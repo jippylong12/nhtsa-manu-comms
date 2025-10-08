@@ -1,3 +1,19 @@
+"""nhtsa-manu-comms
+
+Fetch and filter NHTSA manufacturer communications for a specific vehicle, with
+simple on-disk caching and resilient HTTP requests.
+
+Workflow overview:
+- Pull the vehicle details to discover manufacturer communication NHTSA IDs.
+- For each ID, call the safety issues API (cached per ID) to get full details.
+- Filter communications for the configured product (year/model) and keywords.
+- Print grouped document URLs from matching communications.
+
+This script is designed to be friendly to the NHTSA APIs by using a shared
+requests.Session with retries and conservative headers. Caching reduces repeated
+network calls across runs.
+"""
+
 import os
 import pickle
 import threading
@@ -25,6 +41,17 @@ CACHE_DIR = ".cache"
 TARGET_YEAR = "2024"
 TARGET_MODEL = "SILVERADO EV"  # will compare case-insensitively
 
+# Keyword filters for summary field
+KEYWORDS = (
+    "sidewinder",
+    # "software update",
+    # "update",
+    # "reprogram",
+    # "reprogramming",
+    # "calibration",
+    # "flash",
+)
+
 
 def create_session() -> requests.Session:
     """Create a requests session with retries and polite headers to reduce 403s/blocks."""
@@ -47,20 +74,24 @@ def create_session() -> requests.Session:
 
 
 def ensure_cache_dir() -> None:
+    """Ensure the on-disk cache directory exists."""
     if not os.path.isdir(CACHE_DIR):
         os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 def daily_details_cache_path() -> str:
+    """Return the path to the daily details cache file (rotates by date)."""
     today = datetime.now().strftime("%Y%m%d")
     return os.path.join(CACHE_DIR, f"details_{today}.pkl")
 
 
 def safety_db_cache_path() -> str:
+    """Return the path to the persistent safety issues cache (by nhtsaId)."""
     return os.path.join(CACHE_DIR, "safety_issues.pkl")
 
 
 def load_pickle(path: str) -> Any:
+    """Load a Python object from a pickle file, returning None if missing."""
     try:
         with open(path, "rb") as f:
             return pickle.load(f)
@@ -69,6 +100,7 @@ def load_pickle(path: str) -> Any:
 
 
 def save_pickle(path: str, obj: Any) -> None:
+    """Atomically save a Python object to a pickle file (write-then-replace)."""
     # Write atomically when possible
     tmp_path = f"{path}.tmp"
     with open(tmp_path, "wb") as f:
@@ -77,6 +109,12 @@ def save_pickle(path: str, obj: Any) -> None:
 
 
 def fetch_details_with_cache(session: requests.Session) -> Dict[str, Any]:
+    """Fetch vehicle details once per day and cache the JSON on disk.
+
+    The NHTSA details endpoint is used only to discover NHTSA IDs for
+    manufacturer communications. Since this rarely changes within a day,
+    we cache the raw response by date.
+    """
     ensure_cache_dir()
     path = daily_details_cache_path()
     cached = load_pickle(path)
@@ -91,6 +129,7 @@ def fetch_details_with_cache(session: requests.Session) -> Dict[str, Any]:
 
 
 def load_safety_db() -> Dict[str, Any]:
+    """Load the per-nhtsaId safety issues cache dictionary from disk."""
     ensure_cache_dir()
     path = safety_db_cache_path()
     db = load_pickle(path)
@@ -100,10 +139,12 @@ def load_safety_db() -> Dict[str, Any]:
 
 
 def save_safety_db(db: Dict[str, Any]) -> None:
+    """Persist the safety issues cache dictionary to disk."""
     save_pickle(safety_db_cache_path(), db)
 
 
 def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
+    """Extract a list of manufacturer communication NHTSA IDs from details JSON."""
     try:
         comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
     except (KeyError, IndexError, TypeError):
@@ -123,6 +164,7 @@ def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
 
 
 def parse_manufacturer_communications_from_safety_resp(resp_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Pull and normalize the manufacturerCommunications list from safetyIssues API response."""
     try:
         results = resp_json.get("results") or []
         if not results:
@@ -142,6 +184,11 @@ def parse_manufacturer_communications_from_safety_resp(resp_json: Dict[str, Any]
 
 
 def fetch_safety_issue_by_id(nhtsa_id: int, session: requests.Session, db: Dict[str, Any], lock: threading.Lock) -> Optional[Dict[str, Any]]:
+    """Fetch a single manufacturer communication by NHTSA ID with caching.
+
+    Stores the result (or None on failure/403) in the safety DB to avoid
+    repeated requests within or across runs.
+    """
     key = str(nhtsa_id)
     cached = db.get(key)
     if cached is not None:
@@ -188,6 +235,10 @@ def fetch_safety_issue_by_id(nhtsa_id: int, session: requests.Session, db: Dict[
 
 
 def product_matches(comm: Dict[str, Any]) -> bool:
+    """Return True if the communication references the configured product.
+
+    Matches by exact year and case-insensitive model string.
+    """
     products = comm.get("associatedProducts") or []
     for p in products:
         year = str(p.get("productYear", "")).strip()
@@ -197,17 +248,33 @@ def product_matches(comm: Dict[str, Any]) -> bool:
     return False
 
 
-def extract_document_urls(comm: Dict[str, Any]) -> List[str]:
-    urls = []
+def is_update_related(summary: Optional[str]) -> bool:
+    """Return True if the summary contains any configured KEYWORDS as whole words."""
+    if not summary:
+        return False
+    words = {w.strip().lower() for w in str(summary).split() if w.strip()}
+    keywords = {str(k).strip().lower() for k in KEYWORDS if isinstance(k, str) and k.strip()}
+    if not keywords:
+        return False
+    return any(k in words for k in keywords)
+
+
+def extract_document_urls(comm: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Extract document URLs grouped by summary type."""
+    urls_by_summary = {}
     docs = comm.get("associatedDocuments") or []
     for d in docs:
         url = d.get("url")
+        summary = d.get("summary", "Unknown")
         if isinstance(url, str) and url:
-            urls.append(url)
-    return urls
+            if summary not in urls_by_summary:
+                urls_by_summary[summary] = []
+            urls_by_summary[summary].append(url)
+    return urls_by_summary
 
 
 def main() -> None:
+    """Entry point: orchestrates fetching, caching, filtering, and printing results."""
     session = create_session()
     try:
         # 1) Details with daily cache
@@ -246,22 +313,27 @@ def main() -> None:
             if isinstance(c, dict):
                 comms.append(c)
 
-        # 6) Filter for our target product
-        matching = [c for c in comms if product_matches(c)]
+        # 6) Filter for our target product and update-related keywords in summary
+        matching = [c for c in comms if product_matches(c) and is_update_related(c.get("summary"))]
 
-        # 7) Extract associated document URLs
-        url_results = []
+        # 7) Extract associated document URLs grouped by summary type
+        url_results = {}
         for c in matching:
-            urls = extract_document_urls(c)
-            if urls:
-                url_results.extend(urls)
+            urls_by_summary = extract_document_urls(c)
+            for summary, urls in urls_by_summary.items():
+                if summary not in url_results:
+                    url_results[summary] = []
+                url_results[summary].extend(urls)
 
         if not url_results:
-            print("No associated document URLs found for 2024 Silverado EV.")
+            print("No associated document URLs found for 2024 Silverado EV with update-related summaries.")
         else:
-            print("Associated document URLs for 2024 Silverado EV:")
-            for u in url_results:
-                print(u)
+            print("Associated document URLs for 2024 Silverado EV with update-related summaries:\n")
+            for summary, urls in url_results.items():
+                print(f"=== {summary} ===")
+                for u in urls:
+                    print(f"  {u}")
+                print()  # Empty line between sections
 
     except requests.exceptions.RequestException as e:
         print(f"API request failed: {e}")
