@@ -18,8 +18,14 @@ def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
         comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
     except (KeyError, IndexError, TypeError):
         return []
+    # Inline filter: skip entries whose manufacturerCommunicationNumber starts with "PI"
+    # comms = [c for c in (comms or []) if not (isinstance(c.get("manufacturerCommunicationNumber"), str) and c["manufacturerCommunicationNumber"].startswith("PI"))]
+    comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
+
     ids = []
     for c in comms or []:
+        # if c.get("manufacturerCommunicationNumber") == "24-NA-143":
+        #     print("Matched manufacturerCommunicationNumber: 24-NA-143")
         n = c.get("nhtsaIdNumber")
         if isinstance(n, int):
             ids.append(n)
