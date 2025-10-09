@@ -24,8 +24,9 @@ def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
 
     ids = []
     for c in comms or []:
-        # if c.get("manufacturerCommunicationNumber") == "24-NA-143":
-        #     print("Matched manufacturerCommunicationNumber: 24-NA-143")
+        # search_term = "23-NA-151"
+        # if search_term in c.get("manufacturerCommunicationNumber"):
+        #     print(f"Matched manufacturerCommunicationNumber: {search_term}")
         n = c.get("nhtsaIdNumber")
         if isinstance(n, int):
             ids.append(n)
