@@ -85,7 +85,13 @@ def print_grouped_urls(url_results: Dict[str, List[Dict[str, str]]], header_text
     for summary, items in url_results.items():
         # Keep section header to reflect grouping by summary
         print(f"=== {summary} ===")
-        for item in items:
+        # Sort each group by ISO loadDate descending (most recent first)
+        sorted_items = sorted(
+            items,
+            key=lambda it: (str(it.get("loadDate", "")) or ""),
+            reverse=True,
+        )
+        for item in sorted_items:
             url = item.get("url", "")
             sum_text = item.get("summary", summary or "")
             load_date = item.get("loadDate", "")
