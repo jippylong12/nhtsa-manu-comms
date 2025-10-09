@@ -22,27 +22,36 @@ essential_whitespace = str.split
 
 
 def is_update_related(summary: Optional[str]) -> bool:
-    """Return True if the summary contains any configured KEYWORDS as whole words."""
+    """Return True if the summary contains any configured KEYWORDS as whole words or if KEYWORDS is empty."""
     if not summary:
         return False
     words = {w.strip().lower() for w in str(summary).split() if w.strip()}
+    if len(KEYWORDS) > 0: return True
     keywords = {str(k).strip().lower() for k in KEYWORDS if isinstance(k, str) and k.strip()}
     if not keywords:
         return False
     return any(k in words for k in keywords)
 
 
-def extract_document_urls(comm: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Extract document URLs grouped by summary type."""
-    urls_by_summary: Dict[str, List[str]] = {}
+def extract_document_urls(comm: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
+    """Extract document metadata grouped by summary type.
+
+    For each associated document, capture url, summary, and loadDate.
+    """
+    urls_by_summary: Dict[str, List[Dict[str, str]]] = {}
     docs = comm.get("associatedDocuments") or []
     for d in docs:
         url = d.get("url")
         summary = d.get("summary", "Unknown")
+        load_date = d.get("loadDate", "")
         if isinstance(url, str) and url:
             if summary not in urls_by_summary:
                 urls_by_summary[summary] = []
-            urls_by_summary[summary].append(url)
+            urls_by_summary[summary].append({
+                "url": url,
+                "summary": summary,
+                "loadDate": str(load_date) if load_date is not None else "",
+            })
     return urls_by_summary
 
 
@@ -51,27 +60,34 @@ def filter_update_related_comms(comms: List[Dict[str, Any]]) -> List[Dict[str, A
     return [c for c in comms if product_matches(c) and is_update_related(c.get("summary"))]
 
 
-def group_urls_by_summary(comms: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-    """Aggregate associated document URLs across communications, grouped by summary label."""
-    url_results: Dict[str, List[str]] = {}
+def group_urls_by_summary(comms: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, str]]]:
+    """Aggregate associated document metadata across communications, grouped by summary label."""
+    url_results: Dict[str, List[Dict[str, str]]] = {}
     for c in comms:
         urls_by_summary = extract_document_urls(c)
-        for summary, urls in urls_by_summary.items():
+        for summary, items in urls_by_summary.items():
             if summary not in url_results:
                 url_results[summary] = []
-            url_results[summary].extend(urls)
+            url_results[summary].extend(items)
     return url_results
 
 
-def print_grouped_urls(url_results: Dict[str, List[str]], header_text: str) -> None:
-    """Pretty-print grouped URLs or a helpful message when none are present."""
+def print_grouped_urls(url_results: Dict[str, List[Dict[str, str]]], header_text: str) -> None:
+    """Pretty-print grouped document entries as comma-separated values: url,summary,loadDate.
+
+    Falls back gracefully if some fields are missing.
+    """
     if not url_results:
         print(f"No associated document URLs found for {header_text}.")
         return
 
-    print(f"Associated document URLs for {header_text}:\n")
-    for summary, urls in url_results.items():
+    print(f"Associated document URLs for {header_text}:")
+    for summary, items in url_results.items():
+        # Keep section header to reflect grouping by summary
         print(f"=== {summary} ===")
-        for u in urls:
-            print(f"  {u}")
+        for item in items:
+            url = item.get("url", "")
+            sum_text = item.get("summary", summary or "")
+            load_date = item.get("loadDate", "")
+            print(f"{url}, {sum_text}, {load_date}")
         print()
