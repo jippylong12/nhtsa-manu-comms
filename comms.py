@@ -1,5 +1,5 @@
 """Functions for discovering and fetching manufacturer communications."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
@@ -19,14 +19,11 @@ def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
     except (KeyError, IndexError, TypeError):
         return []
     # Inline filter: skip entries whose manufacturerCommunicationNumber starts with "PI"
-    # comms = [c for c in (comms or []) if not (isinstance(c.get("manufacturerCommunicationNumber"), str) and c["manufacturerCommunicationNumber"].startswith("PI"))]
+    comms = [c for c in (comms or []) if not (isinstance(c.get("manufacturerCommunicationNumber"), str) and c["manufacturerCommunicationNumber"].startswith("PI"))]
     comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
 
     ids = []
     for c in comms or []:
-        # search_term = "23-NA-151"
-        # if search_term in c.get("manufacturerCommunicationNumber"):
-        #     print(f"Matched manufacturerCommunicationNumber: {search_term}")
         n = c.get("nhtsaIdNumber")
         if isinstance(n, int):
             ids.append(n)
@@ -36,6 +33,28 @@ def extract_nhtsa_ids_from_details(details: Dict[str, Any]) -> List[int]:
             except (TypeError, ValueError):
                 continue
     return ids
+
+
+def extract_id_to_summary_from_details(details: Dict[str, Any]) -> Dict[int, str]:
+    """Extract a mapping from NHTSA ID to the communication's summary from details JSON."""
+    mapping: Dict[int, str] = {}
+    try:
+        comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
+    except (KeyError, IndexError, TypeError):
+        return mapping
+    # Mirror same filtering and ordering as ID extraction
+    comms = [c for c in (comms or []) if not (isinstance(c.get("manufacturerCommunicationNumber"), str) and c["manufacturerCommunicationNumber"].startswith("PI"))]
+    comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
+
+    for c in comms or []:
+        n = c.get("nhtsaIdNumber")
+        summary = str(c.get("summary", "") or "")
+        try:
+            n_int = int(str(n))
+        except (TypeError, ValueError):
+            continue
+        mapping[n_int] = summary
+    return mapping
 
 
 def parse_manufacturer_communications_from_safety_resp(resp_json: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -140,3 +159,14 @@ def discover_manufacturer_comm_ids(session: requests.Session) -> List[int]:
     """Fetch daily-cached vehicle details and extract manufacturer comm IDs."""
     details = fetch_details_with_cache(session)
     return extract_nhtsa_ids_from_details(details)
+
+
+def discover_manufacturer_comm_ids_with_summaries(session: requests.Session) -> (List[int], Dict[int, str]):
+    """Fetch daily-cached vehicle details and extract IDs and an ID→summary map.
+
+    The summary comes from the details response (same source as `extract_nhtsa_ids_from_details`).
+    """
+    details = fetch_details_with_cache(session)
+    ids = extract_nhtsa_ids_from_details(details)
+    id_to_summary = extract_id_to_summary_from_details(details)
+    return ids, id_to_summary

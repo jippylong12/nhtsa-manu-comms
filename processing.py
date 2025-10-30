@@ -36,10 +36,12 @@ def is_update_related(summary: Optional[str]) -> bool:
 def extract_document_urls(comm: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
     """Extract document metadata grouped by summary type.
 
-    For each associated document, capture url, summary, and loadDate.
+    For each associated document, capture url, summary, loadDate, and the parent
+    communication's summary (from details), so we can print it later.
     """
     urls_by_summary: Dict[str, List[Dict[str, str]]] = {}
     docs = comm.get("associatedDocuments") or []
+    comm_summary = str(comm.get("summary", "") or "")
     for d in docs:
         url = d.get("url")
         summary = d.get("summary", "Unknown")
@@ -51,6 +53,7 @@ def extract_document_urls(comm: Dict[str, Any]) -> Dict[str, List[Dict[str, str]
                 "url": url,
                 "summary": summary,
                 "loadDate": str(load_date) if load_date is not None else "",
+                "commSummary": comm_summary,
             })
     return urls_by_summary
 
@@ -60,12 +63,27 @@ def filter_update_related_comms(comms: List[Dict[str, Any]]) -> List[Dict[str, A
     return [c for c in comms if product_matches(c) and is_update_related(c.get("summary"))]
 
 
-def group_urls_by_summary(comms: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, str]]]:
-    """Aggregate associated document metadata across communications, grouped by summary label."""
+def group_urls_by_summary(comms: List[Dict[str, Any]], id_to_summary: Optional[Dict[int, str]] = None) -> Dict[str, List[Dict[str, str]]]:
+    """Aggregate associated document metadata across communications, grouped by summary label.
+
+    If `id_to_summary` is provided, append the summary from the vehicle details (per NHTSA ID)
+    to each document entry under key `detailsSummary`.
+    """
     url_results: Dict[str, List[Dict[str, str]]] = {}
     for c in comms:
         urls_by_summary = extract_document_urls(c)
+        # Determine details summary if mapping provided
+        details_summary = ""
+        if id_to_summary is not None:
+            try:
+                nhtsa_id = int(str(c.get("nhtsaIdNumber")))
+                details_summary = id_to_summary.get(nhtsa_id, "")
+            except Exception:
+                details_summary = ""
         for summary, items in urls_by_summary.items():
+            if details_summary:
+                for it in items:
+                    it["detailsSummary"] = details_summary
             if summary not in url_results:
                 url_results[summary] = []
             url_results[summary].extend(items)
@@ -73,9 +91,10 @@ def group_urls_by_summary(comms: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
 
 
 def print_grouped_urls(url_results: Dict[str, List[Dict[str, str]]], header_text: str) -> None:
-    """Pretty-print grouped document entries as comma-separated values: url,summary,loadDate.
+    """Pretty-print grouped document entries as comma-separated values: url,summary,loadDate,detailsSummary.
 
-    Falls back gracefully if some fields are missing.
+    Falls back gracefully if some fields are missing. The `detailsSummary` column comes
+    from the vehicle details response (mapped by NHTSA ID) when provided upstream.
     """
     if not url_results:
         print(f"No associated document URLs found for {header_text}.")
@@ -95,5 +114,9 @@ def print_grouped_urls(url_results: Dict[str, List[Dict[str, str]]], header_text
             url = item.get("url", "")
             sum_text = item.get("summary", summary or "")
             load_date = item.get("loadDate", "")
-            print(f"{url}, {sum_text}, {load_date}")
+            details_summary = item.get("detailsSummary", item.get("commSummary", ""))
+            if details_summary:
+                print(f"{url}, {sum_text}, {load_date}, {details_summary}")
+            else:
+                print(f"{url}, {sum_text}, {load_date}")
         print()

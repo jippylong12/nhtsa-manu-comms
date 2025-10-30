@@ -7,7 +7,7 @@ communications using helpers split across dedicated modules.
 import requests
 
 from http_utils import create_session
-from comms import discover_manufacturer_comm_ids, fetch_communications_for_ids
+from comms import discover_manufacturer_comm_ids_with_summaries, fetch_communications_for_ids
 from processing import (
     filter_update_related_comms,
     group_urls_by_summary,
@@ -21,8 +21,8 @@ def main() -> None:
     session = create_session()
     header_text = f"{TARGET_YEAR} {TARGET_MODEL} with update-related summaries"
     try:
-        # 1) Discover IDs from vehicle details (daily-cached)
-        nhtsa_ids = discover_manufacturer_comm_ids(session)
+        # 1) Discover IDs and details-based summaries from vehicle details (daily-cached)
+        nhtsa_ids, id_to_summary = discover_manufacturer_comm_ids_with_summaries(session)
         if not nhtsa_ids:
             print("No manufacturer communications found in details response.")
             return
@@ -33,8 +33,8 @@ def main() -> None:
         # 3) Filter for our target product and keywords
         matching = filter_update_related_comms(comms)
 
-        # 4) Group associated document URLs by summary label and print
-        url_results = group_urls_by_summary(matching)
+        # 4) Group associated document URLs by summary label and print, including details summary
+        url_results = group_urls_by_summary(matching, id_to_summary)
         print_grouped_urls(url_results, header_text)
 
     except requests.exceptions.RequestException as e:
