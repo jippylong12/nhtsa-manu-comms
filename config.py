@@ -15,18 +15,12 @@ MAX_WORKERS = 5
 CACHE_DIR = ".cache"
 
 # Product filters
-# TARGET_YEAR = "2024"
-# TARGET_MODEL = "SILVERADO EV"  # case-insensitive comparison
-TARGET_YEAR = "2025"
-TARGET_MODEL = "EQUINOX EV"  # case-insensitive comparison
+TARGET_YEAR = "2024"
+TARGET_MODEL = "SILVERADO EV"  # case-insensitive comparison
+# TARGET_YEAR = "2025"
+# TARGET_MODEL = "EQUINOX EV"  # case-insensitive comparison
 
 # Keyword filters for the summary field
 KEYWORDS = (
-    "sidewinder",
-    "software update",
-    "update",
-    "reprogram",
-    "reprogramming",
-    "calibration",
-    "flash",
+    "software",
 )

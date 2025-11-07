@@ -26,7 +26,7 @@ def is_update_related(summary: Optional[str]) -> bool:
     if not summary:
         return False
     words = {w.strip().lower() for w in str(summary).split() if w.strip()}
-    if len(KEYWORDS) > 0: return True
+    if len(KEYWORDS) == 0: return True
     keywords = {str(k).strip().lower() for k in KEYWORDS if isinstance(k, str) and k.strip()}
     if not keywords:
         return False
