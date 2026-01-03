@@ -1,8 +1,8 @@
 /* Main Application Component */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Plus, Car, ArrowLeft, Search } from 'lucide-react';
+import { Plus, Car, ArrowLeft, Search, Filter, Calendar, TrendingUp } from 'lucide-react';
 
 import { Header } from './components/Header';
 import { VehicleCard } from './features/vehicles/components/VehicleCard';
@@ -18,9 +18,11 @@ import {
 import {
   useCommunicationsQuery,
   useFetchCommunications,
+  useVehicleStatsQuery,
 } from './features/communications/hooks/useCommunications';
 
-import type { Vehicle } from './client';
+import type { Vehicle, CommType, CommunicationFilters } from './client';
+import { COMM_TYPE_COLORS } from './client';
 
 // Query Client
 const queryClient = new QueryClient({
@@ -36,6 +38,8 @@ const queryClient = new QueryClient({
 function Dashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedType, setSelectedType] = useState<CommType | ''>('');
 
   const { data: vehiclesData, isLoading: vehiclesLoading } = useVehiclesQuery();
   const { mutate: createVehicle, isPending: isCreating } = useCreateVehicle();
@@ -43,8 +47,20 @@ function Dashboard() {
 
   const { fetch, progress, isFetching, reset } = useFetchCommunications();
 
+  // Stats for selected vehicle
+  const { data: statsData } = useVehicleStatsQuery(selectedVehicleId || 0);
+
+  // Build filters for communications query
+  const filters: CommunicationFilters = useMemo(() => {
+    if (!selectedVehicleId) return {};
+    const f: CommunicationFilters = { vehicleId: selectedVehicleId, perPage: 100 };
+    if (searchTerm.trim()) f.search = searchTerm.trim();
+    if (selectedType) f.commType = selectedType;
+    return f;
+  }, [selectedVehicleId, searchTerm, selectedType]);
+
   const { data: commsData, isLoading: commsLoading } = useCommunicationsQuery(
-    selectedVehicleId ? { vehicleId: selectedVehicleId, perPage: 100 } : {}
+    selectedVehicleId ? filters : {}
   );
 
   const selectedVehicle = vehiclesData?.items.find(
@@ -77,15 +93,26 @@ function Dashboard() {
     fetch(vehicleId, false);
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Search is already reactive via state
+  };
+
   // Communications View
   if (selectedVehicleId && selectedVehicle) {
+    const commTypes: CommType[] = ['TSB', 'PIT', 'PIC', 'PIP', 'OTHER'];
+
     return (
       <div className="page">
         <div className="container">
           <div className="page-header">
             <button
               className="btn btn-ghost"
-              onClick={() => setSelectedVehicleId(null)}
+              onClick={() => {
+                setSelectedVehicleId(null);
+                setSearchTerm('');
+                setSelectedType('');
+              }}
             >
               <ArrowLeft size={18} />
               Back to Vehicles
@@ -97,18 +124,11 @@ function Dashboard() {
               <span className="vehicle-year">{selectedVehicle.year}</span>
               <h2>{selectedVehicle.model}</h2>
               <p>
-                {commsData?.total || 0} manufacturer communications
+                {commsData?.total || 0} communications
+                {selectedType && ` (filtered by ${selectedType})`}
               </p>
             </div>
             <div className="vehicle-banner-actions">
-              <div className="input-group search-input">
-                <Search size={18} className="search-icon" />
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="Search communications..."
-                />
-              </div>
               <button
                 className="btn btn-primary"
                 onClick={() => fetch(selectedVehicleId, true)}
@@ -116,6 +136,85 @@ function Dashboard() {
               >
                 Refresh Data
               </button>
+            </div>
+          </div>
+
+          {/* Stats Summary */}
+          {statsData && (
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-icon">
+                  <TrendingUp size={20} />
+                </div>
+                <div className="stat-content">
+                  <span className="stat-value">{statsData.totalCount}</span>
+                  <span className="stat-label">Total Communications</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon">
+                  <Calendar size={20} />
+                </div>
+                <div className="stat-content">
+                  <span className="stat-value">{statsData.last30DaysCount}</span>
+                  <span className="stat-label">Last 30 Days</span>
+                </div>
+              </div>
+              {statsData.categories.map((cat) => (
+                <div
+                  key={cat.type}
+                  className="stat-card category-stat"
+                  style={{ borderColor: COMM_TYPE_COLORS[cat.type as CommType] }}
+                  onClick={() => setSelectedType(selectedType === cat.type ? '' : cat.type as CommType)}
+                >
+                  <div
+                    className="stat-dot"
+                    style={{ backgroundColor: COMM_TYPE_COLORS[cat.type as CommType] }}
+                  />
+                  <div className="stat-content">
+                    <span className="stat-value">{cat.count}</span>
+                    <span className="stat-label">{cat.type}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Filters */}
+          <div className="filters-bar">
+            <form onSubmit={handleSearch} className="search-form">
+              <div className="input-group search-input">
+                <Search size={18} className="search-icon" />
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Search summary or comm number..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </form>
+
+            <div className="type-filters">
+              <Filter size={16} />
+              <button
+                className={`type-filter-btn ${selectedType === '' ? 'active' : ''}`}
+                onClick={() => setSelectedType('')}
+              >
+                All
+              </button>
+              {commTypes.map((type) => (
+                <button
+                  key={type}
+                  className={`type-filter-btn ${selectedType === type ? 'active' : ''}`}
+                  style={{
+                    '--type-color': COMM_TYPE_COLORS[type],
+                  } as React.CSSProperties}
+                  onClick={() => setSelectedType(selectedType === type ? '' : type)}
+                >
+                  {type}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -136,7 +235,7 @@ function Dashboard() {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: var(--space-xl);
+            margin-bottom: var(--space-lg);
             padding: var(--space-xl);
             gap: var(--space-lg);
           }
@@ -168,6 +267,85 @@ function Dashboard() {
             align-items: center;
           }
 
+          /* Stats Grid */
+          .stats-grid {
+            display: flex;
+            gap: var(--space-md);
+            margin-bottom: var(--space-lg);
+            flex-wrap: wrap;
+          }
+
+          .stat-card {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: var(--space-md) var(--space-lg);
+            min-width: 140px;
+          }
+
+          .stat-card.category-stat {
+            border-left: 3px solid;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+          }
+
+          .stat-card.category-stat:hover {
+            background: var(--bg-hover);
+          }
+
+          .stat-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-elevated);
+            border-radius: var(--radius-md);
+            color: var(--color-primary);
+          }
+
+          .stat-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+          }
+
+          .stat-content {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1;
+          }
+
+          .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+          }
+
+          /* Filters Bar */
+          .filters-bar {
+            display: flex;
+            gap: var(--space-lg);
+            align-items: center;
+            margin-bottom: var(--space-lg);
+            flex-wrap: wrap;
+          }
+
+          .search-form {
+            flex: 1;
+            min-width: 250px;
+          }
+
           .search-input {
             position: relative;
           }
@@ -178,11 +356,42 @@ function Dashboard() {
             top: 50%;
             transform: translateY(-50%);
             color: var(--text-muted);
+            pointer-events: none;
           }
 
           .search-input .input {
-            padding-left: calc(var(--space-md) + 24px);
-            width: 280px;
+            padding-left: calc(var(--space-md) + 28px);
+            width: 100%;
+          }
+
+          .type-filters {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            color: var(--text-muted);
+          }
+
+          .type-filter-btn {
+            padding: var(--space-xs) var(--space-md);
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-full);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+          }
+
+          .type-filter-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+          }
+
+          .type-filter-btn.active {
+            background: var(--type-color, var(--color-primary));
+            border-color: var(--type-color, var(--color-primary));
+            color: white;
           }
 
           @media (max-width: 768px) {
@@ -196,8 +405,18 @@ function Dashboard() {
               width: 100%;
             }
 
-            .search-input .input {
-              width: 100%;
+            .stats-grid {
+              justify-content: center;
+            }
+
+            .filters-bar {
+              flex-direction: column;
+              align-items: stretch;
+            }
+
+            .type-filters {
+              flex-wrap: wrap;
+              justify-content: center;
             }
           }
         `}</style>

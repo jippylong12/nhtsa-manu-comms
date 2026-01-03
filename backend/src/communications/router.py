@@ -10,6 +10,7 @@ from src.communications.schemas import (
     CommunicationListResponse,
     FetchRequest,
     FetchResult,
+    VehicleStats,
 )
 from src.communications.service import CommunicationService
 
@@ -28,6 +29,8 @@ async def list_communications(
     year: Optional[str] = Query(None, description="Filter by model year"),
     model: Optional[str] = Query(None, description="Filter by model name"),
     keywords: Optional[str] = Query(None, description="Comma-separated keywords to filter by"),
+    search: Optional[str] = Query(None, description="Search in summary and comm number"),
+    comm_type: Optional[str] = Query(None, description="Filter by type (TSB, PIT, PIC, PIP, OTHER)"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ) -> CommunicationListResponse:
@@ -39,6 +42,8 @@ async def list_communications(
         year=year,
         model=model,
         keywords=kw_list,
+        search=search,
+        comm_type=comm_type,
         page=page,
         per_page=per_page,
     )
@@ -133,3 +138,16 @@ async def fetch_communications_sync(payload: FetchRequest) -> FetchResult:
         matched_count=last_progress.get("fetched_ids", 0),
         duration_seconds=round(duration, 2),
     )
+
+
+@router.get(
+    "/stats/{vehicle_id}",
+    response_model=VehicleStats,
+    summary="Get communication stats for a vehicle",
+    response_description="Vehicle statistics including category breakdown",
+)
+async def get_vehicle_stats(vehicle_id: int) -> VehicleStats:
+    """Get statistics for a vehicle's communications."""
+    stats = await CommunicationService.get_vehicle_stats(vehicle_id)
+    return VehicleStats(**stats)
+

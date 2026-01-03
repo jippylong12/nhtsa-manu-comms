@@ -1,7 +1,7 @@
 """Business logic for Communications feature."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Optional
 from bson import ObjectId
 
@@ -11,7 +11,9 @@ from src.communications.nhtsa_client import (
     NHTSAClient,
     extract_comm_ids_from_details,
     extract_id_to_summary,
+    extract_id_to_comm_number,
 )
+from src.communications.schemas import get_comm_type, COMM_TYPE_MAP
 
 
 class CommunicationService:
@@ -56,6 +58,8 @@ class CommunicationService:
         year: Optional[str] = None,
         model: Optional[str] = None,
         keywords: Optional[list[str]] = None,
+        search: Optional[str] = None,
+        comm_type: Optional[str] = None,
         page: int = 1,
         per_page: int = 50,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -72,6 +76,13 @@ class CommunicationService:
             query["associated_products.product_model"] = {"$regex": model, "$options": "i"}
         if keywords:
             query["matched_keywords"] = {"$in": keywords}
+        if search:
+            query["$or"] = [
+                {"summary": {"$regex": search, "$options": "i"}},
+                {"communication_number": {"$regex": search, "$options": "i"}},
+            ]
+        if comm_type:
+            query["communication_type"] = comm_type.upper()
 
         cursor = (
             db.communications.find(query)
@@ -142,6 +153,7 @@ class CommunicationService:
 
         nhtsa_ids = extract_comm_ids_from_details(details)
         id_to_summary = extract_id_to_summary(details)
+        id_to_comm_number = extract_id_to_comm_number(details)
 
         if not nhtsa_ids:
             yield {
@@ -215,10 +227,14 @@ class CommunicationService:
                 summary = str(comm_data.get("summary", "") or "")
                 matched_kw = CommunicationService._matches_keywords(summary, keywords)
 
+                # Prefer communication number from vehicle details (has proper PIT/PIC/PIP prefix)
+                # Fallback to the one from safety issues API
+                comm_number = id_to_comm_number.get(nhtsa_id) or comm_data.get("manufacturerCommunicationNumber")
                 doc = {
                     "nhtsa_id": nhtsa_id,
                     "vehicle_id": vehicle_id,
-                    "communication_number": comm_data.get("manufacturerCommunicationNumber"),
+                    "communication_number": comm_number,
+                    "communication_type": get_comm_type(comm_number),
                     "communication_date": comm_data.get("communicationDate"),
                     "summary": summary,
                     "details_summary": id_to_summary.get(nhtsa_id),
@@ -273,3 +289,42 @@ class CommunicationService:
         db = get_database()
         result = await db.communications.delete_many({"vehicle_id": vehicle_id})
         return result.deleted_count
+
+    @staticmethod
+    async def get_vehicle_stats(vehicle_id: int) -> dict[str, Any]:
+        """Get statistics for a vehicle's communications."""
+        db = get_database()
+
+        # Total count
+        total_count = await db.communications.count_documents({"vehicle_id": vehicle_id})
+
+        # Last 30 days count
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        last_30_query = {
+            "vehicle_id": vehicle_id,
+            "communication_date": {"$gte": thirty_days_ago.isoformat()},
+        }
+        last_30_count = await db.communications.count_documents(last_30_query)
+
+        # Category breakdown using aggregation
+        pipeline = [
+            {"$match": {"vehicle_id": vehicle_id}},
+            {"$group": {"_id": "$communication_type", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ]
+        category_cursor = db.communications.aggregate(pipeline)
+        categories = []
+        async for doc in category_cursor:
+            type_code = doc["_id"] or "OTHER"
+            categories.append({
+                "type": type_code,
+                "label": COMM_TYPE_MAP.get(type_code, "Other"),
+                "count": doc["count"],
+            })
+
+        return {
+            "vehicle_id": vehicle_id,
+            "total_count": total_count,
+            "last_30_days_count": last_30_count,
+            "categories": categories,
+        }

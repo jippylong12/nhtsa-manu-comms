@@ -7,6 +7,33 @@ from pydantic import Field
 from src.vehicles.schemas import CamelModel
 
 
+# --- Communication Types ---
+# Based on manufacturer communication number prefix:
+# TSB = Technical Service Bulletin
+# PIT = Preliminary Information Technical
+# PIC = Preliminary Information Customer
+# PIP = Preliminary Information Parts
+# Other = Unknown/Other type
+
+COMM_TYPE_MAP = {
+    "TSB": "Technical Service Bulletin",
+    "PIT": "Preliminary Info Technical",
+    "PIC": "Preliminary Info Customer", 
+    "PIP": "Preliminary Info Parts",
+    "OTHER": "Other",
+}
+
+
+def get_comm_type(comm_number: Optional[str]) -> str:
+    """Extract communication type from manufacturer communication number."""
+    if not comm_number:
+        return "OTHER"
+    prefix = comm_number[:3].upper()
+    if prefix in COMM_TYPE_MAP:
+        return prefix
+    return "OTHER"
+
+
 # --- Embedded Schemas ---
 
 
@@ -36,6 +63,7 @@ class CommunicationResponse(CamelModel):
     nhtsa_id: int = Field(..., description="NHTSA ID number")
     vehicle_id: int = Field(..., description="Associated vehicle ID")
     communication_number: Optional[str] = Field(None, description="Manufacturer comm number")
+    communication_type: str = Field("OTHER", description="Communication type (TSB, PIT, PIC, PIP, OTHER)")
     communication_date: Optional[str] = Field(None, description="Communication date")
     summary: str = Field("", description="Communication summary")
     details_summary: Optional[str] = Field(None, description="Summary from vehicle details")
@@ -58,6 +86,23 @@ class CommunicationListResponse(CamelModel):
     total: int
     page: int
     per_page: int
+
+
+class CategoryStats(CamelModel):
+    """Stats for a single category."""
+
+    type: str = Field(..., description="Category type code")
+    label: str = Field(..., description="Human readable label")
+    count: int = Field(..., description="Number of communications")
+
+
+class VehicleStats(CamelModel):
+    """Statistics for a vehicle's communications."""
+
+    vehicle_id: int
+    total_count: int = Field(..., description="Total communications")
+    last_30_days_count: int = Field(..., description="Communications in last 30 days")
+    categories: list[CategoryStats] = Field(default_factory=list, description="Breakdown by type")
 
 
 class SearchFilters(CamelModel):
@@ -95,3 +140,4 @@ class FetchResult(CamelModel):
     new_count: int = Field(..., description="New communications stored")
     matched_count: int = Field(..., description="Communications matching filters")
     duration_seconds: float = Field(..., description="Fetch duration in seconds")
+

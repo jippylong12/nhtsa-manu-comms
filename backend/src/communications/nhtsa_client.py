@@ -104,19 +104,12 @@ def extract_comm_ids_from_details(details: dict[str, Any]) -> list[int]:
     except (KeyError, IndexError, TypeError):
         return []
 
-    # Filter out PI-prefixed entries and sort by date
-    comms = [
-        c
-        for c in (comms or [])
-        if not (
-            isinstance(c.get("manufacturerCommunicationNumber"), str)
-            and c["manufacturerCommunicationNumber"].startswith("PI")
-        )
-    ]
-    comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
+    # Sort by date (keep all types now)
+    all_comms = comms or []
+    all_comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
 
     ids = []
-    for c in comms:
+    for c in all_comms:
         n = c.get("nhtsaIdNumber")
         try:
             ids.append(int(str(n)))
@@ -133,16 +126,7 @@ def extract_id_to_summary(details: dict[str, Any]) -> dict[int, str]:
     except (KeyError, IndexError, TypeError):
         return mapping
 
-    comms = [
-        c
-        for c in (comms or [])
-        if not (
-            isinstance(c.get("manufacturerCommunicationNumber"), str)
-            and c["manufacturerCommunicationNumber"].startswith("PI")
-        )
-    ]
-
-    for c in comms:
+    for c in (comms or []):
         n = c.get("nhtsaIdNumber")
         summary = str(c.get("summary", "") or "")
         try:
@@ -150,3 +134,23 @@ def extract_id_to_summary(details: dict[str, Any]) -> dict[int, str]:
         except (TypeError, ValueError):
             continue
     return mapping
+
+
+def extract_id_to_comm_number(details: dict[str, Any]) -> dict[int, str]:
+    """Extract NHTSA ID to manufacturer communication number mapping."""
+    mapping: dict[int, str] = {}
+    try:
+        comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
+    except (KeyError, IndexError, TypeError):
+        return mapping
+
+    for c in (comms or []):
+        n = c.get("nhtsaIdNumber")
+        comm_number = str(c.get("manufacturerCommunicationNumber", "") or "")
+        try:
+            if comm_number:
+                mapping[int(str(n))] = comm_number
+        except (TypeError, ValueError):
+            continue
+    return mapping
+

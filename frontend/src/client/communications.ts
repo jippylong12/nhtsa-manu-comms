@@ -7,6 +7,7 @@ import type {
     CommunicationFilters,
     FetchResult,
     FetchProgress,
+    VehicleStats,
 } from './types';
 
 export const communicationApi = {
@@ -16,6 +17,8 @@ export const communicationApi = {
         if (filters.year) params.append('year', filters.year);
         if (filters.model) params.append('model', filters.model);
         if (filters.keywords) params.append('keywords', filters.keywords);
+        if (filters.search) params.append('search', filters.search);
+        if (filters.commType) params.append('comm_type', filters.commType);
         if (filters.page) params.append('page', String(filters.page));
         if (filters.perPage) params.append('per_page', String(filters.perPage));
 
@@ -25,6 +28,9 @@ export const communicationApi = {
 
     get: (nhtsaId: number) =>
         request<Communication>(`/communications/${nhtsaId}`),
+
+    getStats: (vehicleId: number) =>
+        request<VehicleStats>(`/communications/stats/${vehicleId}`),
 
     fetchSync: (vehicleId: number, forceRefresh = false) =>
         request<FetchResult>('/communications/fetch-sync', {

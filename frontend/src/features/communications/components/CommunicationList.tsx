@@ -3,104 +3,121 @@
 import { format } from 'date-fns';
 import { FileText, ExternalLink, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
-import type { Communication } from '@/client';
+import type { Communication, CommType } from '@/client';
+import { COMM_TYPE_COLORS } from '@/client';
 
 interface Props {
-    communications: Communication[];
-    isLoading?: boolean;
+  communications: Communication[];
+  isLoading?: boolean;
 }
 
 function CommunicationRow({ comm }: { comm: Communication }) {
-    const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-    const commDate = comm.communicationDate
-        ? format(new Date(comm.communicationDate), 'MMM d, yyyy')
-        : 'Unknown';
+  const commDate = comm.communicationDate
+    ? format(new Date(comm.communicationDate), 'MMM d, yyyy')
+    : 'Unknown';
 
-    return (
-        <div className="comm-row">
-            <div className="comm-header" onClick={() => setIsExpanded(!isExpanded)}>
-                <div className="comm-info">
-                    <span className="comm-date">{commDate}</span>
-                    <h4 className="comm-summary">{comm.summary || 'No summary available'}</h4>
-                    {comm.communicationNumber && (
-                        <span className="comm-number">{comm.communicationNumber}</span>
-                    )}
-                </div>
+  const commType = (comm.communicationType || 'OTHER') as CommType;
+  const typeColor = COMM_TYPE_COLORS[commType] || COMM_TYPE_COLORS.OTHER;
 
-                <div className="comm-meta">
-                    {comm.matchedKeywords.length > 0 && (
-                        <div className="comm-keywords">
-                            {comm.matchedKeywords.map((kw) => (
-                                <span key={kw} className="badge badge-success">
-                                    <Tag size={10} />
-                                    {kw}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                    <span className="doc-count">
-                        <FileText size={14} />
-                        {comm.associatedDocuments.length}
-                    </span>
-                    <button className="btn btn-ghost btn-icon btn-sm">
-                        {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                    </button>
-                </div>
+  return (
+    <div className="comm-row" style={{ borderLeftColor: typeColor }}>
+      <div className="comm-header" onClick={() => setIsExpanded(!isExpanded)}>
+        <div className="comm-info">
+          <div className="comm-top-row">
+            <span
+              className="comm-type-badge"
+              style={{
+                backgroundColor: `${typeColor}20`,
+                color: typeColor,
+                borderColor: `${typeColor}40`,
+              }}
+            >
+              {commType}
+            </span>
+            <span className="comm-date">{commDate}</span>
+          </div>
+          <h4 className="comm-summary">{comm.summary || 'No summary available'}</h4>
+          {comm.communicationNumber && (
+            <span className="comm-number">{comm.communicationNumber}</span>
+          )}
+        </div>
+
+        <div className="comm-meta">
+          {comm.matchedKeywords.length > 0 && (
+            <div className="comm-keywords">
+              {comm.matchedKeywords.map((kw) => (
+                <span key={kw} className="badge badge-success">
+                  <Tag size={10} />
+                  {kw}
+                </span>
+              ))}
             </div>
+          )}
+          <span className="doc-count">
+            <FileText size={14} />
+            {comm.associatedDocuments.length}
+          </span>
+          <button className="btn btn-ghost btn-icon btn-sm">
+            {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+        </div>
+      </div>
 
-            {isExpanded && (
-                <div className="comm-details animate-fade-in">
-                    {comm.detailsSummary && (
-                        <p className="details-summary">{comm.detailsSummary}</p>
+      {isExpanded && (
+        <div className="comm-details animate-fade-in">
+          {comm.detailsSummary && (
+            <p className="details-summary">{comm.detailsSummary}</p>
+          )}
+
+          {comm.associatedProducts.length > 0 && (
+            <div className="products-section">
+              <h5>Associated Products</h5>
+              <div className="products-list">
+                {comm.associatedProducts.slice(0, 5).map((p, i) => (
+                  <span key={i} className="product-tag">
+                    {p.productYear} {p.productModel}
+                  </span>
+                ))}
+                {comm.associatedProducts.length > 5 && (
+                  <span className="product-tag more">
+                    +{comm.associatedProducts.length - 5} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {comm.associatedDocuments.length > 0 && (
+            <div className="documents-section">
+              <h5>Documents</h5>
+              <ul className="documents-list">
+                {comm.associatedDocuments.map((doc, i) => (
+                  <li key={i}>
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer">
+                      <FileText size={14} />
+                      <span>{doc.summary}</span>
+                      <ExternalLink size={12} />
+                    </a>
+                    {doc.loadDate && (
+                      <span className="doc-date">
+                        {format(new Date(doc.loadDate), 'MMM d, yyyy')}
+                      </span>
                     )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
-                    {comm.associatedProducts.length > 0 && (
-                        <div className="products-section">
-                            <h5>Associated Products</h5>
-                            <div className="products-list">
-                                {comm.associatedProducts.slice(0, 5).map((p, i) => (
-                                    <span key={i} className="product-tag">
-                                        {p.productYear} {p.productModel}
-                                    </span>
-                                ))}
-                                {comm.associatedProducts.length > 5 && (
-                                    <span className="product-tag more">
-                                        +{comm.associatedProducts.length - 5} more
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {comm.associatedDocuments.length > 0 && (
-                        <div className="documents-section">
-                            <h5>Documents</h5>
-                            <ul className="documents-list">
-                                {comm.associatedDocuments.map((doc, i) => (
-                                    <li key={i}>
-                                        <a href={doc.url} target="_blank" rel="noopener noreferrer">
-                                            <FileText size={14} />
-                                            <span>{doc.summary}</span>
-                                            <ExternalLink size={12} />
-                                        </a>
-                                        {doc.loadDate && (
-                                            <span className="doc-date">
-                                                {format(new Date(doc.loadDate), 'MMM d, yyyy')}
-                                            </span>
-                                        )}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <style>{`
+      <style>{`
         .comm-row {
           background: var(--bg-surface);
           border: 1px solid var(--border-subtle);
+          border-left: 4px solid;
           border-radius: var(--radius-lg);
           overflow: hidden;
           transition: all var(--transition-default);
@@ -108,6 +125,7 @@ function CommunicationRow({ comm }: { comm: Communication }) {
 
         .comm-row:hover {
           border-color: var(--border-default);
+          border-left-width: 4px;
         }
 
         .comm-header {
@@ -124,11 +142,27 @@ function CommunicationRow({ comm }: { comm: Communication }) {
           min-width: 0;
         }
 
+        .comm-top-row {
+          display: flex;
+          align-items: center;
+          gap: var(--space-sm);
+          margin-bottom: var(--space-xs);
+        }
+
+        .comm-type-badge {
+          font-size: 0.625rem;
+          font-weight: 700;
+          padding: 2px 6px;
+          border-radius: var(--radius-sm);
+          border: 1px solid;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+        }
+
         .comm-date {
           font-size: 0.75rem;
           font-weight: 500;
-          color: var(--color-primary);
-          text-transform: uppercase;
+          color: var(--text-muted);
           letter-spacing: 0.02em;
         }
 
@@ -276,40 +310,40 @@ function CommunicationRow({ comm }: { comm: Communication }) {
           }
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }
 
 export function CommunicationList({ communications, isLoading }: Props) {
-    if (isLoading) {
-        return (
-            <div className="comm-list-loading">
-                {[1, 2, 3].map((i) => (
-                    <div key={i} className="skeleton" style={{ height: 100 }} />
-                ))}
-            </div>
-        );
-    }
-
-    if (communications.length === 0) {
-        return (
-            <div className="empty-state">
-                <FileText className="empty-state-icon" />
-                <h3 className="empty-state-title">No communications found</h3>
-                <p className="empty-state-description">
-                    Try adjusting your filters or fetch the latest data.
-                </p>
-            </div>
-        );
-    }
-
+  if (isLoading) {
     return (
-        <div className="comm-list">
-            {communications.map((comm) => (
-                <CommunicationRow key={comm.nhtsaId} comm={comm} />
-            ))}
+      <div className="comm-list-loading">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="skeleton" style={{ height: 100 }} />
+        ))}
+      </div>
+    );
+  }
 
-            <style>{`
+  if (communications.length === 0) {
+    return (
+      <div className="empty-state">
+        <FileText className="empty-state-icon" />
+        <h3 className="empty-state-title">No communications found</h3>
+        <p className="empty-state-description">
+          Try adjusting your filters or fetch the latest data.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="comm-list">
+      {communications.map((comm) => (
+        <CommunicationRow key={comm.nhtsaId} comm={comm} />
+      ))}
+
+      <style>{`
         .comm-list {
           display: flex;
           flex-direction: column;
@@ -322,6 +356,6 @@ export function CommunicationList({ communications, isLoading }: Props) {
           gap: var(--space-md);
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }

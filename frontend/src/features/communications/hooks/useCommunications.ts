@@ -20,6 +20,14 @@ export function useCommunicationQuery(nhtsaId: number) {
     });
 }
 
+export function useVehicleStatsQuery(vehicleId: number) {
+    return useQuery({
+        queryKey: ['communications', 'stats', vehicleId],
+        queryFn: () => communicationApi.getStats(vehicleId),
+        enabled: vehicleId > 0,
+    });
+}
+
 export function useFetchCommunications() {
     const queryClient = useQueryClient();
     const [progress, setProgress] = useState<FetchProgress | null>(null);
