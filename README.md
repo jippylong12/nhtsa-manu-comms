@@ -1,89 +1,122 @@
-# nhtsa-manu-comms
+# NHTSA Manufacturer Communications Tracker
 
-Fetch and filter NHTSA manufacturer communications for a specific vehicle, with simple on-disk caching and resilient HTTP requests.
+A full-stack web application for fetching, filtering, and viewing NHTSA manufacturer communications for specific vehicles.
 
-This small utility script:
-- Calls the NHTSA Vehicles API to discover manufacturer communication IDs for a given vehicle.
-- Fetches full communication details from the NHTSA Safety Issues API (with retry-friendly HTTP and local caching).
-- Filters communications by model year, model name, and keywords.
-- Prints grouped document URLs for the matching communications.
+## Tech Stack
 
+### Backend
+- **FastAPI** - Modern async Python web framework
+- **MongoDB** + **Motor** - NoSQL database with async driver
+- **Pydantic V2** - Data validation and settings management
+- **httpx** - Async HTTP client for NHTSA API
 
-## Requirements
-- Python 3.8+
-- Internet access to reach api.nhtsa.gov
-- Dependencies:
-  - requests (automatically brings urllib3)
+### Frontend
+- **React 19** + **TypeScript** - UI framework
+- **Vite** - Build tool and dev server
+- **TanStack Query v5** - Server state management
+- **Lucide React** - Icon library
 
-Install dependencies (recommended in a virtual environment):
+## Architecture
+
+This project follows the architecture defined in `AGENTS.md`:
+
+```
+project_root/
+├── backend/                 # FastAPI (Service Layer Pattern)
+│   ├── src/
+│   │   ├── main.py          # Entry point
+│   │   ├── database.py      # MongoDB connection
+│   │   ├── vehicles/        # Vehicles feature module
+│   │   └── communications/  # Communications feature module
+│   └── pyproject.toml
+├── frontend/                # React + Vite
+│   ├── src/
+│   │   ├── client/          # API client & types
+│   │   ├── features/        # Feature modules
+│   │   └── components/      # Shared components
+│   └── package.json
+└── docker-compose.yml       # MongoDB infrastructure
+```
+
+## Quick Start
+
+### 1. Start MongoDB
 
 ```bash
-pip install requests
+docker-compose up -d
 ```
 
-## Quick start
-1. Clone or open the project folder.
-2. Inspect and (optionally) adjust configuration constants in `config.py` (see Configuration below).
-3. Run the script:
+MongoDB will be available at `localhost:27017`.
+Mongo Express GUI (optional) at `http://localhost:8081`.
+
+### 2. Start Backend
 
 ```bash
-python main.py
+cd backend
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+pip install -e .
+uvicorn src.main:app --reload --port 8000
 ```
 
-## Configuration
-Edit the constants near the top of `main.py` to suit your needs:
+Backend API will be available at `http://localhost:8000`.
+API docs at `http://localhost:8000/docs`.
 
-- VEHICLE_ID: NHTSA "vehicle ID" used by the details endpoint.
-- TARGET_YEAR: Only communications matching this model year will be considered.
-- TARGET_MODEL: Only communications for this model (case-insensitive) will be considered.
-- KEYWORDS: A tuple of words searched for in the communication summary. Matching is done on whole words only.
-- MAX_WORKERS: Maximum number of parallel requests when fetching safety issues by ID.
-- CACHE_DIR: Directory used to persist cache files.
+### 3. Start Frontend
 
-The script uses two NHTSA endpoints:
-- Details: `https://api.nhtsa.gov/vehicles/{VEHICLE_ID}/details` – called once per day (response cached).
-- Safety Issues by NHTSA ID: `https://api.nhtsa.gov/safetyIssues/byNhtsaId` – called for each ID that is not yet cached.
-
-## Caching
-Caching is enabled by default to reduce repeated requests:
-- Daily details cache: `.cache/details_YYYYMMDD.pkl`
-- Per-issue cache: `.cache/safety_issues.pkl` (a dictionary keyed by stringified nhtsaId)
-
-The caches are safe to delete; the script will re-create them as needed.
-
-## Output
-If matching communications are found, the script prints grouped document URLs (as provided by the API), for example:
-
-```
-Associated document URLs for <YEAR> <MODEL> with update-related summaries:
-
-=== SOME SUMMARY TITLE ===
-  <document URL>
-  <document URL>
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-Otherwise it prints a helpful message indicating nothing was found.
+Frontend will be available at `http://localhost:5173`.
 
-Note: This project does not assert or document any specific format for these document URLs; it simply outputs the URLs returned by the API.
+## Features
 
-## Notes on filtering
-- Product filter matches exact year and case-insensitive model string.
-- Keyword filter looks at the communication summary and compares whole words (lowercased) to the configured KEYWORDS. If KEYWORDS is empty, nothing matches by design.
+### Vehicle Tracking
+- Add vehicles by NHTSA Vehicle ID
+- Configure model year, name, and filter keywords
+- View communication count and last fetch time
 
-## Troubleshooting
-- Receiving 403s: The script is configured with polite headers and a retry strategy. Temporary 403s are handled gracefully and cached as missing for that ID for the session. You can delete `.cache/safety_issues.pkl` to force re-fetching.
-- No results: Ensure your `TARGET_YEAR`, `TARGET_MODEL`, and `KEYWORDS` match what appears in the NHTSA data for your vehicle.
-- Networking errors: They’re caught and printed; try re-running later.
+### Communication Fetching
+- Real-time SSE progress updates during fetch
+- Caches communications in MongoDB (no duplicate requests)
+- Force refresh option to update cached data
 
-## Project structure
-- `main.py` – thin CLI entry point that orchestrates the workflow.
-- `config.py` – user-editable configuration (vehicle ID, filters, cache options).
-- `http_utils.py` – HTTP session with retries and polite headers.
-- `cache_utils.py` – on-disk caching helpers and pickle persistence.
-- `comms.py` – functions to discover/fetch manufacturer communications from NHTSA.
-- `processing.py` – filtering, URL extraction, grouping, and printing helpers.
-- `README.md` – this documentation.
-- `.cache/` – created on first run; contains pickle files for caching.
+### Communication Viewing
+- Expandable list with full details
+- Associated documents with download links
+- Keyword highlighting for matched summary text
+- Filter by vehicle, year, model, keywords
+
+## API Endpoints
+
+### Vehicles
+- `POST /api/vehicles` - Add a vehicle to track
+- `GET /api/vehicles` - List all tracked vehicles
+- `GET /api/vehicles/{id}` - Get vehicle by NHTSA ID
+- `PATCH /api/vehicles/{id}` - Update vehicle config
+- `DELETE /api/vehicles/{id}` - Remove vehicle
+
+### Communications
+- `GET /api/communications` - List with filters
+- `GET /api/communications/{id}` - Get by NHTSA ID
+- `POST /api/communications/fetch` - SSE streaming fetch
+- `POST /api/communications/fetch-sync` - Synchronous fetch
+
+## Environment Variables
+
+Create `.env` in the `backend/` directory:
+
+```env
+MONGODB_URL=mongodb://localhost:27017
+MONGODB_DATABASE=nhtsa_comms
+API_HOST=0.0.0.0
+API_PORT=8000
+NHTSA_API_BASE_URL=https://api.nhtsa.gov
+```
 
 ## License
+
 No license specified. Add one if you intend to distribute or open-source.

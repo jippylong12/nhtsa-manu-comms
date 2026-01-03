@@ -22,5 +22,5 @@ TARGET_MODEL = "SILVERADO EV"  # case-insensitive comparison
 
 # Keyword filters for the summary field
 KEYWORDS = (
-    "software",
+    # "software",
 )
