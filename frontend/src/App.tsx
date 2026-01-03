@@ -100,8 +100,6 @@ function Dashboard() {
 
   // Communications View
   if (selectedVehicleId && selectedVehicle) {
-    const commTypes: CommType[] = ['TSB', 'PIT', 'PIC', 'PIP', 'OTHER'];
-
     return (
       <div className="page">
         <div className="container">
@@ -203,16 +201,17 @@ function Dashboard() {
               >
                 All
               </button>
-              {commTypes.map((type) => (
+              {statsData?.categories.map((cat) => (
                 <button
-                  key={type}
-                  className={`type-filter-btn ${selectedType === type ? 'active' : ''}`}
+                  key={cat.type}
+                  className={`type-filter-btn ${selectedType === cat.type ? 'active' : ''}`}
                   style={{
-                    '--type-color': COMM_TYPE_COLORS[type],
+                    '--type-color': COMM_TYPE_COLORS[cat.type as CommType] || COMM_TYPE_COLORS.OTHER,
                   } as React.CSSProperties}
-                  onClick={() => setSelectedType(selectedType === type ? '' : type)}
+                  onClick={() => setSelectedType(selectedType === cat.type ? '' : cat.type as CommType)}
+                  title={cat.label}
                 >
-                  {type}
+                  {cat.type} ({cat.count})
                 </button>
               ))}
             </div>

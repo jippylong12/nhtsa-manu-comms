@@ -234,7 +234,7 @@ class CommunicationService:
                     "nhtsa_id": nhtsa_id,
                     "vehicle_id": vehicle_id,
                     "communication_number": comm_number,
-                    "communication_type": get_comm_type(comm_number),
+                    "communication_type": get_comm_type(comm_number, summary),
                     "communication_date": comm_data.get("communicationDate"),
                     "summary": summary,
                     "details_summary": id_to_summary.get(nhtsa_id),

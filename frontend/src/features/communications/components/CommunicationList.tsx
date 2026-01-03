@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { FileText, ExternalLink, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import type { Communication, CommType } from '@/client';
-import { COMM_TYPE_COLORS } from '@/client';
+import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
 
 interface Props {
   communications: Communication[];
@@ -28,6 +28,7 @@ function CommunicationRow({ comm }: { comm: Communication }) {
           <div className="comm-top-row">
             <span
               className="comm-type-badge"
+              title={COMM_TYPE_LABELS[commType] || commType}
               style={{
                 backgroundColor: `${typeColor}20`,
                 color: typeColor,

@@ -8,25 +8,28 @@ from src.communications.schemas import get_comm_type
 
 
 async def backfill_communication_types():
-    """Backfill communication_type field for existing records."""
+    """Backfill communication_type field for existing records using enhanced detection."""
     settings = get_settings()
     client = AsyncIOMotorClient(settings.mongodb_url)
     db = client[settings.mongodb_database]
     
-    # Find all communications without communication_type or with null/OTHER
+    # Find all communications
     cursor = db.communications.find({})
     
     updated = 0
     async for doc in cursor:
         comm_number = doc.get("communication_number")
-        comm_type = get_comm_type(comm_number)
+        summary = doc.get("summary") or doc.get("details_summary") or ""
         
-        # Only update if different or missing
+        # Use enhanced type detection with summary
+        new_type = get_comm_type(comm_number, summary)
+        
+        # Only update if different
         current_type = doc.get("communication_type")
-        if current_type != comm_type:
+        if current_type != new_type:
             await db.communications.update_one(
                 {"_id": doc["_id"]},
-                {"$set": {"communication_type": comm_type}}
+                {"$set": {"communication_type": new_type}}
             )
             updated += 1
         

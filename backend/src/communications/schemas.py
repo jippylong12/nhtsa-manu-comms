@@ -8,30 +8,90 @@ from src.vehicles.schemas import CamelModel
 
 
 # --- Communication Types ---
-# Based on manufacturer communication number prefix:
-# TSB = Technical Service Bulletin
-# PIT = Preliminary Information Technical
-# PIC = Preliminary Information Customer
-# PIP = Preliminary Information Parts
-# Other = Unknown/Other type
+# Extended categorization based on:
+# 1. Manufacturer communication number prefix (PIT, PIC, PIP, TSB)
+# 2. Summary text analysis for bulletins/programs
+# 3. Communication number patterns (XX-NA-XXX format)
 
 COMM_TYPE_MAP = {
+    # Prefix-based types
     "TSB": "Technical Service Bulletin",
     "PIT": "Preliminary Info Technical",
-    "PIC": "Preliminary Info Customer", 
+    "PIC": "Preliminary Info Customer",
     "PIP": "Preliminary Info Parts",
+    # Summary-based types (detected from text)
+    "SB": "Service Bulletin",
+    "TB": "Technical Bulletin",
+    "IB": "Informational Bulletin",
+    "CSP": "Customer Satisfaction Program",
+    "RC": "Recall/Campaign",
+    "SC": "Special Coverage",
+    # Format-based types
+    "NA": "NA Bulletin",  # XX-NA-XXX format
+    # Default
     "OTHER": "Other",
 }
 
 
-def get_comm_type(comm_number: Optional[str]) -> str:
-    """Extract communication type from manufacturer communication number."""
+def get_comm_type_from_prefix(comm_number: Optional[str]) -> Optional[str]:
+    """Extract communication type from manufacturer communication number prefix."""
     if not comm_number:
-        return "OTHER"
+        return None
     prefix = comm_number[:3].upper()
-    if prefix in COMM_TYPE_MAP:
+    if prefix in ("TSB", "PIT", "PIC", "PIP"):
         return prefix
+    # Check for NA bulletin format (XX-NA-XXX)
+    if "-NA-" in comm_number.upper() or comm_number.upper().endswith("-NA"):
+        return "NA"
+    return None
+
+
+def get_comm_type_from_summary(summary: Optional[str]) -> Optional[str]:
+    """Extract communication type by analyzing the summary text."""
+    if not summary:
+        return None
+    
+    text = summary.lower()
+    
+    # Order matters - check more specific patterns first
+    if "customer satisfaction" in text:
+        return "CSP"
+    if "special coverage" in text:
+        return "SC"
+    if "safety recall" in text or "recall campaign" in text:
+        return "RC"
+    if "technical service bulletin" in text:
+        return "TSB"
+    if "technical bulletin" in text:
+        return "TB"
+    if "service bulletin" in text:
+        return "SB"
+    if "informational bulletin" in text:
+        return "IB"
+    if "preliminary information" in text:
+        return "PIT"  # Default to PIT for "preliminary information"
+    
+    return None
+
+
+def get_comm_type(comm_number: Optional[str], summary: Optional[str] = None) -> str:
+    """
+    Determine communication type using multiple detection methods.
+    Priority: 1) Prefix-based, 2) Summary-based, 3) Default to OTHER
+    """
+    # First try prefix-based detection
+    prefix_type = get_comm_type_from_prefix(comm_number)
+    if prefix_type:
+        return prefix_type
+    
+    # Then try summary-based detection
+    if summary:
+        summary_type = get_comm_type_from_summary(summary)
+        if summary_type:
+            return summary_type
+    
     return "OTHER"
+
 
 
 # --- Embedded Schemas ---

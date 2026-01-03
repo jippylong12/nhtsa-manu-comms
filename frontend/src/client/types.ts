@@ -1,22 +1,48 @@
 /* API Types - Mirrors backend Pydantic schemas */
 
-// Communication Types
-export type CommType = 'TSB' | 'PIT' | 'PIC' | 'PIP' | 'OTHER';
+// Communication Types - Extended categorization
+export type CommType =
+    | 'TSB'   // Technical Service Bulletin (prefix-based)
+    | 'PIT'   // Preliminary Info Technical (prefix-based)
+    | 'PIC'   // Preliminary Info Customer (prefix-based)
+    | 'PIP'   // Preliminary Info Parts (prefix-based)
+    | 'SB'    // Service Bulletin (summary-based)
+    | 'TB'    // Technical Bulletin (summary-based)
+    | 'IB'    // Informational Bulletin (summary-based)
+    | 'CSP'   // Customer Satisfaction Program (summary-based)
+    | 'RC'    // Recall/Campaign (summary-based)
+    | 'SC'    // Special Coverage (summary-based)
+    | 'NA'    // NA Bulletin (XX-NA-XXX format)
+    | 'OTHER'; // Uncategorized
 
 export const COMM_TYPE_LABELS: Record<CommType, string> = {
     TSB: 'Technical Service Bulletin',
     PIT: 'Preliminary Info Technical',
     PIC: 'Preliminary Info Customer',
     PIP: 'Preliminary Info Parts',
+    SB: 'Service Bulletin',
+    TB: 'Technical Bulletin',
+    IB: 'Informational Bulletin',
+    CSP: 'Customer Satisfaction',
+    RC: 'Recall/Campaign',
+    SC: 'Special Coverage',
+    NA: 'NA Bulletin',
     OTHER: 'Other',
 };
 
 export const COMM_TYPE_COLORS: Record<CommType, string> = {
-    TSB: 'hsl(38, 92%, 50%)',      // Warning orange
-    PIT: 'hsl(210, 100%, 56%)',    // Primary blue
-    PIC: 'hsl(162, 73%, 46%)',     // Accent teal
-    PIP: 'hsl(280, 65%, 60%)',     // Purple
-    OTHER: 'hsl(215, 15%, 50%)',   // Gray
+    TSB: 'hsl(38, 92%, 50%)',       // Orange - High priority
+    PIT: 'hsl(210, 100%, 56%)',     // Blue - Technical
+    PIC: 'hsl(162, 73%, 46%)',      // Teal - Customer
+    PIP: 'hsl(280, 65%, 60%)',      // Purple - Parts
+    SB: 'hsl(45, 93%, 47%)',        // Gold - Service
+    TB: 'hsl(200, 80%, 50%)',       // Cyan - Technical
+    IB: 'hsl(170, 60%, 45%)',       // Sea green - Informational
+    CSP: 'hsl(340, 75%, 55%)',      // Pink - Customer Satisfaction
+    RC: 'hsl(0, 85%, 55%)',         // Red - Recalls (important!)
+    SC: 'hsl(270, 60%, 55%)',       // Violet - Special Coverage
+    NA: 'hsl(220, 50%, 55%)',       // Steel blue - NA bulletins
+    OTHER: 'hsl(215, 15%, 50%)',    // Gray
 };
 
 // Vehicles
