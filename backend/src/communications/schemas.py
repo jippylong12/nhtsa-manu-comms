@@ -23,10 +23,12 @@ COMM_TYPE_MAP = {
     "SB": "Service Bulletin",
     "TB": "Technical Bulletin",
     "IB": "Informational Bulletin",
+    "SU": "Service Update",
+    "WA": "Warranty Administration",
     "CSP": "Customer Satisfaction Program",
     "RC": "Recall/Campaign",
     "SC": "Special Coverage",
-    # Format-based types
+    # Format-based types (catchall before OTHER)
     "NA": "NA Bulletin",  # XX-NA-XXX format
     # Default
     "OTHER": "Other",
@@ -40,9 +42,7 @@ def get_comm_type_from_prefix(comm_number: Optional[str]) -> Optional[str]:
     prefix = comm_number[:3].upper()
     if prefix in ("TSB", "PIT", "PIC", "PIP"):
         return prefix
-    # Check for NA bulletin format (XX-NA-XXX)
-    if "-NA-" in comm_number.upper() or comm_number.upper().endswith("-NA"):
-        return "NA"
+    # NA format check moved to get_comm_type as fallback
     return None
 
 
@@ -60,26 +60,39 @@ def get_comm_type_from_summary(summary: Optional[str]) -> Optional[str]:
         return "SC"
     if "safety recall" in text or "recall campaign" in text:
         return "RC"
-    if "technical service bulletin" in text:
+    if "warranty administration" in text:
+        return "WA"
+    # Check for bulletin type patterns with "provides" language
+    if "technical service bulletin" in text or "this technical bulletin provides" in text:
         return "TSB"
     if "technical bulletin" in text:
         return "TB"
-    if "service bulletin" in text:
+    if "this service bulletin provides" in text or "service bulletin" in text:
         return "SB"
-    if "informational bulletin" in text:
+    if "service update" in text:
+        return "SU"
+    if "informational bulletin" in text or "this bulletin provides information" in text:
         return "IB"
     if "preliminary information" in text:
-        return "PIT"  # Default to PIT for "preliminary information"
+        return "PIT"
     
     return None
+
+
+def is_na_format(comm_number: Optional[str]) -> bool:
+    """Check if communication number follows XX-NA-XXX format."""
+    if not comm_number:
+        return False
+    upper = comm_number.upper()
+    return "-NA-" in upper or upper.endswith("-NA")
 
 
 def get_comm_type(comm_number: Optional[str], summary: Optional[str] = None) -> str:
     """
     Determine communication type using multiple detection methods.
-    Priority: 1) Prefix-based, 2) Summary-based, 3) Default to OTHER
+    Priority: 1) Prefix-based, 2) Summary-based, 3) NA format, 4) OTHER
     """
-    # First try prefix-based detection
+    # First try prefix-based detection (TSB, PIT, PIC, PIP)
     prefix_type = get_comm_type_from_prefix(comm_number)
     if prefix_type:
         return prefix_type
@@ -89,6 +102,10 @@ def get_comm_type(comm_number: Optional[str], summary: Optional[str] = None) -> 
         summary_type = get_comm_type_from_summary(summary)
         if summary_type:
             return summary_type
+    
+    # NA format is the last catchall before OTHER
+    if is_na_format(comm_number):
+        return "NA"
     
     return "OTHER"
 

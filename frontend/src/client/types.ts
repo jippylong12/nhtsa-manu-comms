@@ -9,10 +9,12 @@ export type CommType =
     | 'SB'    // Service Bulletin (summary-based)
     | 'TB'    // Technical Bulletin (summary-based)
     | 'IB'    // Informational Bulletin (summary-based)
+    | 'SU'    // Service Update (summary-based)
+    | 'WA'    // Warranty Administration (summary-based)
     | 'CSP'   // Customer Satisfaction Program (summary-based)
     | 'RC'    // Recall/Campaign (summary-based)
     | 'SC'    // Special Coverage (summary-based)
-    | 'NA'    // NA Bulletin (XX-NA-XXX format)
+    | 'NA'    // NA Bulletin (XX-NA-XXX format) - catchall before OTHER
     | 'OTHER'; // Uncategorized
 
 export const COMM_TYPE_LABELS: Record<CommType, string> = {
@@ -23,6 +25,8 @@ export const COMM_TYPE_LABELS: Record<CommType, string> = {
     SB: 'Service Bulletin',
     TB: 'Technical Bulletin',
     IB: 'Informational Bulletin',
+    SU: 'Service Update',
+    WA: 'Warranty Administration',
     CSP: 'Customer Satisfaction',
     RC: 'Recall/Campaign',
     SC: 'Special Coverage',
@@ -38,6 +42,8 @@ export const COMM_TYPE_COLORS: Record<CommType, string> = {
     SB: 'hsl(45, 93%, 47%)',        // Gold - Service
     TB: 'hsl(200, 80%, 50%)',       // Cyan - Technical
     IB: 'hsl(170, 60%, 45%)',       // Sea green - Informational
+    SU: 'hsl(25, 85%, 55%)',        // Coral - Service Update
+    WA: 'hsl(190, 70%, 45%)',       // Dark cyan - Warranty
     CSP: 'hsl(340, 75%, 55%)',      // Pink - Customer Satisfaction
     RC: 'hsl(0, 85%, 55%)',         // Red - Recalls (important!)
     SC: 'hsl(270, 60%, 55%)',       // Violet - Special Coverage

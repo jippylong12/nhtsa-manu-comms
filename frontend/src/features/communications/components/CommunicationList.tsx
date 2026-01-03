@@ -2,7 +2,7 @@
 
 import { format } from 'date-fns';
 import { FileText, ExternalLink, Tag, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { Communication, CommType } from '@/client';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
 
@@ -11,7 +11,12 @@ interface Props {
   isLoading?: boolean;
 }
 
-function CommunicationRow({ comm }: { comm: Communication }) {
+interface RowProps {
+  comm: Communication;
+  occurrence?: number; // Which occurrence this is (2 means second time seeing this number)
+}
+
+function CommunicationRow({ comm, occurrence }: RowProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const commDate = comm.communicationDate
@@ -20,6 +25,13 @@ function CommunicationRow({ comm }: { comm: Communication }) {
 
   const commType = (comm.communicationType || 'OTHER') as CommType;
   const typeColor = COMM_TYPE_COLORS[commType] || COMM_TYPE_COLORS.OTHER;
+
+  // Display communication number with occurrence indicator
+  const displayNumber = comm.communicationNumber
+    ? occurrence && occurrence > 1
+      ? `${comm.communicationNumber} (${occurrence})`
+      : comm.communicationNumber
+    : null;
 
   return (
     <div className="comm-row" style={{ borderLeftColor: typeColor }}>
@@ -40,8 +52,15 @@ function CommunicationRow({ comm }: { comm: Communication }) {
             <span className="comm-date">{commDate}</span>
           </div>
           <h4 className="comm-summary">{comm.summary || 'No summary available'}</h4>
-          {comm.communicationNumber && (
-            <span className="comm-number">{comm.communicationNumber}</span>
+          {displayNumber && (
+            <span className="comm-number">
+              {displayNumber}
+              {occurrence && occurrence > 1 && (
+                <span className="duplicate-badge" title="Duplicate bulletin number">
+                  dup
+                </span>
+              )}
+            </span>
           )}
         </div>
 
@@ -182,6 +201,19 @@ function CommunicationRow({ comm }: { comm: Communication }) {
           font-size: 0.75rem;
           color: var(--text-muted);
           font-family: var(--font-mono);
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-xs);
+        }
+
+        .duplicate-badge {
+          font-size: 0.625rem;
+          font-weight: 600;
+          padding: 1px 4px;
+          background: hsl(38, 92%, 50%);
+          color: white;
+          border-radius: var(--radius-sm);
+          text-transform: uppercase;
         }
 
         .comm-meta {
@@ -316,6 +348,23 @@ function CommunicationRow({ comm }: { comm: Communication }) {
 }
 
 export function CommunicationList({ communications, isLoading }: Props) {
+  // Track duplicate communication numbers
+  const occurrenceMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    const occurrences = new Map<string, number>(); // nhtsaId -> occurrence number
+
+    for (const comm of communications) {
+      const num = comm.communicationNumber;
+      if (num) {
+        const currentCount = counts.get(num) || 0;
+        counts.set(num, currentCount + 1);
+        occurrences.set(String(comm.nhtsaId), currentCount + 1);
+      }
+    }
+
+    return occurrences;
+  }, [communications]);
+
   if (isLoading) {
     return (
       <div className="comm-list-loading">
@@ -341,7 +390,11 @@ export function CommunicationList({ communications, isLoading }: Props) {
   return (
     <div className="comm-list">
       {communications.map((comm) => (
-        <CommunicationRow key={comm.nhtsaId} comm={comm} />
+        <CommunicationRow
+          key={comm.nhtsaId}
+          comm={comm}
+          occurrence={occurrenceMap.get(String(comm.nhtsaId))}
+        />
       ))}
 
       <style>{`
