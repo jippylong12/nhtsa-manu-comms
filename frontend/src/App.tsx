@@ -41,7 +41,7 @@ function Dashboard() {
   const [showFilterInfo, setShowFilterInfo] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedType, setSelectedType] = useState<CommType | ''>('');
+  const [selectedTypes, setSelectedTypes] = useState<CommType[]>([]);
 
   const { data: vehiclesData, isLoading: vehiclesLoading } = useVehiclesQuery();
   const { mutate: createVehicle, isPending: isCreating } = useCreateVehicle();
@@ -57,9 +57,9 @@ function Dashboard() {
     if (!selectedVehicleId) return {};
     const f: CommunicationFilters = { vehicleId: selectedVehicleId, perPage: 100 };
     if (searchTerm.trim()) f.search = searchTerm.trim();
-    if (selectedType) f.commType = selectedType;
+    if (selectedTypes.length > 0) f.commTypes = selectedTypes;
     return f;
-  }, [selectedVehicleId, searchTerm, selectedType]);
+  }, [selectedVehicleId, searchTerm, selectedTypes]);
 
   const { data: commsData, isLoading: commsLoading } = useCommunicationsQuery(
     selectedVehicleId ? filters : {}
@@ -111,7 +111,7 @@ function Dashboard() {
               onClick={() => {
                 setSelectedVehicleId(null);
                 setSearchTerm('');
-                setSelectedType('');
+                setSelectedTypes([]);
               }}
             >
               <ArrowLeft size={18} />
@@ -125,7 +125,7 @@ function Dashboard() {
               <h2>{selectedVehicle.model}</h2>
               <p>
                 {commsData?.total || 0} communications
-                {selectedType && ` (filtered by ${selectedType})`}
+                {selectedTypes.length > 0 && ` (filtered by ${selectedTypes.length} type${selectedTypes.length > 1 ? 's' : ''})`}
               </p>
             </div>
             <div className="vehicle-banner-actions">
@@ -163,9 +163,14 @@ function Dashboard() {
               {statsData.categories.map((cat) => (
                 <div
                   key={cat.type}
-                  className="stat-card category-stat"
+                  className={`stat-card category-stat ${selectedTypes.includes(cat.type as CommType) ? 'selected' : ''}`}
                   style={{ borderColor: COMM_TYPE_COLORS[cat.type as CommType] }}
-                  onClick={() => setSelectedType(selectedType === cat.type ? '' : cat.type as CommType)}
+                  onClick={() => {
+                    const type = cat.type as CommType;
+                    setSelectedTypes(prev =>
+                      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+                    );
+                  }}
                 >
                   <div
                     className="stat-dot"
@@ -198,19 +203,24 @@ function Dashboard() {
             <div className="type-filters">
               <Filter size={16} />
               <button
-                className={`type-filter-btn ${selectedType === '' ? 'active' : ''}`}
-                onClick={() => setSelectedType('')}
+                className={`type-filter-btn ${selectedTypes.length === 0 ? 'active' : ''}`}
+                onClick={() => setSelectedTypes([])}
               >
                 All
               </button>
               {statsData?.categories.map((cat) => (
                 <button
                   key={cat.type}
-                  className={`type-filter-btn ${selectedType === cat.type ? 'active' : ''}`}
+                  className={`type-filter-btn ${selectedTypes.includes(cat.type as CommType) ? 'active' : ''}`}
                   style={{
                     '--type-color': COMM_TYPE_COLORS[cat.type as CommType] || COMM_TYPE_COLORS.OTHER,
                   } as React.CSSProperties}
-                  onClick={() => setSelectedType(selectedType === cat.type ? '' : cat.type as CommType)}
+                  onClick={() => {
+                    const type = cat.type as CommType;
+                    setSelectedTypes(prev =>
+                      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+                    );
+                  }}
                   title={cat.label}
                 >
                   {cat.type} ({cat.count})

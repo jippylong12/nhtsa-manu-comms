@@ -163,7 +163,8 @@ export interface CommunicationFilters {
     model?: string;
     keywords?: string;
     search?: string;
-    commType?: CommType;
+    commTypes?: CommType[];  // Changed to array for multi-select
     page?: number;
     perPage?: number;
 }
+

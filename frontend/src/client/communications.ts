@@ -18,7 +18,9 @@ export const communicationApi = {
         if (filters.model) params.append('model', filters.model);
         if (filters.keywords) params.append('keywords', filters.keywords);
         if (filters.search) params.append('search', filters.search);
-        if (filters.commType) params.append('comm_type', filters.commType);
+        if (filters.commTypes && filters.commTypes.length > 0) {
+            params.append('comm_type', filters.commTypes.join(','));
+        }
         if (filters.page) params.append('page', String(filters.page));
         if (filters.perPage) params.append('per_page', String(filters.perPage));
 

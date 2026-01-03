@@ -82,7 +82,12 @@ class CommunicationService:
                 {"communication_number": {"$regex": search, "$options": "i"}},
             ]
         if comm_type:
-            query["communication_type"] = comm_type.upper()
+            # Support comma-separated multiple types
+            types = [t.strip().upper() for t in comm_type.split(",") if t.strip()]
+            if len(types) == 1:
+                query["communication_type"] = types[0]
+            elif len(types) > 1:
+                query["communication_type"] = {"$in": types}
 
         cursor = (
             db.communications.find(query)
