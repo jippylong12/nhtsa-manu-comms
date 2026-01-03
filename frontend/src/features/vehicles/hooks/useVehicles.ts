@@ -25,7 +25,10 @@ export function useCreateVehicle() {
     return useMutation({
         mutationFn: (data: VehicleCreate) => vehicleApi.create(data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
+            queryClient.invalidateQueries({
+                queryKey: vehicleKeys.lists(),
+                refetchType: 'active',
+            });
         },
     });
 }
@@ -37,8 +40,14 @@ export function useUpdateVehicle() {
         mutationFn: ({ vehicleId, data }: { vehicleId: number; data: VehicleUpdate }) =>
             vehicleApi.update(vehicleId, data),
         onSuccess: (_, { vehicleId }) => {
-            queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
-            queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
+            queryClient.invalidateQueries({
+                queryKey: vehicleKeys.detail(vehicleId),
+                refetchType: 'active',
+            });
+            queryClient.invalidateQueries({
+                queryKey: vehicleKeys.lists(),
+                refetchType: 'active',
+            });
         },
     });
 }
@@ -49,9 +58,16 @@ export function useDeleteVehicle() {
     return useMutation({
         mutationFn: (vehicleId: number) => vehicleApi.delete(vehicleId),
         onSuccess: (_, vehicleId) => {
-            queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
+            // Force refetch even with stale data
+            queryClient.invalidateQueries({
+                queryKey: vehicleKeys.lists(),
+                refetchType: 'active',
+            });
             queryClient.removeQueries({ queryKey: vehicleKeys.detail(vehicleId) });
-            queryClient.invalidateQueries({ queryKey: communicationKeys.lists() });
+            queryClient.invalidateQueries({
+                queryKey: communicationKeys.lists(),
+                refetchType: 'active',
+            });
         },
     });
 }

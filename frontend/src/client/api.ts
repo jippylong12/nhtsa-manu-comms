@@ -22,7 +22,12 @@ async function handleResponse<T>(response: Response): Promise<T> {
         }
         throw new ApiError(response.status, message);
     }
-    return response.json();
+    // Handle empty response (e.g., 204 No Content from DELETE)
+    const text = await response.text();
+    if (!text) {
+        return undefined as T;
+    }
+    return JSON.parse(text);
 }
 
 async function request<T>(
