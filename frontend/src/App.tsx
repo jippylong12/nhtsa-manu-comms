@@ -22,8 +22,8 @@ import {
   useVehicleStatsQuery,
 } from './features/communications/hooks/useCommunications';
 
-import type { Vehicle, CommType, CommunicationFilters } from './client';
-import { COMM_TYPE_COLORS } from './client';
+import type { Vehicle, CommType, CommPriority, CommunicationFilters } from './client';
+import { COMM_TYPE_COLORS, COMM_PRIORITY_TYPES, PRIORITY_COLORS } from './client';
 
 // Query Client
 const queryClient = new QueryClient({
@@ -208,6 +208,51 @@ function Dashboard() {
               >
                 All
               </button>
+
+              {/* Priority filter buttons */}
+              <div className="priority-divider" />
+              {(['high', 'medium', 'low'] as CommPriority[]).map((priority) => {
+                const priorityTypes = COMM_PRIORITY_TYPES[priority];
+                const availableTypes = statsData?.categories
+                  .filter(cat => priorityTypes.includes(cat.type as CommType))
+                  .map(cat => cat.type as CommType) || [];
+                const allSelected = availableTypes.length > 0 &&
+                  availableTypes.every(t => selectedTypes.includes(t));
+                const someSelected = availableTypes.some(t => selectedTypes.includes(t));
+                const totalCount = statsData?.categories
+                  .filter(cat => priorityTypes.includes(cat.type as CommType))
+                  .reduce((sum, cat) => sum + cat.count, 0) || 0;
+
+                if (totalCount === 0) return null;
+
+                return (
+                  <button
+                    key={priority}
+                    className={`type-filter-btn priority-btn ${allSelected ? 'active' : ''} ${someSelected && !allSelected ? 'partial' : ''}`}
+                    style={{
+                      '--type-color': PRIORITY_COLORS[priority],
+                    } as React.CSSProperties}
+                    onClick={() => {
+                      if (allSelected) {
+                        // Remove all types in this priority
+                        setSelectedTypes(prev => prev.filter(t => !priorityTypes.includes(t)));
+                      } else {
+                        // Add all available types in this priority
+                        setSelectedTypes(prev => {
+                          const newTypes = availableTypes.filter(t => !prev.includes(t));
+                          return [...prev, ...newTypes];
+                        });
+                      }
+                    }}
+                    title={`${priority.charAt(0).toUpperCase() + priority.slice(1)} priority: ${priorityTypes.join(', ')}`}
+                  >
+                    {priority === 'high' ? '🔴' : priority === 'medium' ? '🟡' : '🟢'} {priority.charAt(0).toUpperCase() + priority.slice(1)} ({totalCount})
+                  </button>
+                );
+              })}
+              <div className="priority-divider" />
+
+              {/* Individual type buttons */}
               {statsData?.categories.map((cat) => (
                 <button
                   key={cat.type}
@@ -416,6 +461,23 @@ function Dashboard() {
             background: var(--type-color, var(--color-primary));
             border-color: var(--type-color, var(--color-primary));
             color: white;
+          }
+
+          .type-filter-btn.partial {
+            background: color-mix(in srgb, var(--type-color) 30%, transparent);
+            border-color: var(--type-color, var(--color-primary));
+            color: var(--text-primary);
+          }
+
+          .type-filter-btn.priority-btn {
+            font-weight: 700;
+          }
+
+          .priority-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+            margin: 0 var(--space-xs);
           }
 
           .filter-help-btn {

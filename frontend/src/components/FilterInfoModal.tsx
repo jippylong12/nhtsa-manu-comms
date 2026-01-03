@@ -1,8 +1,8 @@
 /* Filter Information Modal - Explains what each filter means */
 
 import { X, Info, Search, Filter, AlertTriangle, Wrench, FileText, RefreshCw, Shield, Star, Bookmark, HelpCircle } from 'lucide-react';
-import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '../client';
-import type { CommType } from '../client';
+import { COMM_TYPE_COLORS, COMM_TYPE_LABELS, PRIORITY_COLORS } from '../client';
+import type { CommType, CommPriority } from '../client';
 
 interface FilterInfoModalProps {
   isOpen: boolean;
@@ -135,9 +135,36 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
 
           {/* Priority Legend */}
           <div className="priority-legend">
-            <span className="priority-badge priority-high">High Priority</span>
-            <span className="priority-badge priority-medium">Medium Priority</span>
-            <span className="priority-badge priority-low">Low Priority</span>
+            <span
+              className="priority-badge"
+              style={{
+                background: `color-mix(in srgb, ${PRIORITY_COLORS.high} 20%, transparent)`,
+                color: PRIORITY_COLORS.high,
+                border: `1px solid ${PRIORITY_COLORS.high}40`
+              }}
+            >
+              🔴 High Priority
+            </span>
+            <span
+              className="priority-badge"
+              style={{
+                background: `color-mix(in srgb, ${PRIORITY_COLORS.medium} 20%, transparent)`,
+                color: PRIORITY_COLORS.medium,
+                border: `1px solid ${PRIORITY_COLORS.medium}40`
+              }}
+            >
+              🟡 Medium Priority
+            </span>
+            <span
+              className="priority-badge"
+              style={{
+                background: `color-mix(in srgb, ${PRIORITY_COLORS.low} 20%, transparent)`,
+                color: PRIORITY_COLORS.low,
+                border: `1px solid ${PRIORITY_COLORS.low}40`
+              }}
+            >
+              🟢 Low Priority
+            </span>
           </div>
 
           {/* High Priority Types */}
