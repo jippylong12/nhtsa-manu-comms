@@ -28,11 +28,43 @@ COMM_TYPE_MAP = {
     "CSP": "Customer Satisfaction Program",
     "RC": "Recall/Campaign",
     "SC": "Special Coverage",
+    # Document-based types (from associated_documents.summary)
+    "OL": "Owner Letter",
+    "DL": "Dealer Letter",
+    "BL": "Bulletin",  # Generic bulletin (catch-all from document type)
+    "MC": "Manufacturer Communication",  # Generic comm catch-all
     # Format-based types (catchall before OTHER)
     "NA": "NA Bulletin",  # XX-NA-XXX format
     # Default
     "OTHER": "Other",
 }
+
+
+# Document summary to type code mapping
+DOC_SUMMARY_TYPE_MAP = {
+    "owner letter": "OL",
+    "dealer letter": "DL",
+    "service bulletin document": "SB",
+    "bulletin": "BL",
+    "manufacturer communications": "MC",
+}
+
+
+def get_comm_type_from_doc_summary(documents: list[dict] | None) -> str | None:
+    """Extract communication type from associated document summary field.
+    
+    The API returns document types like 'Owner Letter', 'Bulletin', 'Dealer Letter', etc.
+    in the associated_documents[].summary field.
+    """
+    if not documents:
+        return None
+    
+    for doc in documents:
+        summary = (doc.get("summary") or "").lower().strip()
+        if summary in DOC_SUMMARY_TYPE_MAP:
+            return DOC_SUMMARY_TYPE_MAP[summary]
+    
+    return None
 
 
 def get_comm_type_from_prefix(comm_number: Optional[str]) -> Optional[str]:
@@ -87,21 +119,31 @@ def is_na_format(comm_number: Optional[str]) -> bool:
     return "-NA-" in upper or upper.endswith("-NA")
 
 
-def get_comm_type(comm_number: Optional[str], summary: Optional[str] = None) -> str:
+def get_comm_type(
+    comm_number: Optional[str],
+    summary: Optional[str] = None,
+    documents: list[dict] | None = None,
+) -> str:
     """
     Determine communication type using multiple detection methods.
-    Priority: 1) Prefix-based, 2) Summary-based, 3) NA format, 4) OTHER
+    Priority: 1) Prefix-based, 2) Summary text, 3) Document type, 4) NA format, 5) OTHER
     """
     # First try prefix-based detection (TSB, PIT, PIC, PIP)
     prefix_type = get_comm_type_from_prefix(comm_number)
     if prefix_type:
         return prefix_type
     
-    # Then try summary-based detection
+    # Then try summary text-based detection
     if summary:
         summary_type = get_comm_type_from_summary(summary)
         if summary_type:
             return summary_type
+    
+    # Try document type detection (Owner Letter, Bulletin, etc.)
+    if documents:
+        doc_type = get_comm_type_from_doc_summary(documents)
+        if doc_type:
+            return doc_type
     
     # NA format is the last catchall before OTHER
     if is_na_format(comm_number):

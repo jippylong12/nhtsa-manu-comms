@@ -20,9 +20,10 @@ async def backfill_communication_types():
     async for doc in cursor:
         comm_number = doc.get("communication_number")
         summary = doc.get("summary") or doc.get("details_summary") or ""
+        documents = doc.get("associated_documents") or []
         
-        # Use enhanced type detection with summary
-        new_type = get_comm_type(comm_number, summary)
+        # Use enhanced type detection with summary and documents
+        new_type = get_comm_type(comm_number, summary, documents)
         
         # Only update if different
         current_type = doc.get("communication_type")
