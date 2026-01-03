@@ -300,9 +300,11 @@ class CommunicationService:
 
         # Last 30 days count
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        # Format as ISO with Z suffix to match stored format
+        thirty_days_str = thirty_days_ago.strftime("%Y-%m-%dT%H:%M:%SZ")
         last_30_query = {
             "vehicle_id": vehicle_id,
-            "communication_date": {"$gte": thirty_days_ago.isoformat()},
+            "communication_date": {"$gte": thirty_days_str},
         }
         last_30_count = await db.communications.count_documents(last_30_query)
 
