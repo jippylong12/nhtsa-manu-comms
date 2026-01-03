@@ -336,35 +336,72 @@ class CommunicationService:
             "categories": categories,
         }
 
+    # Top 20 US car manufacturers by 2024 sales
+    TOP_MAKES = [
+        "TOYOTA", "FORD", "CHEVROLET", "HONDA", "NISSAN", "HYUNDAI", "KIA",
+        "SUBARU", "GMC", "JEEP", "RAM", "MAZDA", "VOLKSWAGEN", "BMW", "LEXUS",
+        "MERCEDES-BENZ", "AUDI", "BUICK", "CADILLAC", "DODGE", "TESLA",
+    ]
+
     @staticmethod
     async def get_discovery_years() -> list[int]:
-        """Get available model years."""
-        client = NHTSAClient()
-        return await client.get_model_years()
+        """Return recent model years (hardcoded - no API call needed)."""
+        current_year = 2026  # NHTSA has data through 2026
+        return list(range(current_year, current_year - 20, -1))
 
     @staticmethod
     async def get_discovery_makes(year: int) -> list[str]:
-        """Get makes for a year."""
-        client = NHTSAClient()
-        return await client.get_makes_for_year(year)
+        """Return top 20 US makes (hardcoded - no API call needed)."""
+        # Just return the hardcoded list - these are available for all years
+        return CommunicationService.TOP_MAKES
 
     @staticmethod
     async def get_discovery_models(year: int, make: str) -> list[str]:
-        """Get models for a year and make."""
-        client = NHTSAClient()
-        return await client.get_models_for_make_year(year, make)
+        """Get models for a year and make from local catalog."""
+        db = get_database()
+        models = await db.vehicle_catalog.distinct(
+            "model",
+            {"year": year, "make": make.upper()}
+        )
+        return sorted([m for m in models if m])
 
     @staticmethod
     async def get_discovery_trims(year: int, make: str, model: str) -> list[str]:
-        """Get available trims for a year/make/model."""
-        client = NHTSAClient()
-        return await client.get_trims_for_model(year, make, model)
+        """Get available trims for a year/make/model from local catalog."""
+        db = get_database()
+        trims = await db.vehicle_catalog.distinct(
+            "trim",
+            {"year": year, "make": make.upper(), "model": model.upper()}
+        )
+        return sorted([t for t in trims if t])
 
     @staticmethod
     async def get_discovery_variants(
         year: int, make: str, model: str, trim: str | None = None
     ) -> list[dict[str, Any]]:
-        """Get vehicle variants with correct vehicleId for communications API."""
-        client = NHTSAClient()
-        return await client.get_vehicle_variants(year, make, model, trim)
+        """Get vehicle variants with correct vehicleId from local catalog."""
+        db = get_database()
+        query: dict[str, Any] = {
+            "year": year,
+            "make": make.upper(),
+            "model": model.upper(),
+        }
+        if trim:
+            query["trim"] = trim
+        
+        cursor = db.vehicle_catalog.find(query)
+        variants = []
+        async for v in cursor:
+            variants.append({
+                "vehicleId": v.get("vehicle_id"),
+                "ncapId": v.get("ncap_id"),
+                "modelYear": v.get("year"),
+                "make": v.get("make"),
+                "model": v.get("model"),
+                "trim": v.get("trim"),
+                "series": v.get("series"),
+                "vehicleDescription": f"{v.get('model', '')} {v.get('trim', '')} {v.get('series', '')}".strip(),
+            })
+        return variants
+
 
