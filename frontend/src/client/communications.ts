@@ -102,4 +102,18 @@ export const communicationApi = {
 
         return () => controller.abort();
     },
+
+    // Discovery API
+    getYears: () => request<number[]>('/communications/discovery/years'),
+    getMakes: (year: number) => request<string[]>(`/communications/discovery/makes?year=${year}`),
+    getModels: (year: number, make: string) =>
+        request<string[]>(`/communications/discovery/models?year=${year}&make=${encodeURIComponent(make)}`),
+    getVariants: (year: number, make: string, model: string) => {
+        const params = new URLSearchParams({
+            year: String(year),
+            make,
+            model,
+        });
+        return request<import('./types').VehicleVariant[]>(`/communications/discovery/variants?${params.toString()}`);
+    },
 };

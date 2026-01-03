@@ -199,3 +199,8 @@ export interface CommunicationFilters {
     perPage?: number;
 }
 
+export interface VehicleVariant {
+    VehicleId: number;
+    VehicleDescription: string;
+}
+

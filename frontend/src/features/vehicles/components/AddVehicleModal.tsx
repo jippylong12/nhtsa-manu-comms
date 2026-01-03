@@ -1,7 +1,8 @@
 /* Add Vehicle Modal Component */
 
 import { useState } from 'react';
-import { X, Plus, Car } from 'lucide-react';
+import { X, Plus, Car, ExternalLink, AlertTriangle } from 'lucide-react';
+import { useDiscoveryYears, useDiscoveryMakes, useDiscoveryModels } from '../../communications/hooks/useDiscovery';
 
 interface Props {
     isOpen: boolean;
@@ -11,25 +12,40 @@ interface Props {
 }
 
 export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props) {
-    const [vehicleId, setVehicleId] = useState('');
-    const [year, setYear] = useState('');
-    const [model, setModel] = useState('');
+    const [selectedYear, setSelectedYear] = useState<number | null>(null);
+    const [selectedMake, setSelectedMake] = useState<string>('');
+    const [selectedModel, setSelectedModel] = useState<string>('');
+    const [manualId, setManualId] = useState('');
     const [keywords, setKeywords] = useState('');
+
+    const { data: years, isLoading: loadingYears } = useDiscoveryYears();
+    const { data: makes, isLoading: loadingMakes } = useDiscoveryMakes(selectedYear);
+    const { data: models, isLoading: loadingModels } = useDiscoveryModels(selectedYear, selectedMake);
 
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        // Allow submission if we have a manual ID OR if we have full selection (but we need ID)
+        if (!manualId) return;
+
         const keywordList = keywords
             .split(',')
             .map((k) => k.trim())
             .filter(Boolean);
+
         onSubmit({
-            vehicleId: parseInt(vehicleId, 10),
-            year,
-            model: model.toUpperCase(),
+            vehicleId: parseInt(manualId, 10),
+            year: selectedYear ? String(selectedYear) : '',
+            model: selectedModel || selectedMake, // Fallback
             keywords: keywordList,
         });
+    };
+
+    const getNhtsaLink = () => {
+        if (!selectedYear || !selectedMake) return 'https://www.nhtsa.gov/vehicle';
+        const parts = [selectedYear, selectedMake, selectedModel].filter(Boolean);
+        return `https://www.nhtsa.gov/vehicle/${parts.map(p => encodeURIComponent(p)).join('/')}`;
     };
 
     return (
@@ -47,49 +63,108 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
 
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
+                        {/* Progressive Selection for Link Gen */}
+                        <div className="selection-flow">
+                            <div className="input-group">
+                                <label className="input-label">Year</label>
+                                <select
+                                    className="input select"
+                                    value={selectedYear || ''}
+                                    onChange={(e) => {
+                                        setSelectedYear(Number(e.target.value));
+                                        setSelectedMake('');
+                                        setSelectedModel('');
+                                    }}
+                                    disabled={loadingYears}
+                                >
+                                    <option value="">Year</option>
+                                    {years?.map((y) => (
+                                        <option key={y} value={y}>{y}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className={`input-group ${!selectedYear ? 'disabled' : ''}`}>
+                                <label className="input-label">Make</label>
+                                <select
+                                    className="input select"
+                                    value={selectedMake}
+                                    onChange={(e) => {
+                                        setSelectedMake(e.target.value);
+                                        setSelectedModel('');
+                                    }}
+                                    disabled={!selectedYear || loadingMakes}
+                                >
+                                    <option value="">Make</option>
+                                    {makes?.map((m) => (
+                                        <option key={m} value={m}>{m}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className={`input-group ${!selectedMake ? 'disabled' : ''}`}>
+                                <label className="input-label">Model</label>
+                                <select
+                                    className="input select"
+                                    value={selectedModel}
+                                    onChange={(e) => setSelectedModel(e.target.value)}
+                                    disabled={!selectedMake || loadingModels}
+                                >
+                                    <option value="">Model</option>
+                                    {models?.map((m) => (
+                                        <option key={m} value={m}>{m}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* ID Discovery Helper */}
+                        <div className="id-helper-box">
+                            <div className="helper-icon">
+                                <AlertTriangle size={18} />
+                            </div>
+                            <div className="helper-content">
+                                <strong>Technical ID Required</strong>
+                                <p>
+                                    NHTSA separates Safety Ratings from Technical Communications.
+                                    <strong> You must use the Technical ID.</strong>
+                                </p>
+                                <div className="helper-steps">
+                                    <ol>
+                                        <li>Click the link below to open the official NHTSA page.</li>
+                                        <li>
+                                            Look at the URL in your browser address bar. It will look like:
+                                            <div className="code-snippet">nhtsa.gov/vehicle/<strong>20540</strong>/details</div>
+                                            (You may need to select a Trim/Style on the page first).
+                                        </li>
+                                        <li>Copy that number (e.g. 20540) and paste it below.</li>
+                                    </ol>
+                                </div>
+                                <a
+                                    href={getNhtsaLink()}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="helper-link"
+                                >
+                                    Open NHTSA Page <ExternalLink size={14} />
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* Manual ID Input */}
                         <div className="input-group">
-                            <label className="input-label">NHTSA Vehicle ID *</label>
+                            <label className="input-label">Vehicle ID (from NHTSA)</label>
                             <input
                                 type="number"
                                 className="input"
-                                placeholder="e.g., 218944"
-                                value={vehicleId}
-                                onChange={(e) => setVehicleId(e.target.value)}
+                                placeholder="Paste ID here (e.g. 218944)"
+                                value={manualId}
+                                onChange={(e) => setManualId(e.target.value)}
                                 required
                             />
-                            <span className="input-hint">
-                                Find vehicle IDs at{' '}
-                                <a href="https://www.nhtsa.gov/vehicle" target="_blank" rel="noopener noreferrer">
-                                    nhtsa.gov/vehicle
-                                </a>
-                            </span>
                         </div>
 
-                        <div className="form-row">
-                            <div className="input-group">
-                                <label className="input-label">Model Year *</label>
-                                <input
-                                    type="text"
-                                    className="input"
-                                    placeholder="e.g., 2024"
-                                    value={year}
-                                    onChange={(e) => setYear(e.target.value)}
-                                    required
-                                />
-                            </div>
-                            <div className="input-group">
-                                <label className="input-label">Model Name *</label>
-                                <input
-                                    type="text"
-                                    className="input"
-                                    placeholder="e.g., SILVERADO EV"
-                                    value={model}
-                                    onChange={(e) => setModel(e.target.value)}
-                                    required
-                                />
-                            </div>
-                        </div>
-
+                        {/* Additional Info */}
                         <div className="input-group">
                             <label className="input-label">Filter Keywords (optional)</label>
                             <input
@@ -99,9 +174,6 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 value={keywords}
                                 onChange={(e) => setKeywords(e.target.value)}
                             />
-                            <span className="input-hint">
-                                Only show communications containing these keywords
-                            </span>
                         </div>
                     </div>
 
@@ -109,7 +181,11 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         <button type="button" className="btn btn-secondary" onClick={onClose}>
                             Cancel
                         </button>
-                        <button type="submit" className="btn btn-primary" disabled={isLoading}>
+                        <button
+                            type="submit"
+                            className="btn btn-primary"
+                            disabled={isLoading || !manualId}
+                        >
                             <Plus size={18} />
                             {isLoading ? 'Adding...' : 'Add Vehicle'}
                         </button>
@@ -137,6 +213,8 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
             max-width: 500px;
             max-height: 90vh;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
           }
 
           .modal-header {
@@ -169,24 +247,88 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
             display: flex;
             flex-direction: column;
             gap: var(--space-lg);
-            max-height: 60vh;
             overflow-y: auto;
           }
 
-          .form-row {
+          .selection-flow {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: var(--space-md);
+            grid-template-columns: repeat(3, 1fr);
+            gap: var(--space-xs);
           }
 
-          .input-hint {
-            font-size: 0.75rem;
+          .select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            background-size: 1.25em;
+            padding-right: 2rem;
+            font-size: 0.9rem;
+          }
+
+          .id-helper-box {
+            display: flex;
+            gap: var(--space-md);
+            background: var(--bg-hover);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: var(--space-md);
+            font-size: 0.9rem;
+          }
+
+          .helper-icon {
+            color: var(--color-warning);
+            margin-top: 2px;
+            flex-shrink: 0;
+          }
+
+          .helper-content {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+          }
+
+          .helper-content p {
+            margin: 0;
             color: var(--text-muted);
+            font-size: 0.85rem;
+          }
+
+          .helper-steps ol {
+            margin: var(--space-xs) 0;
+            padding-left: var(--space-lg);
+            color: var(--text-muted);
+          }
+
+          .helper-steps li {
+            margin-bottom: var(--space-xs);
+          }
+
+          .code-snippet {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            margin: 4px 0;
+            display: inline-block;
+          }
+          
+          .code-snippet strong {
+              color: var(--color-primary);
+          }
+
+          .helper-link {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-xs);
+            color: var(--color-primary);
+            font-weight: 500;
             margin-top: var(--space-xs);
           }
 
-          .input-hint a {
-            color: var(--color-primary);
+          .helper-link:hover {
+            text-decoration: underline;
           }
 
           .modal-footer {
@@ -196,10 +338,16 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
             padding: var(--space-lg);
             border-top: 1px solid var(--border-subtle);
             background: var(--bg-elevated);
+            margin-top: auto;
+          }
+
+          .disabled {
+            opacity: 0.5;
+            pointer-events: none;
           }
 
           @media (max-width: 640px) {
-            .form-row {
+            .selection-flow {
               grid-template-columns: 1fr;
             }
           }

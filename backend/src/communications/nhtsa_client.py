@@ -96,6 +96,69 @@ class NHTSAClient:
         for coro in asyncio.as_completed(tasks):
             yield await coro
 
+    async def get_model_years(self) -> list[int]:
+        """Fetch available model years from Safety Ratings API."""
+        url = f"{self.base_url}/SafetyRatings"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("Results", [])
+                years = []
+                for r in results:
+                    try:
+                        years.append(int(r["ModelYear"]))
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                return sorted(years, reverse=True)
+            except httpx.RequestError:
+                return []
+
+    async def get_makes_for_year(self, year: int) -> list[str]:
+        """Fetch makes for a given model year."""
+        url = f"{self.base_url}/SafetyRatings/modelyear/{year}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("Results", [])
+                return sorted([r["Make"] for r in results if r.get("Make")])
+            except httpx.RequestError:
+                return []
+
+    async def get_models_for_make_year(self, year: int, make: str) -> list[str]:
+        """Fetch models for a given year and make."""
+        # Note: Make needs to be URL encoded if it contains spaces or special chars
+        import urllib.parse
+        encoded_make = urllib.parse.quote(make)
+        url = f"{self.base_url}/SafetyRatings/modelyear/{year}/make/{encoded_make}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("Results", [])
+                return sorted([r["Model"] for r in results if r.get("Model")])
+            except httpx.RequestError:
+                return []
+
+    async def get_vehicle_variants(self, year: int, make: str, model: str) -> list[dict[str, Any]]:
+        """Fetch specific vehicle variants (with IDs) for Y/M/M."""
+        import urllib.parse
+        encoded_make = urllib.parse.quote(make)
+        encoded_model = urllib.parse.quote(model)
+        url = f"{self.base_url}/SafetyRatings/modelyear/{year}/make/{encoded_make}/model/{encoded_model}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                return data.get("Results", [])
+            except httpx.RequestError:
+                return []
+
 
 def extract_comm_ids_from_details(details: dict[str, Any]) -> list[int]:
     """Extract manufacturer communication NHTSA IDs from vehicle details."""

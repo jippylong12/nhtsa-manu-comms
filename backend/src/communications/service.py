@@ -335,3 +335,29 @@ class CommunicationService:
             "last_30_days_count": last_30_count,
             "categories": categories,
         }
+
+    @staticmethod
+    async def get_discovery_years() -> list[int]:
+        """Get available model years."""
+        client = NHTSAClient()
+        return await client.get_model_years()
+
+    @staticmethod
+    async def get_discovery_makes(year: int) -> list[str]:
+        """Get makes for a year."""
+        client = NHTSAClient()
+        return await client.get_makes_for_year(year)
+
+    @staticmethod
+    async def get_discovery_models(year: int, make: str) -> list[str]:
+        """Get models for a year and make."""
+        client = NHTSAClient()
+        return await client.get_models_for_make_year(year, make)
+
+    @staticmethod
+    async def get_discovery_variants(
+        year: int, make: str, model: str
+    ) -> list[dict[str, Any]]:
+        """Get vehicle variants with IDs."""
+        client = NHTSAClient()
+        return await client.get_vehicle_variants(year, make, model)

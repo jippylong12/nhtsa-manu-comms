@@ -218,3 +218,11 @@ class FetchResult(CamelModel):
     matched_count: int = Field(..., description="Communications matching filters")
     duration_seconds: float = Field(..., description="Fetch duration in seconds")
 
+
+class VehicleVariant(CamelModel):
+    """Schema for vehicle variant from discovery API."""
+
+    vehicle_id: int = Field(..., alias="VehicleId", description="Safety Ratings Vehicle ID")
+    vehicle_description: str = Field(..., alias="VehicleDescription", description="Vehicle description")
+
+

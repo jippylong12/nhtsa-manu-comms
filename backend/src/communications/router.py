@@ -3,7 +3,7 @@
 import json
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
-from typing import Optional
+from typing import Optional, Any
 
 from src.communications.schemas import (
     CommunicationResponse,
@@ -148,6 +148,62 @@ async def fetch_communications_sync(payload: FetchRequest) -> FetchResult:
 )
 async def get_vehicle_stats(vehicle_id: int) -> VehicleStats:
     """Get statistics for a vehicle's communications."""
+
     stats = await CommunicationService.get_vehicle_stats(vehicle_id)
     return VehicleStats(**stats)
+
+
+@router.get(
+    "/discovery/years",
+    response_model=list[int],
+    summary="Get model years",
+    response_description="List of available model years",
+)
+async def get_model_years() -> list[int]:
+    """Get available model years for vehicle discovery."""
+    return await CommunicationService.get_discovery_years()
+
+
+@router.get(
+    "/discovery/makes",
+    response_model=list[str],
+    summary="Get makes for a model year",
+    response_description="List of available makes",
+)
+async def get_makes(
+    year: int = Query(..., description="Model year"),
+) -> list[str]:
+    """Get available makes for a specific model year."""
+    return await CommunicationService.get_discovery_makes(year)
+
+
+@router.get(
+    "/discovery/models",
+    response_model=list[str],
+    summary="Get models for a make/year",
+    response_description="List of available models",
+)
+async def get_models(
+    year: int = Query(..., description="Model year"),
+    make: str = Query(..., description="Make name"),
+) -> list[str]:
+    """Get available models for a specific year and make."""
+    return await CommunicationService.get_discovery_models(year, make)
+
+
+@router.get(
+    "/discovery/variants",
+    response_model=list[dict[str, Any]],
+    summary="Get vehicle variants",
+    response_description="List of vehicle variants with IDs",
+)
+async def get_variants(
+    year: int = Query(..., description="Model year"),
+    make: str = Query(..., description="Make name"),
+    model: str = Query(..., description="Model name"),
+) -> list[dict[str, Any]]:
+    """Get specific vehicle variants and their IDs."""
+    # Using list[dict] instead of VehicleVariant schema because CamelModel might conflict with direct API response
+    return await CommunicationService.get_discovery_variants(year, make, model)
+
 
