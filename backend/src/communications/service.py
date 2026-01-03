@@ -357,51 +357,22 @@ class CommunicationService:
 
     @staticmethod
     async def get_discovery_models(year: int, make: str) -> list[str]:
-        """Get models for a year and make from local catalog."""
-        db = get_database()
-        models = await db.vehicle_catalog.distinct(
-            "model",
-            {"year": year, "make": make.upper()}
-        )
-        return sorted([m for m in models if m])
+        """Get models for a year and make from NHTSA API."""
+        client = NHTSAClient()
+        return await client.get_models_for_make_year(year, make)
 
     @staticmethod
     async def get_discovery_trims(year: int, make: str, model: str) -> list[str]:
-        """Get available trims for a year/make/model from local catalog."""
-        db = get_database()
-        trims = await db.vehicle_catalog.distinct(
-            "trim",
-            {"year": year, "make": make.upper(), "model": model.upper()}
-        )
-        return sorted([t for t in trims if t])
+        """Get available trims for a year/make/model from NHTSA API."""
+        client = NHTSAClient()
+        return await client.get_trims_for_model(year, make, model)
 
     @staticmethod
     async def get_discovery_variants(
         year: int, make: str, model: str, trim: str | None = None
     ) -> list[dict[str, Any]]:
-        """Get vehicle variants with correct vehicleId from local catalog."""
-        db = get_database()
-        query: dict[str, Any] = {
-            "year": year,
-            "make": make.upper(),
-            "model": model.upper(),
-        }
-        if trim:
-            query["trim"] = trim
-        
-        cursor = db.vehicle_catalog.find(query)
-        variants = []
-        async for v in cursor:
-            variants.append({
-                "vehicleId": v.get("vehicle_id"),
-                "ncapId": v.get("ncap_id"),
-                "modelYear": v.get("year"),
-                "make": v.get("make"),
-                "model": v.get("model"),
-                "trim": v.get("trim"),
-                "series": v.get("series"),
-                "vehicleDescription": f"{v.get('model', '')} {v.get('trim', '')} {v.get('series', '')}".strip(),
-            })
-        return variants
+        """Get vehicle variants with correct vehicleId from NHTSA API."""
+        client = NHTSAClient()
+        return await client.get_vehicle_variants(year, make, model, trim)
 
 
