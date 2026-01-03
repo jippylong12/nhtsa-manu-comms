@@ -2,11 +2,12 @@
 
 import { useState, useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Plus, Car, ArrowLeft, Search, Filter, Calendar, TrendingUp } from 'lucide-react';
+import { Plus, Car, ArrowLeft, Search, Filter, Calendar, TrendingUp, HelpCircle } from 'lucide-react';
 
 import { Header } from './components/Header';
 import { VehicleCard } from './features/vehicles/components/VehicleCard';
 import { AddVehicleModal } from './features/vehicles/components/AddVehicleModal';
+import { FilterInfoModal } from './components/FilterInfoModal';
 import { CommunicationList } from './features/communications/components/CommunicationList';
 import { FetchProgressBar } from './features/communications/components/FetchProgress';
 
@@ -37,6 +38,7 @@ const queryClient = new QueryClient({
 // Dashboard View
 function Dashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showFilterInfo, setShowFilterInfo] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<CommType | ''>('');
@@ -215,7 +217,20 @@ function Dashboard() {
                 </button>
               ))}
             </div>
+
+            <button
+              className="btn btn-ghost btn-icon filter-help-btn"
+              onClick={() => setShowFilterInfo(true)}
+              title="Learn about filters"
+            >
+              <HelpCircle size={18} />
+            </button>
           </div>
+
+          <FilterInfoModal
+            isOpen={showFilterInfo}
+            onClose={() => setShowFilterInfo(false)}
+          />
 
           <FetchProgressBar progress={progress} onDismiss={reset} />
 
@@ -391,6 +406,17 @@ function Dashboard() {
             background: var(--type-color, var(--color-primary));
             border-color: var(--type-color, var(--color-primary));
             color: white;
+          }
+
+          .filter-help-btn {
+            margin-left: var(--space-sm);
+            color: var(--text-muted);
+            transition: all var(--transition-fast);
+          }
+
+          .filter-help-btn:hover {
+            color: var(--color-primary);
+            background: var(--bg-elevated);
           }
 
           @media (max-width: 768px) {
