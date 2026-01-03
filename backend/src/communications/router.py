@@ -194,16 +194,30 @@ async def get_models(
 @router.get(
     "/discovery/variants",
     response_model=list[dict[str, Any]],
-    summary="Get vehicle variants",
-    response_description="List of vehicle variants with IDs",
+    summary="Get vehicle variants with vehicleId",
+    response_description="List of vehicle variants with correct vehicleId for communications",
 )
 async def get_variants(
     year: int = Query(..., description="Model year"),
     make: str = Query(..., description="Make name"),
     model: str = Query(..., description="Model name"),
+    trim: Optional[str] = Query(None, description="Body style/trim (e.g., PU/CC, SUV)"),
 ) -> list[dict[str, Any]]:
-    """Get specific vehicle variants and their IDs."""
-    # Using list[dict] instead of VehicleVariant schema because CamelModel might conflict with direct API response
-    return await CommunicationService.get_discovery_variants(year, make, model)
+    """Get specific vehicle variants with their correct vehicleId for communications API."""
+    return await CommunicationService.get_discovery_variants(year, make, model, trim)
 
+
+@router.get(
+    "/discovery/trims",
+    response_model=list[str],
+    summary="Get available trims/body styles for a model",
+    response_description="List of available trims",
+)
+async def get_trims(
+    year: int = Query(..., description="Model year"),
+    make: str = Query(..., description="Make name"),
+    model: str = Query(..., description="Model name"),
+) -> list[str]:
+    """Get available trims/body styles for a specific year/make/model."""
+    return await CommunicationService.get_discovery_trims(year, make, model)
 

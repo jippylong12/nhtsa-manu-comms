@@ -355,9 +355,16 @@ class CommunicationService:
         return await client.get_models_for_make_year(year, make)
 
     @staticmethod
-    async def get_discovery_variants(
-        year: int, make: str, model: str
-    ) -> list[dict[str, Any]]:
-        """Get vehicle variants with IDs."""
+    async def get_discovery_trims(year: int, make: str, model: str) -> list[str]:
+        """Get available trims for a year/make/model."""
         client = NHTSAClient()
-        return await client.get_vehicle_variants(year, make, model)
+        return await client.get_trims_for_model(year, make, model)
+
+    @staticmethod
+    async def get_discovery_variants(
+        year: int, make: str, model: str, trim: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get vehicle variants with correct vehicleId for communications API."""
+        client = NHTSAClient()
+        return await client.get_vehicle_variants(year, make, model, trim)
+

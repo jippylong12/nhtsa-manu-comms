@@ -98,6 +98,7 @@ class NHTSAClient:
 
     async def get_model_years(self) -> list[int]:
         """Fetch available model years from Safety Ratings API."""
+        # SafetyRatings is still fine for year discovery
         url = f"{self.base_url}/SafetyRatings"
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
@@ -116,46 +117,77 @@ class NHTSAClient:
                 return []
 
     async def get_makes_for_year(self, year: int) -> list[str]:
-        """Fetch makes for a given model year."""
-        url = f"{self.base_url}/SafetyRatings/modelyear/{year}"
+        """Fetch makes for a given model year using /vehicles/makes endpoint."""
+        url = f"{self.base_url}/vehicles/makes"
+        params = {"modelYear": year}
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, params=params, headers=self.headers)
                 response.raise_for_status()
                 data = response.json()
-                results = data.get("Results", [])
-                return sorted([r["Make"] for r in results if r.get("Make")])
+                results = data.get("results", [])
+                return sorted(set(r["make"] for r in results if r.get("make")))
             except httpx.RequestError:
                 return []
 
     async def get_models_for_make_year(self, year: int, make: str) -> list[str]:
-        """Fetch models for a given year and make."""
-        # Note: Make needs to be URL encoded if it contains spaces or special chars
-        import urllib.parse
-        encoded_make = urllib.parse.quote(make)
-        url = f"{self.base_url}/SafetyRatings/modelyear/{year}/make/{encoded_make}"
+        """Fetch models for a given year and make using /vehicles/models endpoint."""
+        url = f"{self.base_url}/vehicles/models"
+        params = {"modelYear": year, "make": make}
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, params=params, headers=self.headers)
                 response.raise_for_status()
                 data = response.json()
-                results = data.get("Results", [])
-                return sorted([r["Model"] for r in results if r.get("Model")])
+                results = data.get("results", [])
+                return sorted(set(r["vehicleModel"] for r in results if r.get("vehicleModel")))
             except httpx.RequestError:
                 return []
 
-    async def get_vehicle_variants(self, year: int, make: str, model: str) -> list[dict[str, Any]]:
-        """Fetch specific vehicle variants (with IDs) for Y/M/M."""
-        import urllib.parse
-        encoded_make = urllib.parse.quote(make)
-        encoded_model = urllib.parse.quote(model)
-        url = f"{self.base_url}/SafetyRatings/modelyear/{year}/make/{encoded_make}/model/{encoded_model}"
+    async def get_trims_for_model(self, year: int, make: str, model: str) -> list[str]:
+        """Fetch available trims for a given Y/M/M using /vehicles/trims endpoint."""
+        url = f"{self.base_url}/vehicles/trims"
+        params = {"modelYear": year, "make": make, "model": model}
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, params=params, headers=self.headers)
                 response.raise_for_status()
                 data = response.json()
-                return data.get("Results", [])
+                results = data.get("results", [])
+                return sorted(set(r["trim"] for r in results if r.get("trim")))
+            except httpx.RequestError:
+                return []
+
+    async def get_vehicle_variants(self, year: int, make: str, model: str, trim: str | None = None) -> list[dict[str, Any]]:
+        """Fetch specific vehicle variants with vehicleId using /vehicles/byYmmt endpoint.
+        
+        This is the KEY endpoint that returns the correct vehicleId for use with
+        /vehicles/{vehicleId}/details for manufacturer communications.
+        """
+        url = f"{self.base_url}/vehicles/byYmmt"
+        params: dict[str, Any] = {"modelYear": year, "make": make, "model": model}
+        if trim:
+            params["trim"] = trim
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, params=params, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("results", [])
+                # Return structured variant info with the correct vehicleId
+                variants = []
+                for r in results:
+                    variants.append({
+                        "vehicleId": r.get("vehicleId"),  # This is the CORRECT ID!
+                        "ncapId": r.get("ncapId"),  # SafetyRatings ID (for reference)
+                        "modelYear": r.get("modelYear"),
+                        "make": r.get("make"),
+                        "model": r.get("vehicleModel"),
+                        "trim": r.get("trim"),
+                        "series": r.get("series"),
+                        "vehicleDescription": f"{r.get('vehicleModel', '')} {r.get('trim', '')} {r.get('series', '')}".strip(),
+                    })
+                return variants
             except httpx.RequestError:
                 return []
 
