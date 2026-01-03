@@ -32,8 +32,8 @@ class NHTSAClient:
             response.raise_for_status()
             return response.json()
 
-    async def get_safety_issue(self, nhtsa_id: int) -> dict[str, Any] | None:
-        """Fetch a single manufacturer communication by NHTSA ID."""
+    async def get_safety_issue(self, nhtsa_id: int, max_retries: int = 3) -> dict[str, Any] | None:
+        """Fetch a single manufacturer communication by NHTSA ID with retry logic."""
         url = f"{self.base_url}/safetyIssues/byNhtsaId"
         params = {
             "offset": 0,
@@ -45,15 +45,25 @@ class NHTSAClient:
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, params=params, headers=self.headers)
-                if response.status_code == 403:
+            for attempt in range(max_retries):
+                try:
+                    response = await client.get(url, params=params, headers=self.headers)
+                    if response.status_code == 403:
+                        # Rate limited - wait and retry with exponential backoff
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt  # 1s, 2s, 4s
+                            await asyncio.sleep(wait_time)
+                            continue
+                        return None
+                    response.raise_for_status()
+                    data = response.json()
+                    return self._extract_communication(data, nhtsa_id)
+                except httpx.RequestError:
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1)
+                        continue
                     return None
-                response.raise_for_status()
-                data = response.json()
-                return self._extract_communication(data, nhtsa_id)
-            except httpx.RequestError:
-                return None
+        return None
 
     def _extract_communication(
         self, response: dict[str, Any], target_id: int
@@ -81,13 +91,15 @@ class NHTSAClient:
     async def fetch_communications_batch(
         self,
         nhtsa_ids: list[int],
-        max_concurrent: int = 5,
+        max_concurrent: int = 3,  # Reduced from 5 to avoid rate limiting
     ) -> AsyncGenerator[tuple[int, dict[str, Any] | None], None]:
         """Fetch multiple communications with controlled concurrency."""
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def fetch_with_semaphore(nhtsa_id: int) -> tuple[int, dict[str, Any] | None]:
             async with semaphore:
+                # Small delay to prevent bursting
+                await asyncio.sleep(0.2)
                 result = await self.get_safety_issue(nhtsa_id)
                 return nhtsa_id, result
 

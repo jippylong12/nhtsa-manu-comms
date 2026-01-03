@@ -336,11 +336,11 @@ class CommunicationService:
             "categories": categories,
         }
 
-    # Top 20 US car manufacturers by 2024 sales
+    # Top 21 US car manufacturers by 2024 sales (sorted alphabetically)
     TOP_MAKES = [
-        "TOYOTA", "FORD", "CHEVROLET", "HONDA", "NISSAN", "HYUNDAI", "KIA",
-        "SUBARU", "GMC", "JEEP", "RAM", "MAZDA", "VOLKSWAGEN", "BMW", "LEXUS",
-        "MERCEDES-BENZ", "AUDI", "BUICK", "CADILLAC", "DODGE", "TESLA",
+        "AUDI", "BMW", "BUICK", "CADILLAC", "CHEVROLET", "DODGE", "FORD",
+        "GMC", "HONDA", "HYUNDAI", "JEEP", "KIA", "LEXUS", "MAZDA",
+        "MERCEDES-BENZ", "NISSAN", "RAM", "SUBARU", "TESLA", "TOYOTA", "VOLKSWAGEN",
     ]
 
     @staticmethod
