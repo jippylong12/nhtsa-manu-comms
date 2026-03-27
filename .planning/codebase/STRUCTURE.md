@@ -39,26 +39,47 @@ nhtsa-manu-comms/
 │   │   │   ├── index.ts        # Barrel export
 │   │   │   ├── types.ts        # TypeScript interfaces (mirrors backend schemas)
 │   │   │   └── vehicles.ts     # Vehicle API functions
+│   │   ├── contexts/           # React context providers
+│   │   │   └── AppContext.tsx       # Global UI state (useReducer)
 │   │   ├── components/         # Shared UI components
-│   │   │   ├── FilterInfoModal.tsx  # Filter help modal (441 lines)
-│   │   │   └── Header.tsx           # App header (119 lines)
+│   │   │   ├── layout/             # Layout components
+│   │   │   │   ├── AppShell.tsx     # Two-column layout shell
+│   │   │   │   ├── AppShell.module.css
+│   │   │   │   ├── Sidebar.tsx      # Vehicle list sidebar
+│   │   │   │   ├── Sidebar.module.css
+│   │   │   │   ├── SidebarVehicleItem.tsx
+│   │   │   │   ├── SidebarVehicleItem.module.css
+│   │   │   │   ├── StatsBar.tsx     # Reusable stat chips
+│   │   │   │   └── StatsBar.module.css
+│   │   │   ├── FilterInfoModal.tsx  # Filter help modal
+│   │   │   ├── FilterInfoModal.module.css
+│   │   │   ├── Header.tsx           # App header
+│   │   │   └── Header.module.css
 │   │   ├── features/           # Feature-organized code
 │   │   │   ├── communications/
 │   │   │   │   ├── components/
-│   │   │   │   │   ├── CommunicationList.tsx  # Comm list view (415 lines)
-│   │   │   │   │   └── FetchProgress.tsx      # SSE progress bar (156 lines)
+│   │   │   │   │   ├── CommunicationList.tsx       # Comm list view
+│   │   │   │   │   ├── CommunicationList.module.css
+│   │   │   │   │   ├── CommunicationsView.tsx      # Full comms page (filters, stats, list)
+│   │   │   │   │   ├── CommunicationsView.module.css
+│   │   │   │   │   ├── FetchProgress.tsx           # SSE progress bar
+│   │   │   │   │   └── FetchProgress.module.css
 │   │   │   │   └── hooks/
 │   │   │   │       ├── useCommunications.ts   # Query + fetch hooks
 │   │   │   │       └── useDiscovery.ts        # Vehicle discovery hooks
 │   │   │   ├── vehicles/
 │   │   │   │   ├── components/
-│   │   │   │   │   ├── AddVehicleModal.tsx     # Add vehicle form (433 lines)
-│   │   │   │   │   └── VehicleCard.tsx         # Vehicle card (180 lines)
+│   │   │   │   │   ├── AddVehicleModal.tsx     # Add vehicle form
+│   │   │   │   │   ├── AddVehicleModal.module.css
+│   │   │   │   │   ├── VehicleCard.tsx         # Vehicle card
+│   │   │   │   │   ├── VehicleCard.module.css
+│   │   │   │   │   ├── VehicleGrid.tsx         # Vehicle grid overview
+│   │   │   │   │   └── VehicleGrid.module.css
 │   │   │   │   └── hooks/
 │   │   │   │       └── useVehicles.ts          # Vehicle CRUD hooks
 │   │   │   └── queryKeys.ts    # React Query key factory
 │   │   ├── assets/             # Static assets
-│   │   ├── App.tsx             # Root component + Dashboard (659 lines)
+│   │   ├── App.tsx             # Root component — slim shell (90 lines)
 │   │   ├── main.tsx            # React DOM entry point
 │   │   └── index.css           # Global styles
 │   ├── dist/                   # Built output
@@ -111,9 +132,19 @@ nhtsa-manu-comms/
 - Contains: `communications/` and `vehicles/` feature modules
 - Key files: `queryKeys.ts` (shared query key factory)
 
+**`frontend/src/contexts/`:**
+- Purpose: React context providers for global state
+- Contains: AppContext (selectedVehicleId, showAddModal via useReducer)
+- Key files: `AppContext.tsx`
+
+**`frontend/src/components/layout/`:**
+- Purpose: Layout shell and navigation components
+- Contains: AppShell (two-column layout), Sidebar, SidebarVehicleItem, StatsBar
+- Key files: `AppShell.tsx` (react-resizable-panels), `Sidebar.tsx`
+
 **`frontend/src/components/`:**
 - Purpose: Shared/cross-feature UI components
-- Contains: Header, FilterInfoModal
+- Contains: Header, FilterInfoModal, layout/
 - Key files: `Header.tsx`, `FilterInfoModal.tsx`
 
 ## Key File Locations
