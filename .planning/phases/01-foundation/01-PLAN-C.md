@@ -1,0 +1,464 @@
+---
+phase: 1
+plan: C
+title: App.tsx Decomposition + CSS Migration
+wave: 2
+depends_on: [A, B]
+files_modified:
+  - frontend/src/App.tsx
+  - frontend/src/contexts/AppContext.tsx
+  - frontend/src/features/communications/components/CommunicationsView.tsx
+  - frontend/src/features/communications/components/CommunicationsView.module.css
+  - frontend/src/features/vehicles/components/VehicleGrid.tsx
+  - frontend/src/features/vehicles/components/VehicleGrid.module.css
+  - frontend/src/components/Header.tsx
+  - frontend/src/components/layout/StatsBar.tsx
+  - frontend/src/components/layout/StatsBar.module.css
+  - frontend/src/features/communications/components/CommunicationList.module.css
+  - frontend/src/features/vehicles/components/VehicleCard.module.css
+  - frontend/src/features/vehicles/components/AddVehicleModal.module.css
+  - frontend/src/components/FilterInfoModal.module.css
+  - frontend/src/features/communications/components/FetchProgress.module.css
+requirements_addressed: [LAYOUT-04, LAYOUT-05]
+autonomous: true
+estimated_effort: large
+---
+
+# Plan C: App.tsx Decomposition + CSS Migration
+
+<objective>
+Decompose the 658-line App.tsx God component into focused components with explicit state ownership (AppContext for global state, view-local state for page-scoped concerns). Migrate all inline `<style>` blocks to CSS modules. The result: App.tsx under 100 lines, no prop chains deeper than 2 levels, zero hardcoded hex values in component files.
+</objective>
+
+## Tasks
+
+<task id="C1">
+<title>Create AppContext for global UI state</title>
+<read_first>
+- frontend/src/App.tsx (lines 39-55 — all useState declarations, identify which state is global vs view-local)
+- frontend/src/client/types.ts (Vehicle type, CommType type — used in state)
+- .planning/phases/01-foundation/01-RESEARCH.md (state ownership map)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-05 — AppContext provider, no prop drilling)
+</read_first>
+<action>
+Create `frontend/src/contexts/` directory.
+
+Create `frontend/src/contexts/AppContext.tsx`:
+```tsx
+import { createContext, useContext, useReducer, type ReactNode, type Dispatch } from 'react';
+
+interface AppState {
+  selectedVehicleId: number | null;
+  showAddModal: boolean;
+}
+
+type AppAction =
+  | { type: 'SELECT_VEHICLE'; payload: number | null }
+  | { type: 'OPEN_ADD_MODAL' }
+  | { type: 'CLOSE_ADD_MODAL' };
+
+function appReducer(state: AppState, action: AppAction): AppState {
+  switch (action.type) {
+    case 'SELECT_VEHICLE':
+      return { ...state, selectedVehicleId: action.payload };
+    case 'OPEN_ADD_MODAL':
+      return { ...state, showAddModal: true };
+    case 'CLOSE_ADD_MODAL':
+      return { ...state, showAddModal: false };
+    default:
+      return state;
+  }
+}
+
+const initialState: AppState = {
+  selectedVehicleId: null,
+  showAddModal: false,
+};
+
+const AppStateContext = createContext<AppState>(initialState);
+const AppDispatchContext = createContext<Dispatch<AppAction>>(() => {});
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(appReducer, initialState);
+  return (
+    <AppStateContext.Provider value={state}>
+      <AppDispatchContext.Provider value={dispatch}>
+        {children}
+      </AppDispatchContext.Provider>
+    </AppStateContext.Provider>
+  );
+}
+
+export function useAppState() {
+  return useContext(AppStateContext);
+}
+
+export function useAppDispatch() {
+  return useContext(AppDispatchContext);
+}
+```
+
+This context holds only global UI state: `selectedVehicleId` (drives sidebar + content view) and `showAddModal` (triggered from sidebar, renders in root). Filter state (`searchTerm`, `selectedTypes`) is view-local and stays in CommunicationsView. The separate state/dispatch contexts prevent unnecessary re-renders — components reading only state don't re-render when dispatch reference changes.
+</action>
+<acceptance_criteria>
+- `frontend/src/contexts/AppContext.tsx` exists and exports `AppProvider`, `useAppState`, `useAppDispatch`
+- AppState contains `selectedVehicleId: number | null` and `showAddModal: boolean`
+- AppAction has `SELECT_VEHICLE`, `OPEN_ADD_MODAL`, `CLOSE_ADD_MODAL` types
+- Uses `useReducer` (not `useState`) for the reducer pattern
+- Separate `AppStateContext` and `AppDispatchContext` for re-render optimization
+- No external dependencies (only React imports)
+- `import type` used for ReactNode and Dispatch
+</acceptance_criteria>
+</task>
+
+<task id="C2">
+<title>Create CommunicationsView component (extracts comms-specific logic from App.tsx)</title>
+<read_first>
+- frontend/src/App.tsx (lines 55-350 — the entire communications rendering section: filters, stats, CommunicationList, FetchProgressBar, filter buttons, search input)
+- frontend/src/features/communications/hooks/useCommunications.ts (useCommunicationsQuery, useFetchCommunications, useVehicleStatsQuery signatures)
+- frontend/src/client/types.ts (CommType, CommPriority, CommunicationFilters types)
+- frontend/src/client/index.ts (COMM_TYPE_COLORS, COMM_PRIORITY_TYPES, PRIORITY_COLORS exports)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-06 — decompose by feature area, each owns its styles)
+</read_first>
+<action>
+Create `frontend/src/features/communications/components/CommunicationsView.tsx`:
+
+This component extracts ALL communications-specific rendering from App.tsx Dashboard. It owns:
+- `searchTerm` state (view-local)
+- `selectedTypes` state (view-local)
+- `showFilterInfo` state (view-local)
+- Stats rendering (StatsBar integration)
+- Filter bar (search input, type filter buttons)
+- CommunicationList rendering
+- FetchProgressBar rendering
+
+It receives from parent:
+- `vehicleId: number` (from AppContext — the parent provides it)
+- `vehicle: Vehicle` (for display purposes)
+
+The component reads `useCommunicationsQuery`, `useFetchCommunications`, and `useVehicleStatsQuery` directly — these hooks already exist and manage all server state.
+
+The component preserves ALL existing filter logic, type filter button rendering, stats grid rendering, and communication list rendering from App.tsx. Move the JSX and logic wholesale — do not rewrite business logic.
+
+Move all communications-related inline styles from App.tsx into `CommunicationsView.module.css`. This includes the styles for: `.vehicle-banner`, `.stats-grid`, `.stat-card`, `.filters-bar`, `.search-box`, `.type-filter-btn`, `.comm-count`, and all related classes.
+
+Replace any hardcoded hex values found in the migrated styles with CSS custom property references:
+- `${typeColor}20` patterns → `color-mix(in srgb, var(--type-color) 12%, transparent)`
+- Any remaining hardcoded colors → appropriate `var(--bg-*)`, `var(--text-*)`, or `var(--border-*)` tokens
+
+Create `frontend/src/features/communications/components/CommunicationsView.module.css` with all the extracted styles converted to use CSS custom properties.
+</action>
+<acceptance_criteria>
+- `frontend/src/features/communications/components/CommunicationsView.tsx` exists and exports `CommunicationsView`
+- `frontend/src/features/communications/components/CommunicationsView.module.css` exists
+- CommunicationsView accepts `vehicleId` and `vehicle` props
+- CommunicationsView contains `searchTerm`, `selectedTypes`, `showFilterInfo` as local useState
+- CommunicationsView calls `useCommunicationsQuery`, `useFetchCommunications`, `useVehicleStatsQuery` directly
+- CommunicationsView renders the filter bar, stats grid, and CommunicationList
+- CSS module contains no hardcoded hex values (grep for `#[0-9a-fA-F]` returns 0 matches)
+- All filter logic preserved from App.tsx (search filtering, type filtering, sorted communications)
+</acceptance_criteria>
+</task>
+
+<task id="C3">
+<title>Create VehicleGrid component (extracts vehicle cards from App.tsx)</title>
+<read_first>
+- frontend/src/App.tsx (lines 350-450 — vehicle grid rendering: hero section, vehicles-grid, VehicleCard mapping)
+- frontend/src/features/vehicles/components/VehicleCard.tsx (VehicleCard props and interface)
+- frontend/src/index.css (token system)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-06 — each feature area owns its styles)
+</read_first>
+<action>
+Create `frontend/src/features/vehicles/components/VehicleGrid.tsx`:
+
+This component renders the vehicle card grid shown when no vehicle is selected (the "overview" / landing view). It extracts from App.tsx:
+- The hero section with "NHTSA Comms Tracker" title and stats
+- The vehicles grid mapping over vehicles array
+- VehicleCard rendering with all props (onSelect, onDelete, onFetch handlers)
+
+Props:
+- `vehicles: Vehicle[]`
+- `isLoading: boolean`
+- `onSelectVehicle: (id: number) => void`
+- `onDeleteVehicle: (id: number) => void`
+- `onFetchComms: (vehicle: Vehicle) => void`
+
+Create `frontend/src/features/vehicles/components/VehicleGrid.module.css` with the hero section and vehicles-grid styles extracted from App.tsx inline styles, converted to use CSS custom properties.
+</action>
+<acceptance_criteria>
+- `frontend/src/features/vehicles/components/VehicleGrid.tsx` exists and exports `VehicleGrid`
+- `frontend/src/features/vehicles/components/VehicleGrid.module.css` exists
+- VehicleGrid renders VehicleCard components for each vehicle
+- VehicleGrid accepts `vehicles`, `isLoading`, `onSelectVehicle`, `onDeleteVehicle`, `onFetchComms` props
+- CSS module contains no hardcoded hex values
+- Hero section title and stats are preserved from App.tsx
+</acceptance_criteria>
+</task>
+
+<task id="C4">
+<title>Extract StatsBar component</title>
+<read_first>
+- frontend/src/App.tsx (find the stats-grid rendering section — it shows communication type counts as stat cards)
+- frontend/src/features/communications/hooks/useCommunications.ts (useVehicleStatsQuery return shape)
+- frontend/src/client/index.ts (COMM_TYPE_COLORS, PRIORITY_COLORS exports)
+- frontend/src/index.css (token system)
+</read_first>
+<action>
+Create `frontend/src/components/layout/StatsBar.tsx`:
+
+This component extracts the horizontal stat chips/cards that display communication type counts above the communications list. It receives stats data as props and renders the category stat cards.
+
+Props:
+- `stats: Record<string, number>` (type → count mapping from useVehicleStatsQuery)
+- `onStatClick?: (type: string) => void` (optional: clicking a stat filters by that type)
+
+Create `frontend/src/components/layout/StatsBar.module.css` with the stats-grid and stat-card styles, converted to use CSS custom properties. Replace any `${typeColor}` dynamic values with CSS custom property patterns using `style={{ '--type-color': color } as React.CSSProperties}` on the card element.
+</action>
+<acceptance_criteria>
+- `frontend/src/components/layout/StatsBar.tsx` exists and exports `StatsBar`
+- `frontend/src/components/layout/StatsBar.module.css` exists
+- StatsBar accepts `stats` prop (type → count record)
+- StatsBar renders a horizontal grid of stat items
+- CSS module contains no hardcoded hex values
+- Dynamic type colors use CSS custom property override pattern (`--type-color`)
+</acceptance_criteria>
+</task>
+
+<task id="C5">
+<title>Migrate existing component inline styles to CSS modules</title>
+<read_first>
+- frontend/src/features/communications/components/CommunicationList.tsx (find all `<style>` blocks — extract to CSS module)
+- frontend/src/features/vehicles/components/VehicleCard.tsx (find all `<style>` blocks)
+- frontend/src/features/vehicles/components/AddVehicleModal.tsx (find all `<style>` blocks)
+- frontend/src/components/FilterInfoModal.tsx (find all `<style>` blocks)
+- frontend/src/features/communications/components/FetchProgress.tsx (find all `<style>` blocks)
+- frontend/src/index.css (token system — use for replacements)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-08, D-09, D-10 — CSS modules, full token audit, fix escaped-token patterns)
+</read_first>
+<action>
+For each component with inline `<style>` blocks:
+
+1. **CommunicationList.tsx**: Extract inline styles to `frontend/src/features/communications/components/CommunicationList.module.css`. Replace class name references in JSX with `styles.className` imports. Remove the `<style>` block. Replace hardcoded values with tokens.
+
+2. **VehicleCard.tsx**: Extract to `frontend/src/features/vehicles/components/VehicleCard.module.css`. Same process.
+
+3. **AddVehicleModal.tsx**: Extract to `frontend/src/features/vehicles/components/AddVehicleModal.module.css`. Same process.
+
+4. **FilterInfoModal.tsx**: Extract to `frontend/src/components/FilterInfoModal.module.css`. Same process.
+
+5. **FetchProgress.tsx**: Extract to `frontend/src/features/communications/components/FetchProgress.module.css`. Same process.
+
+For each migration:
+- Move all CSS from `<style>{...}</style>` blocks into the `.module.css` file
+- Convert class names: `className="comm-row"` becomes `className={styles.commRow}` (camelCase)
+- Replace hardcoded hex colors with CSS custom property references from `index.css`
+- Replace hardcoded spacing (px values for padding, margin, gap) with `var(--space-*)` tokens where they match
+- Replace hardcoded font-size values with `var(--font-size-*)` tokens
+- Replace `${typeColor}20` hex-alpha patterns with `color-mix(in srgb, var(--type-color) 12%, transparent)`
+- Remove the inline `<style>` block from the component after extraction
+- Add `import styles from './ComponentName.module.css';` to the component
+
+IMPORTANT: Do NOT change any component logic or props — only the style migration. All rendering, event handlers, and data flow stay identical.
+</action>
+<acceptance_criteria>
+- `CommunicationList.module.css` exists in `frontend/src/features/communications/components/`
+- `VehicleCard.module.css` exists in `frontend/src/features/vehicles/components/`
+- `AddVehicleModal.module.css` exists in `frontend/src/features/vehicles/components/`
+- `FilterInfoModal.module.css` exists in `frontend/src/components/`
+- `FetchProgress.module.css` exists in `frontend/src/features/communications/components/`
+- No `<style>` blocks remain in any of the 5 migrated component files (grep for `<style>` returns 0 matches)
+- Each component imports `styles from './ComponentName.module.css'`
+- CSS modules contain no hardcoded hex values (grep for `#[0-9a-fA-F]` in `.module.css` files returns 0 outside token definitions)
+- All components still render correctly (no missing styles — verify class name mapping is complete)
+- No component logic or props changed — only style extraction
+</acceptance_criteria>
+</task>
+
+<task id="C6">
+<title>Rewrite App.tsx to slim shell using AppShell + AppContext</title>
+<read_first>
+- frontend/src/App.tsx (read the ENTIRE file — understand every import, state, handler, and JSX block before rewriting)
+- frontend/src/contexts/AppContext.tsx (from task C1 — use AppProvider, useAppState, useAppDispatch)
+- frontend/src/components/layout/AppShell.tsx (from Plan B task B1 — renders sidebar + main)
+- frontend/src/components/layout/Sidebar.tsx (from Plan B task B2 — sidebar component)
+- frontend/src/features/communications/components/CommunicationsView.tsx (from task C2)
+- frontend/src/features/vehicles/components/VehicleGrid.tsx (from task C3)
+- frontend/src/features/vehicles/components/AddVehicleModal.tsx (modal still renders at root)
+- frontend/src/features/vehicles/hooks/useVehicles.ts (useVehiclesQuery, useCreateVehicle, useDeleteVehicle)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-05, D-06, D-07 decisions)
+- .planning/research/ARCHITECTURE.md (AppShell pattern, data flow)
+</read_first>
+<action>
+Rewrite `frontend/src/App.tsx` to approximately this structure (under 100 lines):
+
+```tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AppProvider, useAppState, useAppDispatch } from './contexts/AppContext';
+import { AppShell } from './components/layout/AppShell';
+import { Sidebar } from './components/layout/Sidebar';
+import { CommunicationsView } from './features/communications/components/CommunicationsView';
+import { VehicleGrid } from './features/vehicles/components/VehicleGrid';
+import { AddVehicleModal } from './features/vehicles/components/AddVehicleModal';
+import { useVehiclesQuery, useCreateVehicle, useDeleteVehicle } from './features/vehicles/hooks/useVehicles';
+import { useFetchCommunications } from './features/communications/hooks/useCommunications';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: 1,
+    },
+  },
+});
+
+function Dashboard() {
+  const { selectedVehicleId, showAddModal } = useAppState();
+  const dispatch = useAppDispatch();
+
+  const { data: vehiclesData, isLoading: vehiclesLoading } = useVehiclesQuery();
+  const { mutate: createVehicle, isPending: isCreating } = useCreateVehicle();
+  const { mutate: deleteVehicle } = useDeleteVehicle();
+  const { fetch: fetchComms } = useFetchCommunications();
+
+  const vehicles = vehiclesData?.items ?? [];
+  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) ?? null;
+
+  return (
+    <AppShell
+      sidebar={
+        <Sidebar
+          vehicles={vehicles}
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={(id) => dispatch({ type: 'SELECT_VEHICLE', payload: id })}
+          onAddVehicle={() => dispatch({ type: 'OPEN_ADD_MODAL' })}
+          isLoading={vehiclesLoading}
+        />
+      }
+    >
+      {selectedVehicle ? (
+        <CommunicationsView vehicleId={selectedVehicle.id} vehicle={selectedVehicle} />
+      ) : (
+        <VehicleGrid
+          vehicles={vehicles}
+          isLoading={vehiclesLoading}
+          onSelectVehicle={(id) => dispatch({ type: 'SELECT_VEHICLE', payload: id })}
+          onDeleteVehicle={(id) => deleteVehicle(id)}
+          onFetchComms={(vehicle) => fetchComms({ vehicleId: vehicle.id })}
+        />
+      )}
+
+      {showAddModal && (
+        <AddVehicleModal
+          onClose={() => dispatch({ type: 'CLOSE_ADD_MODAL' })}
+          onSubmit={createVehicle}
+          isCreating={isCreating}
+        />
+      )}
+    </AppShell>
+  );
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppProvider>
+        <Dashboard />
+      </AppProvider>
+    </QueryClientProvider>
+  );
+}
+```
+
+IMPORTANT: Verify that every feature and handler from the original App.tsx is accounted for in one of the extracted components. Nothing should be lost:
+- Vehicle selection → AppContext dispatch
+- Vehicle creation → AddVehicleModal (still renders at root level)
+- Vehicle deletion → VehicleGrid prop
+- Communication fetching → CommunicationsView internal + VehicleGrid prop
+- Search and type filtering → CommunicationsView internal state
+- Stats display → CommunicationsView internal (via StatsBar)
+- Filter info modal → CommunicationsView internal
+
+Remove the old Header component import from App.tsx — the Header's functionality is now split between the Sidebar (branding, nav) and CommunicationsView (page-level header).
+
+Remove ALL inline `<style>` blocks from App.tsx. The rewritten App.tsx should have ZERO `<style>` blocks and ZERO CSS.
+</action>
+<acceptance_criteria>
+- `frontend/src/App.tsx` is under 100 lines (verify with `wc -l frontend/src/App.tsx`)
+- App.tsx imports and renders `AppProvider`, `AppShell`, `Sidebar`, `CommunicationsView`, `VehicleGrid`, `AddVehicleModal`
+- App.tsx has ZERO `<style>` blocks (grep for `<style>` returns 0 matches)
+- App.tsx has ZERO hardcoded CSS or inline style objects
+- `selectedVehicleId` is accessed via `useAppState()` (not useState)
+- `showAddModal` is accessed via `useAppState()` (not useState)
+- State changes use `dispatch({ type: '...' })` pattern (not setState)
+- No prop is passed through more than 2 component levels (App → child → grandchild max)
+- `QueryClientProvider` wraps everything at the top level
+- `AppProvider` wraps `Dashboard` inside `QueryClientProvider`
+- The application compiles: `cd frontend && npx tsc --noEmit` exits 0
+</acceptance_criteria>
+</task>
+
+<task id="C7">
+<title>Final token audit — verify zero hardcoded values in component files</title>
+<read_first>
+- frontend/src/index.css (the authoritative token source)
+- All .module.css files created in this plan
+- All .tsx files in frontend/src/ (check for inline style objects with hardcoded values)
+</read_first>
+<action>
+Run a comprehensive audit:
+
+1. Search for hardcoded hex colors in all component and CSS module files:
+   ```bash
+   grep -rn '#[0-9a-fA-F]\{3,8\}' frontend/src/ --include='*.tsx' --include='*.module.css' | grep -v 'index.css' | grep -v 'node_modules'
+   ```
+
+2. Search for hardcoded hsl values outside index.css:
+   ```bash
+   grep -rn 'hsl(' frontend/src/ --include='*.tsx' --include='*.module.css' | grep -v 'index.css'
+   ```
+
+3. Search for remaining inline `<style>` blocks:
+   ```bash
+   grep -rn '<style>' frontend/src/ --include='*.tsx'
+   ```
+
+4. Verify App.tsx line count:
+   ```bash
+   wc -l frontend/src/App.tsx
+   ```
+
+Fix any violations found:
+- Hardcoded hex → replace with appropriate `var(--color-*)` or `var(--bg-*)` token
+- Hardcoded hsl → replace with token reference
+- Remaining `<style>` blocks → extract to CSS module
+- App.tsx over 100 lines → identify and extract remaining logic
+
+NOTE: Some components may legitimately use `style={{ '--type-color': dynamicColor }}` as CSS custom property overrides — these are acceptable and should NOT be flagged. Only hardcoded visual values in JSX `style={{}}` objects are violations.
+</action>
+<acceptance_criteria>
+- `grep -rn '#[0-9a-fA-F]' frontend/src/ --include='*.tsx' --include='*.module.css' | grep -v 'index.css'` returns 0 results (or only legitimate dynamic CSS custom property patterns)
+- `grep -rn 'hsl(' frontend/src/ --include='*.tsx' --include='*.module.css' | grep -v 'index.css'` returns 0 results
+- `grep -rn '<style>' frontend/src/ --include='*.tsx'` returns 0 results
+- `wc -l frontend/src/App.tsx` shows under 100 lines
+- `cd frontend && npx tsc --noEmit` exits 0 (TypeScript compilation passes)
+- Application renders correctly with no missing styles (visual verification)
+</acceptance_criteria>
+</task>
+
+## Verification
+
+<must_haves>
+- [ ] App.tsx is under 100 lines with zero inline styles
+- [ ] Global state (selectedVehicleId, showAddModal) lives in AppContext with useReducer
+- [ ] View-local state (searchTerm, selectedTypes, showFilterInfo) lives in CommunicationsView
+- [ ] No prop chains deeper than 2 levels anywhere in the component tree
+- [ ] All inline `<style>` blocks removed from every component
+- [ ] All component styles live in co-located CSS modules (.module.css files)
+- [ ] Zero hardcoded hex/hsl values in component files (only in index.css :root)
+- [ ] Header sticky behavior preserved — header and filter bar stay fixed at top during scroll
+- [ ] All existing functionality preserved — vehicle selection, communication filtering, stats display, modals
+- [ ] TypeScript compilation passes with no errors
+</must_haves>
+
+---
+*Plan C — Phase 01-foundation — Wave 2*

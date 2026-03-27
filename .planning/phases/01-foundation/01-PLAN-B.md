@@ -1,0 +1,444 @@
+---
+phase: 1
+plan: B
+title: AppShell Layout + Sidebar Component
+wave: 1
+depends_on: []
+files_modified:
+  - frontend/src/components/layout/AppShell.tsx
+  - frontend/src/components/layout/AppShell.module.css
+  - frontend/src/components/layout/Sidebar.tsx
+  - frontend/src/components/layout/Sidebar.module.css
+  - frontend/src/components/layout/SidebarVehicleItem.tsx
+  - frontend/src/components/layout/SidebarVehicleItem.module.css
+requirements_addressed: [LAYOUT-01, LAYOUT-02, LAYOUT-03]
+autonomous: true
+estimated_effort: medium
+---
+
+# Plan B: AppShell Layout + Sidebar Component
+
+<objective>
+Create the CSS Grid layout shell (`AppShell`) with sidebar and main content area as two independent scroll surfaces. Build the `Sidebar` component with vehicle list using `react-resizable-panels` for resize/collapse. This establishes the two-column layout that all Phase 2+ features slot into.
+</objective>
+
+## Tasks
+
+<task id="B1">
+<title>Create AppShell layout component with CSS Grid</title>
+<read_first>
+- frontend/src/index.css (token system — use only CSS custom properties for all values)
+- frontend/src/App.tsx (current full-page layout structure — understand what AppShell replaces)
+- .planning/research/ARCHITECTURE.md (AppShell pattern, grid spec, responsive breakpoints)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-11, D-12, D-13 decisions — 3-row + sidebar grid, two scroll surfaces, 240px default)
+- .planning/research/PITFALLS.md (Pitfall 1 — sidebar scroll contract)
+</read_first>
+<action>
+Create `frontend/src/components/layout/` directory.
+
+Create `frontend/src/components/layout/AppShell.tsx`:
+```tsx
+import { type ReactNode } from 'react';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import styles from './AppShell.module.css';
+
+interface AppShellProps {
+  sidebar: ReactNode;
+  children: ReactNode;
+}
+
+export function AppShell({ sidebar, children }: AppShellProps) {
+  return (
+    <div className={styles.shell}>
+      <PanelGroup direction="horizontal" autoSaveId="app-layout">
+        <Panel
+          defaultSize={20}
+          minSize={15}
+          maxSize={30}
+          collapsible
+          collapsedSize={0}
+          className={styles.sidebarPanel}
+        >
+          <aside className={styles.sidebar}>
+            {sidebar}
+          </aside>
+        </Panel>
+        <PanelResizeHandle className={styles.resizeHandle} />
+        <Panel minSize={50} className={styles.mainPanel}>
+          <main className={styles.main}>
+            {children}
+          </main>
+        </Panel>
+      </PanelGroup>
+    </div>
+  );
+}
+```
+
+Create `frontend/src/components/layout/AppShell.module.css`:
+```css
+.shell {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.sidebarPanel {
+  min-width: 0;
+}
+
+.sidebar {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+
+.resizeHandle {
+  width: 4px;
+  background: transparent;
+  transition: background var(--transition-fast);
+  cursor: col-resize;
+  position: relative;
+}
+
+.resizeHandle:hover,
+.resizeHandle[data-resize-handle-active] {
+  background: var(--color-primary);
+}
+
+.mainPanel {
+  min-width: 0;
+}
+
+.main {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-base);
+}
+```
+
+The `PanelGroup` with `autoSaveId="app-layout"` automatically persists the sidebar width to localStorage. The `collapsible` prop with `collapsedSize={0}` enables collapse-to-zero. Both `.sidebar` and `.main` get independent `overflow-y: auto` for the two-scroll-surface model.
+</action>
+<acceptance_criteria>
+- `frontend/src/components/layout/AppShell.tsx` exists and exports `AppShell`
+- `frontend/src/components/layout/AppShell.module.css` exists
+- AppShell.tsx imports from `react-resizable-panels` (PanelGroup, Panel, PanelResizeHandle)
+- CSS uses `height: 100vh` on `.shell`
+- CSS uses `overflow: hidden` on `.shell` (prevents body scroll leak)
+- CSS uses `overflow-y: auto` on both `.sidebar` and `.main` (two independent scroll surfaces)
+- CSS references only CSS custom properties for colors and transitions (no hardcoded hex/hsl values)
+- `PanelGroup` has `autoSaveId="app-layout"` for persistence
+- Panel has `collapsible` prop
+</acceptance_criteria>
+</task>
+
+<task id="B2">
+<title>Create Sidebar component with vehicle list</title>
+<read_first>
+- frontend/src/App.tsx (lines 80-200 — current vehicle list rendering, vehicle selection handler, "Add Vehicle" button)
+- frontend/src/features/vehicles/components/VehicleCard.tsx (existing vehicle display patterns — understand props and styling)
+- frontend/src/features/vehicles/hooks/useVehicles.ts (useVehiclesQuery hook signature)
+- frontend/src/index.css (token system for consistent styling)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-01 compact list, D-02 click to select, D-04 Add Vehicle button position)
+</read_first>
+<action>
+Create `frontend/src/components/layout/Sidebar.tsx`:
+```tsx
+import { Plus } from 'lucide-react';
+import { SidebarVehicleItem } from './SidebarVehicleItem';
+import styles from './Sidebar.module.css';
+import type { Vehicle } from '../../client';
+
+interface SidebarProps {
+  vehicles: Vehicle[];
+  selectedVehicleId: number | null;
+  onSelectVehicle: (id: number | null) => void;
+  onAddVehicle: () => void;
+  isLoading?: boolean;
+}
+
+export function Sidebar({
+  vehicles,
+  selectedVehicleId,
+  onSelectVehicle,
+  onAddVehicle,
+  isLoading,
+}: SidebarProps) {
+  return (
+    <div className={styles.sidebar}>
+      <div className={styles.header}>
+        <button
+          className={styles.overviewButton}
+          onClick={() => onSelectVehicle(null)}
+          data-active={selectedVehicleId === null}
+        >
+          All Vehicles
+        </button>
+        <button
+          className={styles.addButton}
+          onClick={onAddVehicle}
+          title="Add Vehicle"
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+      <div className={styles.vehicleList}>
+        {isLoading ? (
+          Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className={styles.skeleton} />
+          ))
+        ) : (
+          vehicles.map((vehicle) => (
+            <SidebarVehicleItem
+              key={vehicle.id}
+              vehicle={vehicle}
+              isSelected={vehicle.id === selectedVehicleId}
+              onSelect={() => onSelectVehicle(vehicle.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+Create `frontend/src/components/layout/Sidebar.module.css`:
+```css
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-sm) 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xs) var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.overviewButton {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm, 0.75rem);
+  font-weight: var(--font-weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.overviewButton:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.overviewButton[data-active="true"] {
+  color: var(--color-primary);
+  background: var(--bg-active);
+}
+
+.addButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.addButton:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: var(--bg-hover);
+}
+
+.vehicleList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-xs);
+}
+
+.skeleton {
+  height: 44px;
+  margin: 2px var(--space-xs);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+```
+
+The Sidebar is a controlled component — it receives vehicles and selection state as props. No data fetching happens inside; that stays in the parent. The `Plus` icon button at the top triggers the Add Vehicle modal in the parent.
+</action>
+<acceptance_criteria>
+- `frontend/src/components/layout/Sidebar.tsx` exists and exports `Sidebar`
+- `frontend/src/components/layout/Sidebar.module.css` exists
+- Sidebar accepts `vehicles`, `selectedVehicleId`, `onSelectVehicle`, `onAddVehicle`, `isLoading` props
+- Sidebar imports `SidebarVehicleItem` component
+- Sidebar has an "All Vehicles" overview button that calls `onSelectVehicle(null)`
+- Sidebar has an add button with the `Plus` icon from lucide-react
+- CSS uses only CSS custom property references (no hardcoded colors, spacing, or font sizes)
+- Vehicle list has `overflow-y: auto` for independent scrolling
+- Loading state renders 5 skeleton placeholders
+</acceptance_criteria>
+</task>
+
+<task id="B3">
+<title>Create SidebarVehicleItem component</title>
+<read_first>
+- frontend/src/features/vehicles/components/VehicleCard.tsx (existing vehicle display — extract compact list pattern from this)
+- frontend/src/client/types.ts (Vehicle type definition — available fields: year, make, model, id, commCount or similar)
+- frontend/src/index.css (token system)
+- .planning/phases/01-foundation/01-CONTEXT.md (D-01 — compact list: year + model per line, comm count badge, selected highlight)
+</read_first>
+<action>
+Create `frontend/src/components/layout/SidebarVehicleItem.tsx`:
+```tsx
+import styles from './SidebarVehicleItem.module.css';
+import type { Vehicle } from '../../client';
+
+interface SidebarVehicleItemProps {
+  vehicle: Vehicle;
+  isSelected: boolean;
+  onSelect: () => void;
+}
+
+export function SidebarVehicleItem({ vehicle, isSelected, onSelect }: SidebarVehicleItemProps) {
+  return (
+    <button
+      className={styles.item}
+      data-selected={isSelected}
+      onClick={onSelect}
+    >
+      <div className={styles.info}>
+        <span className={styles.name}>
+          {vehicle.year} {vehicle.make} {vehicle.model}
+        </span>
+      </div>
+      {vehicle.communicationCount !== undefined && vehicle.communicationCount > 0 && (
+        <span className={styles.badge}>
+          {vehicle.communicationCount}
+        </span>
+      )}
+    </button>
+  );
+}
+```
+
+Create `frontend/src/components/layout/SidebarVehicleItem.module.css`:
+```css
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-sm) var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-align: left;
+  font-family: var(--font-sans);
+  gap: var(--space-sm);
+}
+
+.item:hover {
+  background: var(--bg-hover);
+}
+
+.item[data-selected="true"] {
+  background: var(--bg-active);
+}
+
+.item[data-selected="true"] .name {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium, 500);
+}
+
+.info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.name {
+  display: block;
+  font-size: var(--font-size-sm, 0.75rem);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--leading-normal, 1.5);
+}
+
+.badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--space-xs);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs, 0.6875rem);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--text-secondary);
+  line-height: 1;
+}
+```
+
+The SidebarVehicleItem uses a `<button>` for accessibility (keyboard focusable, screen reader compatible). The `data-selected` attribute drives the selected highlight via CSS. Communication count badge only shows when count > 0. Text truncates with ellipsis for long vehicle names.
+</action>
+<acceptance_criteria>
+- `frontend/src/components/layout/SidebarVehicleItem.tsx` exists and exports `SidebarVehicleItem`
+- `frontend/src/components/layout/SidebarVehicleItem.module.css` exists
+- Component renders `vehicle.year`, `vehicle.make`, `vehicle.model`
+- Component shows a badge with `vehicle.communicationCount` when > 0
+- Component uses `data-selected` attribute for selected state styling
+- Component uses `<button>` element (not `<div>`) for accessibility
+- CSS uses only CSS custom property references (no hardcoded colors)
+- Selected state shows `--color-primary` for the vehicle name
+- Text overflow uses `text-overflow: ellipsis`
+</acceptance_criteria>
+</task>
+
+## Verification
+
+<must_haves>
+- [ ] AppShell renders a two-column layout with sidebar and main content as independent scroll surfaces
+- [ ] Sidebar is resizable via drag handle (react-resizable-panels)
+- [ ] Sidebar is collapsible to zero width
+- [ ] Sidebar panel size persists to localStorage via autoSaveId
+- [ ] Vehicle list in sidebar shows year + make + model per item with communication count badge
+- [ ] Selected vehicle is visually highlighted in the sidebar
+- [ ] All CSS uses only design tokens — no hardcoded hex, hsl, or pixel values outside token definitions
+- [ ] All components use CSS modules (.module.css) for scoped class names
+</must_haves>
+
+---
+*Plan B — Phase 01-foundation — Wave 1*
