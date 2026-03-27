@@ -60,6 +60,39 @@
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Monaco', monospace;
+
+  /* Typography Sizes */
+  --font-size-xs: 0.6875rem;    /* 11px */
+  --font-size-sm: 0.75rem;      /* 12px */
+  --font-size-base: 0.875rem;   /* 14px — app default */
+  --font-size-md: 1rem;         /* 16px */
+  --font-size-lg: 1.125rem;     /* 18px */
+  --font-size-xl: 1.5rem;       /* 24px */
+  --font-size-2xl: 2rem;        /* 32px */
+
+  /* Typography Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 0px;
+  --header-height: 56px;
+  --toolbar-height: 48px;
+
+  /* Line Heights */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+
+  /* Z-Index */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-overlay: 20;
+  --z-modal: 30;
+  --z-toast: 40;
 }
 
 /* Reset & Base */
