@@ -1,0 +1,46 @@
+.statsBar {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+
+.statChip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+}
+
+.statChip:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+
+.statChip.active {
+  background: color-mix(in srgb, var(--type-color, var(--color-primary)) 15%, transparent);
+  border-color: var(--type-color, var(--color-primary));
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.count {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.label {
+  color: var(--text-muted);
+}
