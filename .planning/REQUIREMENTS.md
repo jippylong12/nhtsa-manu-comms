@@ -7,11 +7,11 @@
 
 ### Layout
 
-- [ ] **LAYOUT-01**: App uses a CSS Grid layout shell with sidebar column and main content area
-- [ ] **LAYOUT-02**: Sidebar displays persistent vehicle list visible while browsing communications
-- [ ] **LAYOUT-03**: Sidebar is resizable and collapsible via react-resizable-panels
-- [ ] **LAYOUT-04**: Header and filter bar remain sticky while scrolling content
-- [ ] **LAYOUT-05**: God component (App.tsx) is decomposed into focused components with clear state ownership
+- [x] **LAYOUT-01**: App uses a CSS Grid layout shell with sidebar column and main content area
+- [x] **LAYOUT-02**: Sidebar displays persistent vehicle list visible while browsing communications
+- [x] **LAYOUT-03**: Sidebar is resizable and collapsible via react-resizable-panels
+- [x] **LAYOUT-04**: Header and filter bar remain sticky while scrolling content
+- [x] **LAYOUT-05**: God component (App.tsx) is decomposed into focused components with clear state ownership
 
 ### Data Views
 
@@ -81,11 +81,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LAYOUT-01 | Phase 1 | Pending |
-| LAYOUT-02 | Phase 1 | Pending |
-| LAYOUT-03 | Phase 1 | Pending |
-| LAYOUT-04 | Phase 1 | Pending |
-| LAYOUT-05 | Phase 1 | Pending |
+| LAYOUT-01 | Phase 1 | Complete |
+| LAYOUT-02 | Phase 1 | Complete |
+| LAYOUT-03 | Phase 1 | Complete |
+| LAYOUT-04 | Phase 1 | Complete |
+| LAYOUT-05 | Phase 1 | Complete |
 | VIEW-01 | Phase 2 | Pending |
 | VIEW-02 | Phase 2 | Pending |
 | VIEW-03 | Phase 2 | Pending |
