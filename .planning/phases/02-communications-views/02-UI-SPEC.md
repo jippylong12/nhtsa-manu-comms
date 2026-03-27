@@ -49,14 +49,16 @@ Exceptions:
 
 ## Typography
 
-All values reference existing tokens from `index.css`. Phase 2 uses exactly 4 type roles.
+All values reference existing tokens from `index.css`. Phase 2 uses exactly 4 type roles and exactly 2 font weights.
 
 | Role | CSS Var | Size | Weight | Line Height | Usage |
 |------|---------|------|--------|-------------|-------|
 | Body | `--font-size-base` | 14px (0.875rem) | 400 (`--font-weight-normal`) | 1.5 (`--leading-normal`) | Table cell text, card summary, drawer body copy |
-| Label | `--font-size-sm` | 12px (0.75rem) | 500 (`--font-weight-medium`) | 1.25 (`--leading-tight`) | Filter chips, badges, table column headers, density toggle labels |
+| Label | `--font-size-sm` | 12px (0.75rem) | 600 (`--font-weight-semibold`) | 1.25 (`--leading-tight`) | Filter chips, badges, table column headers, density toggle labels |
 | Heading | `--font-size-md` | 16px (1rem) | 600 (`--font-weight-semibold`) | 1.3 | Drawer section headings, priority group section headers |
 | Display | `--font-size-xl` | 24px (1.5rem) | 600 (`--font-weight-semibold`) | 1.25 (`--leading-tight`) | Drawer communication title / comm number |
+
+Weights declared: `--font-weight-normal` (400) and `--font-weight-semibold` (600) only. `--font-weight-medium` (500) is not used in Phase 2.
 
 Note: Table column headers use Label role + `text-transform: uppercase` + `letter-spacing: 0.05em` — matching the existing `th` rule in `index.css`.
 
@@ -89,6 +91,14 @@ Search highlight color — **new token to add to `index.css`:**
 - Mark text color: `--text-primary` to maintain readability on amber background
 
 Type badge colors come from `COMM_TYPE_COLORS` in `types.ts` — existing, use as-is.
+
+---
+
+## Focal Point
+
+**Primary Communications View focal point:** The communications list (table or card grid) is the primary focal point. It occupies the dominant surface area. The vehicle selector/context header anchors the top of the view with reduced visual weight (`--text-secondary`, `--font-size-sm`). The filter toolbar sits between them as a secondary affordance zone. On first load with data, the eye should land on the first row/card — no competing hero elements.
+
+On mobile, the full-screen card grid is the sole focal point with the filter chip row collapsed by default.
 
 ---
 
@@ -139,7 +149,7 @@ Type badge colors come from `COMM_TYPE_COLORS` in `types.ts` — existing, use a
 | Close (Escape key) | Same as X button |
 | Close (backdrop click) | Semi-transparent backdrop `hsla(225, 25%, 4%, 0.6)`; click triggers close |
 | Desktop width | 400px fixed (`--drawer-width`) |
-| Mobile (<768px) | Full-screen overlay; back button in top-left replaces X button |
+| Mobile (<768px) | Full-screen overlay; "Back to list" button in top-left replaces X button |
 | Z-index | `var(--z-overlay)` = 20 |
 | Content | Flat — no tabs, no accordions. Sections: header (comm #, type badge), summary, details summary, products, documents, keywords |
 
@@ -152,6 +162,7 @@ Type badge colors come from `COMM_TYPE_COLORS` in `types.ts` — existing, use a
 | Zero filters active | Chip row hidden entirely (zero-state = clean toolbar) |
 | Chip appearance | `background: var(--bg-elevated)`, `border: 1px solid var(--border-default)`, `border-radius: var(--radius-full)`, height 28px |
 | Chip X hover | X icon color: `var(--color-danger)` |
+| Chip X aria-label | `aria-label="Remove [filter name] filter"` — e.g. `aria-label="Remove TSB filter"` or `aria-label="Remove search filter"` |
 
 ### Priority Group Toggle (FILT-04)
 
@@ -193,7 +204,7 @@ Type badge colors come from `COMM_TYPE_COLORS` in `types.ts` — existing, use a
 | Drawer — no keywords | "No keywords detected" | default |
 | Priority group section headers | "High Priority (n)" / "Medium Priority (n)" / "Low Priority (n)" | default |
 | Drawer close button aria-label | "Close communication details" | accessibility default |
-| Mobile drawer back button | "Back" | default |
+| Mobile drawer back button | "Back to list" | checker revision |
 
 No destructive actions in this phase — all interactions are read-only view operations.
 
