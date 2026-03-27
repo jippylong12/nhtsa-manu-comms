@@ -1,0 +1,234 @@
+.page {
+  padding: var(--space-xl) 0;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+.pageHeader {
+  margin-bottom: var(--space-lg);
+}
+
+.vehicleBanner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-lg);
+  padding: var(--space-xl);
+  gap: var(--space-lg);
+}
+
+.vehicleBannerInfo .vehicleYear {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.vehicleModel {
+  font-size: var(--font-size-2xl);
+  margin: var(--space-xs) 0;
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--color-primary-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.vehicleBannerText {
+  margin: 0;
+}
+
+.vehicleBannerActions {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+/* Stats Grid */
+.statsGrid {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.statCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  min-width: 140px;
+}
+
+.categoryStat {
+  border-left: 3px solid;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.categoryStat:hover {
+  background: var(--bg-hover);
+}
+
+.statIcon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+}
+
+.statDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statContent {
+  display: flex;
+  flex-direction: column;
+}
+
+.statValue {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Filters Bar */
+.filtersBar {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: center;
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.searchForm {
+  flex: 1;
+  min-width: 250px;
+}
+
+.searchInput {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-md);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.searchInput .input {
+  padding-left: calc(var(--space-md) + 28px);
+  width: 100%;
+}
+
+.typeFilters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+}
+
+.typeFilterBtn {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.typeFilterBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.active {
+  background: var(--type-color, var(--color-primary));
+  border-color: var(--type-color, var(--color-primary));
+  color: white;
+}
+
+.partial {
+  background: color-mix(in srgb, var(--type-color) 30%, transparent);
+  border-color: var(--type-color, var(--color-primary));
+  color: var(--text-primary);
+}
+
+.priorityBtn {
+  font-weight: var(--font-weight-bold);
+}
+
+.priorityDivider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  margin: 0 var(--space-xs);
+}
+
+.filterHelpBtn {
+  margin-left: var(--space-sm);
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+}
+
+.filterHelpBtn:hover {
+  color: var(--color-primary);
+  background: var(--bg-elevated);
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 var(--space-md);
+  }
+
+  .vehicleBanner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .vehicleBannerActions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .statsGrid {
+    justify-content: center;
+  }
+
+  .filtersBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .typeFilters {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
