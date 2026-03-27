@@ -1,0 +1,98 @@
+.fetchProgress {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+  animation: slide-up var(--transition-default) ease-out;
+}
+
+.complete {
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.error {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+.progressHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.statusIcon {
+  flex-shrink: 0;
+}
+
+.success {
+  color: var(--color-success);
+}
+
+.errorIcon {
+  color: var(--color-danger);
+}
+
+.spinning {
+  color: var(--color-primary);
+  animation: spin 1s linear infinite;
+}
+
+.progressMessage {
+  flex: 1;
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+}
+
+.progressBarContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.progressBarContainer .progress {
+  flex: 1;
+}
+
+.progressPercent {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  min-width: 40px;
+  text-align: right;
+}
+
+.progressStats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.newCount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-accent);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

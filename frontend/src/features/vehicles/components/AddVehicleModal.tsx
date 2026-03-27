@@ -8,6 +8,7 @@ import {
     useDiscoveryModels,
     useDiscoveryVariants,
 } from '../../communications/hooks/useDiscovery';
+import styles from './AddVehicleModal.module.css';
 
 interface Props {
     isOpen: boolean;
@@ -43,12 +44,11 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
         selectedModel
     );
 
-    // Auto-select variant if only one exists
     useEffect(() => {
         if (variants && variants.length === 1) {
             setSelectedVariant(variants[0] as VehicleVariant);
         } else if (variants && variants.length > 1) {
-            setSelectedVariant(null); // Reset if multiple
+            setSelectedVariant(null);
         }
     }, [variants]);
 
@@ -85,10 +85,10 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
     };
 
     return (
-        <div className="modal-overlay" onClick={handleClose}>
-            <div className="modal animate-slide-up" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                    <div className="modal-icon">
+        <div className={styles.modalOverlay} onClick={handleClose}>
+            <div className={`${styles.modal} animate-slide-up`} onClick={(e) => e.stopPropagation()}>
+                <div className={styles.modalHeader}>
+                    <div className={styles.modalIcon}>
                         <Car size={24} />
                     </div>
                     <h2>Add Vehicle</h2>
@@ -98,12 +98,12 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                 </div>
 
                 <form onSubmit={handleSubmit}>
-                    <div className="modal-body">
+                    <div className={styles.modalBody}>
                         {/* Step 1: Year */}
                         <div className="input-group">
                             <label className="input-label">Model Year</label>
                             <select
-                                className="input select"
+                                className={`input ${styles.select}`}
                                 value={selectedYear || ''}
                                 onChange={(e) => {
                                     setSelectedYear(Number(e.target.value));
@@ -121,10 +121,10 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         </div>
 
                         {/* Step 2: Make */}
-                        <div className={`input-group ${!selectedYear ? 'disabled' : ''}`}>
+                        <div className={`input-group ${!selectedYear ? styles.disabled : ''}`}>
                             <label className="input-label">Make</label>
                             <select
-                                className="input select"
+                                className={`input ${styles.select}`}
                                 value={selectedMake}
                                 onChange={(e) => {
                                     setSelectedMake(e.target.value);
@@ -143,10 +143,10 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         </div>
 
                         {/* Step 3: Model */}
-                        <div className={`input-group ${!selectedMake ? 'disabled' : ''}`}>
+                        <div className={`input-group ${!selectedMake ? styles.disabled : ''}`}>
                             <label className="input-label">Model</label>
                             <select
-                                className="input select"
+                                className={`input ${styles.select}`}
                                 value={selectedModel}
                                 onChange={(e) => {
                                     setSelectedModel(e.target.value);
@@ -165,20 +165,20 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
 
                         {/* Step 4: Variant Selection (if multiple) */}
                         {selectedModel && variants && variants.length > 1 && (
-                            <div className="variant-selection">
+                            <div className={styles.variantSelection}>
                                 <label className="input-label">Select Trim/Style</label>
-                                <div className="variant-grid">
+                                <div className={styles.variantGrid}>
                                     {(variants as VehicleVariant[]).map((v) => (
                                         <button
                                             key={v.vehicleId}
                                             type="button"
-                                            className={`variant-card ${selectedVariant?.vehicleId === v.vehicleId ? 'selected' : ''}`}
+                                            className={`${styles.variantCard} ${selectedVariant?.vehicleId === v.vehicleId ? styles.variantCardSelected : ''}`}
                                             onClick={() => setSelectedVariant(v)}
                                         >
-                                            <span className="variant-trim">{v.trim}</span>
-                                            <span className="variant-series">{v.series}</span>
+                                            <span className={styles.variantTrim}>{v.trim}</span>
+                                            <span className={styles.variantSeries}>{v.series}</span>
                                             {selectedVariant?.vehicleId === v.vehicleId && (
-                                                <Check size={16} className="variant-check" />
+                                                <Check size={16} className={styles.variantCheck} />
                                             )}
                                         </button>
                                     ))}
@@ -188,21 +188,21 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
 
                         {/* Loading state for variants */}
                         {selectedModel && loadingVariants && (
-                            <div className="loading-variants">
-                                <Loader2 size={20} className="spinner" />
+                            <div className={styles.loadingVariants}>
+                                <Loader2 size={20} className={styles.spinner} />
                                 <span>Finding vehicle variants...</span>
                             </div>
                         )}
 
                         {/* Success confirmation */}
                         {selectedVariant && (
-                            <div className="vehicle-confirmed">
+                            <div className={styles.vehicleConfirmed}>
                                 <Check size={18} />
                                 <div>
                                     <strong>
                                         {selectedVariant.modelYear} {selectedVariant.make} {selectedVariant.model}
                                     </strong>
-                                    <span className="variant-details">
+                                    <span className={styles.variantDetails}>
                                         {selectedVariant.trim} {selectedVariant.series} · ID: {selectedVariant.vehicleId}
                                     </span>
                                 </div>
@@ -210,7 +210,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         )}
 
                         {/* Keywords */}
-                        <div className={`input-group ${!selectedVariant ? 'disabled' : ''}`}>
+                        <div className={`input-group ${!selectedVariant ? styles.disabled : ''}`}>
                             <label className="input-label">Filter Keywords (optional)</label>
                             <input
                                 type="text"
@@ -220,13 +220,13 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 onChange={(e) => setKeywords(e.target.value)}
                                 disabled={!selectedVariant}
                             />
-                            <span className="input-hint">
+                            <span className={styles.inputHint}>
                                 Only show communications containing these keywords
                             </span>
                         </div>
                     </div>
 
-                    <div className="modal-footer">
+                    <div className={styles.modalFooter}>
                         <button type="button" className="btn btn-secondary" onClick={handleClose}>
                             Cancel
                         </button>
@@ -240,193 +240,6 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         </button>
                     </div>
                 </form>
-
-                <style>{`
-          .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: hsla(0, 0%, 0%, 0.7);
-            backdrop-filter: blur(4px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            padding: var(--space-lg);
-          }
-
-          .modal {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-xl);
-            width: 100%;
-            max-width: 480px;
-            max-height: 90vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-          }
-
-          .modal-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-            padding: var(--space-lg);
-            border-bottom: 1px solid var(--border-subtle);
-          }
-
-          .modal-icon {
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-            border-radius: var(--radius-md);
-            color: white;
-          }
-
-          .modal-header h2 {
-            flex: 1;
-            font-size: 1.25rem;
-            margin: 0;
-          }
-
-          .modal-body {
-            padding: var(--space-lg);
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-lg);
-            overflow-y: auto;
-          }
-
-          .select {
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 0.75rem center;
-            background-size: 1.25em;
-            padding-right: 2.5rem;
-          }
-
-          .variant-selection {
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-sm);
-          }
-
-          .variant-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: var(--space-sm);
-          }
-
-          .variant-card {
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: var(--space-xs);
-            padding: var(--space-md);
-            background: var(--bg-hover);
-            border: 2px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: all 0.15s ease;
-          }
-
-          .variant-card:hover {
-            border-color: var(--color-primary);
-            background: var(--bg-active);
-          }
-
-          .variant-card.selected {
-            border-color: var(--color-primary);
-            background: hsla(var(--color-primary-hsl), 0.1);
-          }
-
-          .variant-trim {
-            font-weight: 600;
-            font-size: 0.9rem;
-          }
-
-          .variant-series {
-            color: var(--text-muted);
-            font-size: 0.8rem;
-          }
-
-          .variant-check {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            color: var(--color-primary);
-          }
-
-          .loading-variants {
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-            color: var(--text-muted);
-            padding: var(--space-md);
-            background: var(--bg-hover);
-            border-radius: var(--radius-md);
-          }
-
-          .spinner {
-            animation: spin 1s linear infinite;
-          }
-
-          @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-
-          .vehicle-confirmed {
-            display: flex;
-            align-items: flex-start;
-            gap: var(--space-sm);
-            padding: var(--space-md);
-            background: hsla(120, 50%, 40%, 0.15);
-            border: 1px solid hsla(120, 50%, 40%, 0.3);
-            border-radius: var(--radius-md);
-            color: hsl(120, 50%, 45%);
-          }
-
-          .vehicle-confirmed div {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-          }
-
-          .vehicle-confirmed strong {
-            color: var(--text-primary);
-          }
-
-          .variant-details {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-          }
-
-          .input-hint {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-top: var(--space-xs);
-          }
-
-          .modal-footer {
-            display: flex;
-            justify-content: flex-end;
-            gap: var(--space-md);
-            padding: var(--space-lg);
-            border-top: 1px solid var(--border-subtle);
-            background: var(--bg-elevated);
-            margin-top: auto;
-          }
-
-          .disabled {
-            opacity: 0.5;
-            pointer-events: none;
-          }
-        `}</style>
             </div>
         </div>
     );

@@ -5,6 +5,7 @@ import { FileText, ExternalLink, Tag, ChevronDown, ChevronUp } from 'lucide-reac
 import { useState, useMemo } from 'react';
 import type { Communication, CommType } from '@/client';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
+import styles from './CommunicationList.module.css';
 
 interface Props {
   communications: Communication[];
@@ -13,7 +14,7 @@ interface Props {
 
 interface RowProps {
   comm: Communication;
-  occurrence?: number; // Which occurrence this is (2 means second time seeing this number)
+  occurrence?: number;
 }
 
 function CommunicationRow({ comm, occurrence }: RowProps) {
@@ -26,7 +27,6 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
   const commType = (comm.communicationType || 'OTHER') as CommType;
   const typeColor = COMM_TYPE_COLORS[commType] || COMM_TYPE_COLORS.OTHER;
 
-  // Display communication number with occurrence indicator
   const displayNumber = comm.communicationNumber
     ? occurrence && occurrence > 1
       ? `${comm.communicationNumber} (${occurrence})`
@@ -34,29 +34,29 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
     : null;
 
   return (
-    <div className="comm-row" style={{ borderLeftColor: typeColor }}>
-      <div className="comm-header" onClick={() => setIsExpanded(!isExpanded)}>
-        <div className="comm-info">
-          <div className="comm-top-row">
+    <div className={styles.commRow} style={{ borderLeftColor: typeColor }}>
+      <div className={styles.commHeader} onClick={() => setIsExpanded(!isExpanded)}>
+        <div className={styles.commInfo}>
+          <div className={styles.commTopRow}>
             <span
-              className="comm-type-badge"
+              className={styles.commTypeBadge}
               title={COMM_TYPE_LABELS[commType] || commType}
               style={{
-                backgroundColor: `${typeColor}20`,
+                backgroundColor: `color-mix(in srgb, ${typeColor} 12%, transparent)`,
                 color: typeColor,
-                borderColor: `${typeColor}40`,
+                borderColor: `color-mix(in srgb, ${typeColor} 25%, transparent)`,
               }}
             >
               {commType}
             </span>
-            <span className="comm-date">{commDate}</span>
+            <span className={styles.commDate}>{commDate}</span>
           </div>
-          <h4 className="comm-summary">{comm.summary || 'No summary available'}</h4>
+          <h4 className={styles.commSummary}>{comm.summary || 'No summary available'}</h4>
           {displayNumber && (
-            <span className="comm-number">
+            <span className={styles.commNumber}>
               {displayNumber}
               {occurrence && occurrence > 1 && (
-                <span className="duplicate-badge" title="Duplicate bulletin number">
+                <span className={styles.duplicateBadge} title="Duplicate bulletin number">
                   dup
                 </span>
               )}
@@ -64,9 +64,9 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
           )}
         </div>
 
-        <div className="comm-meta">
+        <div className={styles.commMeta}>
           {comm.matchedKeywords.length > 0 && (
-            <div className="comm-keywords">
+            <div className={styles.commKeywords}>
               {comm.matchedKeywords.map((kw) => (
                 <span key={kw} className="badge badge-success">
                   <Tag size={10} />
@@ -75,7 +75,7 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
               ))}
             </div>
           )}
-          <span className="doc-count">
+          <span className={styles.docCount}>
             <FileText size={14} />
             {comm.associatedDocuments.length}
           </span>
@@ -86,22 +86,22 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
       </div>
 
       {isExpanded && (
-        <div className="comm-details animate-fade-in">
+        <div className={`${styles.commDetails} animate-fade-in`}>
           {comm.detailsSummary && (
-            <p className="details-summary">{comm.detailsSummary}</p>
+            <p className={styles.detailsSummary}>{comm.detailsSummary}</p>
           )}
 
           {comm.associatedProducts.length > 0 && (
-            <div className="products-section">
+            <div className={styles.productsSection}>
               <h5>Associated Products</h5>
-              <div className="products-list">
+              <div className={styles.productsList}>
                 {comm.associatedProducts.slice(0, 5).map((p, i) => (
-                  <span key={i} className="product-tag">
+                  <span key={i} className={styles.productTag}>
                     {p.productYear} {p.productModel}
                   </span>
                 ))}
                 {comm.associatedProducts.length > 5 && (
-                  <span className="product-tag more">
+                  <span className={`${styles.productTag} ${styles.productTagMore}`}>
                     +{comm.associatedProducts.length - 5} more
                   </span>
                 )}
@@ -110,9 +110,9 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
           )}
 
           {comm.associatedDocuments.length > 0 && (
-            <div className="documents-section">
+            <div className={styles.documentsSection}>
               <h5>Documents</h5>
-              <ul className="documents-list">
+              <ul className={styles.documentsList}>
                 {comm.associatedDocuments.map((doc, i) => (
                   <li key={i}>
                     <a href={doc.url} target="_blank" rel="noopener noreferrer">
@@ -121,7 +121,7 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
                       <ExternalLink size={12} />
                     </a>
                     {doc.loadDate && (
-                      <span className="doc-date">
+                      <span className={styles.docDate}>
                         {format(new Date(doc.loadDate), 'MMM d, yyyy')}
                       </span>
                     )}
@@ -132,226 +132,14 @@ function CommunicationRow({ comm, occurrence }: RowProps) {
           )}
         </div>
       )}
-
-      <style>{`
-        .comm-row {
-          background: var(--bg-surface);
-          border: 1px solid var(--border-subtle);
-          border-left: 4px solid;
-          border-radius: var(--radius-lg);
-          overflow: hidden;
-          transition: all var(--transition-default);
-        }
-
-        .comm-row:hover {
-          border-color: var(--border-default);
-          border-left-width: 4px;
-        }
-
-        .comm-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          padding: var(--space-md) var(--space-lg);
-          cursor: pointer;
-          gap: var(--space-md);
-        }
-
-        .comm-info {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .comm-top-row {
-          display: flex;
-          align-items: center;
-          gap: var(--space-sm);
-          margin-bottom: var(--space-xs);
-        }
-
-        .comm-type-badge {
-          font-size: 0.625rem;
-          font-weight: 700;
-          padding: 2px 6px;
-          border-radius: var(--radius-sm);
-          border: 1px solid;
-          text-transform: uppercase;
-          letter-spacing: 0.03em;
-        }
-
-        .comm-date {
-          font-size: 0.75rem;
-          font-weight: 500;
-          color: var(--text-muted);
-          letter-spacing: 0.02em;
-        }
-
-        .comm-summary {
-          font-size: 0.9375rem;
-          font-weight: 500;
-          margin: var(--space-xs) 0;
-          color: var(--text-primary);
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        .comm-number {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          font-family: var(--font-mono);
-          display: inline-flex;
-          align-items: center;
-          gap: var(--space-xs);
-        }
-
-        .duplicate-badge {
-          font-size: 0.625rem;
-          font-weight: 600;
-          padding: 1px 4px;
-          background: hsl(38, 92%, 50%);
-          color: white;
-          border-radius: var(--radius-sm);
-          text-transform: uppercase;
-        }
-
-        .comm-meta {
-          display: flex;
-          align-items: center;
-          gap: var(--space-sm);
-          flex-shrink: 0;
-        }
-
-        .comm-keywords {
-          display: flex;
-          gap: 4px;
-        }
-
-        .comm-keywords .badge {
-          font-size: 0.625rem;
-        }
-
-        .doc-count {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          padding: 4px 8px;
-          background: var(--bg-elevated);
-          border-radius: var(--radius-sm);
-        }
-
-        .comm-details {
-          padding: 0 var(--space-lg) var(--space-lg);
-          border-top: 1px solid var(--border-subtle);
-          background: var(--bg-elevated);
-        }
-
-        .details-summary {
-          font-size: 0.875rem;
-          color: var(--text-secondary);
-          margin: var(--space-md) 0;
-          line-height: 1.6;
-        }
-
-        .products-section,
-        .documents-section {
-          margin-top: var(--space-md);
-        }
-
-        .products-section h5,
-        .documents-section h5 {
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: var(--space-sm);
-        }
-
-        .products-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: var(--space-xs);
-        }
-
-        .product-tag {
-          font-size: 0.75rem;
-          padding: 2px 8px;
-          background: var(--bg-hover);
-          border-radius: var(--radius-sm);
-          color: var(--text-secondary);
-        }
-
-        .product-tag.more {
-          color: var(--text-muted);
-          font-style: italic;
-        }
-
-        .documents-list {
-          list-style: none;
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-xs);
-        }
-
-        .documents-list li {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .documents-list a {
-          display: flex;
-          align-items: center;
-          gap: var(--space-sm);
-          font-size: 0.875rem;
-          color: var(--text-secondary);
-          padding: var(--space-sm);
-          border-radius: var(--radius-sm);
-          transition: all var(--transition-fast);
-          flex: 1;
-        }
-
-        .documents-list a:hover {
-          background: var(--bg-hover);
-          color: var(--color-primary);
-        }
-
-        .documents-list a span {
-          flex: 1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .doc-date {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-        }
-
-        @media (max-width: 640px) {
-          .comm-header {
-            flex-direction: column;
-          }
-
-          .comm-meta {
-            align-self: flex-start;
-            margin-top: var(--space-sm);
-          }
-        }
-      `}</style>
     </div>
   );
 }
 
 export function CommunicationList({ communications, isLoading }: Props) {
-  // Track duplicate communication numbers
   const occurrenceMap = useMemo(() => {
     const counts = new Map<string, number>();
-    const occurrences = new Map<string, number>(); // nhtsaId -> occurrence number
+    const occurrences = new Map<string, number>();
 
     for (const comm of communications) {
       const num = comm.communicationNumber;
@@ -367,7 +155,7 @@ export function CommunicationList({ communications, isLoading }: Props) {
 
   if (isLoading) {
     return (
-      <div className="comm-list-loading">
+      <div className={styles.commListLoading}>
         {[1, 2, 3].map((i) => (
           <div key={i} className="skeleton" style={{ height: 100 }} />
         ))}
@@ -388,7 +176,7 @@ export function CommunicationList({ communications, isLoading }: Props) {
   }
 
   return (
-    <div className="comm-list">
+    <div className={styles.commList}>
       {communications.map((comm) => (
         <CommunicationRow
           key={comm.nhtsaId}
@@ -396,20 +184,6 @@ export function CommunicationList({ communications, isLoading }: Props) {
           occurrence={occurrenceMap.get(String(comm.nhtsaId))}
         />
       ))}
-
-      <style>{`
-        .comm-list {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-md);
-        }
-
-        .comm-list-loading {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-md);
-        }
-      `}</style>
     </div>
   );
 }

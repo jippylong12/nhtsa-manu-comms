@@ -1,0 +1,105 @@
+.vehicleCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  transition: all var(--transition-default);
+}
+
+.vehicleCard:hover {
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-md);
+}
+
+.vehicleHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-md);
+}
+
+.vehicleYear {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.vehicleModel {
+  font-size: 1.25rem;
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-xs) 0 0;
+}
+
+.vehicleActions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.vehicleActions .btn:hover {
+  color: var(--color-danger);
+}
+
+.vehicleActions .btn:first-child:hover {
+  color: var(--color-primary);
+}
+
+.vehicleStats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.stat svg {
+  color: var(--text-muted);
+}
+
+.vehicleKeywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.viewCommsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.viewCommsBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--color-primary);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animateSpin {
+  animation: spin 1s linear infinite;
+}

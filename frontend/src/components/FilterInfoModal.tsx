@@ -3,14 +3,14 @@
 import { X, Info, Search, Filter, AlertTriangle, Wrench, FileText, RefreshCw, Shield, Star, Bookmark, HelpCircle } from 'lucide-react';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS, PRIORITY_COLORS } from '../client';
 import type { CommType, CommPriority } from '../client';
+import styles from './FilterInfoModal.module.css';
 
 interface FilterInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-// Extended descriptions for each communication type
-const COMM_TYPE_DESCRIPTIONS: Record<CommType, { icon: React.ReactNode; description: string; priority: 'high' | 'medium' | 'low' }> = {
+const COMM_TYPE_DESCRIPTIONS: Record<CommType, { icon: React.ReactNode; description: string; priority: CommPriority }> = {
   TSB: {
     icon: <FileText size={16} />,
     description: 'Official bulletins issued by manufacturers to address specific problems. These provide repair procedures and parts information for known issues.',
@@ -97,10 +97,10 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
   );
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal filter-info-modal animate-slide-up" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-icon">
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={`${styles.filterInfoModal} animate-slide-up`} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modalHeader}>
+          <div className={styles.modalIcon}>
             <Info size={24} />
           </div>
           <h2>Understanding Filters</h2>
@@ -109,71 +109,71 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className={styles.modalBody}>
           {/* Search Section */}
-          <section className="info-section">
-            <h3 className="section-title">
+          <section className={styles.infoSection}>
+            <h3 className={styles.sectionTitle}>
               <Search size={18} />
               Search
             </h3>
-            <p className="section-description">
+            <p className={styles.sectionDescription}>
               Search by communication number or keywords in the summary. Results are filtered in real-time as you type.
             </p>
           </section>
 
           {/* Category Filters Section */}
-          <section className="info-section">
-            <h3 className="section-title">
+          <section className={styles.infoSection}>
+            <h3 className={styles.sectionTitle}>
               <Filter size={18} />
               Category Filters
             </h3>
-            <p className="section-description">
+            <p className={styles.sectionDescription}>
               Click on category buttons to filter communications by type. Click the same category again to clear the filter.
               Categories are also clickable in the stats cards above.
             </p>
           </section>
 
           {/* Priority Legend */}
-          <div className="priority-legend">
+          <div className={styles.priorityLegend}>
             <span
-              className="priority-badge"
+              className={styles.priorityBadge}
               style={{
                 background: `color-mix(in srgb, ${PRIORITY_COLORS.high} 20%, transparent)`,
                 color: PRIORITY_COLORS.high,
-                border: `1px solid ${PRIORITY_COLORS.high}40`
+                border: `1px solid color-mix(in srgb, ${PRIORITY_COLORS.high} 40%, transparent)`
               }}
             >
-              🔴 High Priority
+              High Priority
             </span>
             <span
-              className="priority-badge"
+              className={styles.priorityBadge}
               style={{
                 background: `color-mix(in srgb, ${PRIORITY_COLORS.medium} 20%, transparent)`,
                 color: PRIORITY_COLORS.medium,
-                border: `1px solid ${PRIORITY_COLORS.medium}40`
+                border: `1px solid color-mix(in srgb, ${PRIORITY_COLORS.medium} 40%, transparent)`
               }}
             >
-              🟡 Medium Priority
+              Medium Priority
             </span>
             <span
-              className="priority-badge"
+              className={styles.priorityBadge}
               style={{
                 background: `color-mix(in srgb, ${PRIORITY_COLORS.low} 20%, transparent)`,
                 color: PRIORITY_COLORS.low,
-                border: `1px solid ${PRIORITY_COLORS.low}40`
+                border: `1px solid color-mix(in srgb, ${PRIORITY_COLORS.low} 40%, transparent)`
               }}
             >
-              🟢 Low Priority
+              Low Priority
             </span>
           </div>
 
           {/* High Priority Types */}
-          <section className="info-section">
-            <h3 className="section-title priority-section-title">
+          <section className={styles.infoSection}>
+            <h3 className={`${styles.sectionTitle} ${styles.prioritySectionTitle}`}>
               <AlertTriangle size={18} />
               High Priority Communications
             </h3>
-            <div className="type-list">
+            <div className={styles.typeList}>
               {highPriority.map((type) => (
                 <TypeCard key={type} type={type} />
               ))}
@@ -181,12 +181,12 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
           </section>
 
           {/* Medium Priority Types */}
-          <section className="info-section">
-            <h3 className="section-title priority-section-title">
+          <section className={styles.infoSection}>
+            <h3 className={`${styles.sectionTitle} ${styles.prioritySectionTitle}`}>
               <Wrench size={18} />
               Service & Technical Communications
             </h3>
-            <div className="type-list">
+            <div className={styles.typeList}>
               {mediumPriority.map((type) => (
                 <TypeCard key={type} type={type} />
               ))}
@@ -194,12 +194,12 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
           </section>
 
           {/* Low Priority Types */}
-          <section className="info-section">
-            <h3 className="section-title priority-section-title">
+          <section className={styles.infoSection}>
+            <h3 className={`${styles.sectionTitle} ${styles.prioritySectionTitle}`}>
               <Info size={18} />
               Informational Communications
             </h3>
-            <div className="type-list">
+            <div className={styles.typeList}>
               {lowPriority.map((type) => (
                 <TypeCard key={type} type={type} />
               ))}
@@ -207,217 +207,16 @@ export function FilterInfoModal({ isOpen, onClose }: FilterInfoModalProps) {
           </section>
         </div>
 
-        <div className="modal-footer">
+        <div className={styles.modalFooter}>
           <button className="btn btn-primary" onClick={onClose}>
             Got it!
           </button>
         </div>
-
-        <style>{`
-                    .modal-overlay {
-                        position: fixed;
-                        inset: 0;
-                        background: hsla(0, 0%, 0%, 0.7);
-                        backdrop-filter: blur(4px);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        z-index: 1000;
-                        padding: var(--space-lg);
-                    }
-
-                    .filter-info-modal {
-                        background: var(--bg-surface);
-                        border: 1px solid var(--border-subtle);
-                        border-radius: var(--radius-xl);
-                        width: 100%;
-                        max-width: 700px;
-                        max-height: 85vh;
-                        overflow: hidden;
-                        display: flex;
-                        flex-direction: column;
-                    }
-
-                    .filter-info-modal .modal-header {
-                        display: flex;
-                        align-items: center;
-                        gap: var(--space-md);
-                        padding: var(--space-lg);
-                        border-bottom: 1px solid var(--border-subtle);
-                    }
-
-                    .filter-info-modal .modal-icon {
-                        width: 40px;
-                        height: 40px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-                        border-radius: var(--radius-md);
-                        color: white;
-                    }
-
-                    .filter-info-modal .modal-header h2 {
-                        flex: 1;
-                        font-size: 1.25rem;
-                        margin: 0;
-                    }
-
-                    .filter-info-modal .modal-body {
-                        padding: var(--space-lg);
-                        overflow-y: auto;
-                        flex: 1;
-                    }
-
-                    .info-section {
-                        margin-bottom: var(--space-lg);
-                    }
-
-                    .section-title {
-                        display: flex;
-                        align-items: center;
-                        gap: var(--space-sm);
-                        font-size: 1rem;
-                        font-weight: 600;
-                        color: var(--text-primary);
-                        margin-bottom: var(--space-sm);
-                    }
-
-                    .priority-section-title {
-                        margin-top: var(--space-md);
-                    }
-
-                    .section-description {
-                        color: var(--text-secondary);
-                        line-height: 1.6;
-                        margin: 0;
-                    }
-
-                    .priority-legend {
-                        display: flex;
-                        gap: var(--space-md);
-                        flex-wrap: wrap;
-                        margin-bottom: var(--space-lg);
-                        padding: var(--space-md);
-                        background: var(--bg-elevated);
-                        border-radius: var(--radius-md);
-                        border: 1px solid var(--border-subtle);
-                    }
-
-                    .priority-badge {
-                        font-size: 0.75rem;
-                        font-weight: 600;
-                        padding: var(--space-xs) var(--space-md);
-                        border-radius: var(--radius-full);
-                    }
-
-                    .priority-high {
-                        background: hsla(0, 85%, 55%, 0.15);
-                        color: hsl(0, 85%, 55%);
-                        border: 1px solid hsla(0, 85%, 55%, 0.3);
-                    }
-
-                    .priority-medium {
-                        background: hsla(38, 92%, 50%, 0.15);
-                        color: hsl(38, 92%, 50%);
-                        border: 1px solid hsla(38, 92%, 50%, 0.3);
-                    }
-
-                    .priority-low {
-                        background: hsla(215, 15%, 50%, 0.15);
-                        color: var(--text-secondary);
-                        border: 1px solid var(--border-subtle);
-                    }
-
-                    .type-list {
-                        display: flex;
-                        flex-direction: column;
-                        gap: var(--space-sm);
-                    }
-
-                    .type-card {
-                        display: flex;
-                        align-items: flex-start;
-                        gap: var(--space-md);
-                        padding: var(--space-md);
-                        background: var(--bg-elevated);
-                        border: 1px solid var(--border-subtle);
-                        border-radius: var(--radius-md);
-                        border-left: 3px solid var(--type-color);
-                        transition: all var(--transition-fast);
-                    }
-
-                    .type-card:hover {
-                        background: var(--bg-hover);
-                        border-color: var(--border-default);
-                    }
-
-                    .type-badge {
-                        display: flex;
-                        align-items: center;
-                        gap: var(--space-xs);
-                        padding: var(--space-xs) var(--space-sm);
-                        background: var(--type-color);
-                        color: white;
-                        font-size: 0.75rem;
-                        font-weight: 700;
-                        border-radius: var(--radius-sm);
-                        min-width: 60px;
-                        justify-content: center;
-                        flex-shrink: 0;
-                    }
-
-                    .type-info {
-                        flex: 1;
-                    }
-
-                    .type-label {
-                        font-weight: 600;
-                        color: var(--text-primary);
-                        margin-bottom: 2px;
-                    }
-
-                    .type-description {
-                        font-size: 0.875rem;
-                        color: var(--text-secondary);
-                        line-height: 1.5;
-                        margin: 0;
-                    }
-
-                    .filter-info-modal .modal-footer {
-                        display: flex;
-                        justify-content: flex-end;
-                        gap: var(--space-md);
-                        padding: var(--space-lg);
-                        border-top: 1px solid var(--border-subtle);
-                        background: var(--bg-elevated);
-                    }
-
-                    @media (max-width: 600px) {
-                        .filter-info-modal {
-                            max-height: 90vh;
-                        }
-
-                        .priority-legend {
-                            flex-direction: column;
-                            align-items: flex-start;
-                        }
-
-                        .type-card {
-                            flex-direction: column;
-                        }
-
-                        .type-badge {
-                            min-width: auto;
-                        }
-                    }
-                `}</style>
       </div>
     </div>
   );
 }
 
-// Individual Type Card Component
 function TypeCard({ type }: { type: CommType }) {
   const { icon, description } = COMM_TYPE_DESCRIPTIONS[type];
   const label = COMM_TYPE_LABELS[type];
@@ -425,16 +224,16 @@ function TypeCard({ type }: { type: CommType }) {
 
   return (
     <div
-      className="type-card"
+      className={styles.typeCard}
       style={{ '--type-color': color } as React.CSSProperties}
     >
-      <div className="type-badge" style={{ background: color }}>
+      <div className={styles.typeBadge} style={{ background: color }}>
         {icon}
         {type}
       </div>
-      <div className="type-info">
-        <div className="type-label">{label}</div>
-        <p className="type-description">{description}</p>
+      <div className={styles.typeInfo}>
+        <div className={styles.typeLabel}>{label}</div>
+        <p className={styles.typeDescription}>{description}</p>
       </div>
     </div>
   );
