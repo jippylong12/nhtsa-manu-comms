@@ -183,7 +183,7 @@ class CommunicationResponse(CamelModel):
     vehicle_id: int = Field(..., description="Associated vehicle ID")
     communication_number: Optional[str] = Field(None, description="Manufacturer comm number")
     communication_type: str = Field("OTHER", description="Communication type (TSB, PIT, PIC, PIP, OTHER)")
-    communication_date: Optional[str] = Field(None, description="Communication date")
+    communication_date: Optional[datetime] = Field(None, description="Communication date")
     summary: str = Field("", description="Communication summary")
     details_summary: Optional[str] = Field(None, description="Summary from vehicle details")
     associated_products: list[AssociatedProduct] = Field(

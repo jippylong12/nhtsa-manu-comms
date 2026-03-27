@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Optional
 from bson import ObjectId
+from dateutil import parser as dateutil_parser
 
 from src.database import get_database
 from src.vehicles.service import VehicleService
@@ -14,6 +15,18 @@ from src.communications.nhtsa_client import (
     extract_id_to_comm_number,
 )
 from src.communications.schemas import get_comm_type, COMM_TYPE_MAP
+
+
+def _parse_comm_date(raw: Any) -> Optional[datetime]:
+    """Parse a communication date string into a UTC datetime, or None on failure."""
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    try:
+        return dateutil_parser.parse(str(raw))
+    except (ValueError, TypeError):
+        return None
 
 
 class CommunicationService:
@@ -181,10 +194,10 @@ class CommunicationService:
             "new_count": 0,
         }
 
-        # Check which IDs we need to fetch
+        # Check which IDs we need to fetch (scoped to this vehicle)
         if not force_refresh:
             existing = await db.communications.distinct(
-                "nhtsa_id", {"nhtsa_id": {"$in": nhtsa_ids}}
+                "nhtsa_id", {"nhtsa_id": {"$in": nhtsa_ids}, "vehicle_id": vehicle_id}
             )
             ids_to_fetch = [nid for nid in nhtsa_ids if nid not in existing]
         else:
@@ -240,7 +253,7 @@ class CommunicationService:
                     "vehicle_id": vehicle_id,
                     "communication_number": comm_number,
                     "communication_type": get_comm_type(comm_number, summary, documents),
-                    "communication_date": comm_data.get("communicationDate"),
+                    "communication_date": _parse_comm_date(comm_data.get("communicationDate")),
                     "summary": summary,
                     "details_summary": id_to_summary.get(nhtsa_id),
                     "associated_products": products,
@@ -249,9 +262,9 @@ class CommunicationService:
                     "fetched_at": datetime.now(timezone.utc),
                 }
 
-                # Upsert the communication
+                # Upsert per vehicle+nhtsa_id so each vehicle keeps its own copy
                 await db.communications.update_one(
-                    {"nhtsa_id": nhtsa_id},
+                    {"nhtsa_id": nhtsa_id, "vehicle_id": vehicle_id},
                     {"$set": doc},
                     upsert=True,
                 )
@@ -286,6 +299,7 @@ class CommunicationService:
             "total_ids": total_ids,
             "fetched_ids": total_ids,
             "new_count": new_count,
+            "matched_count": matched_count,
         }
 
     @staticmethod
@@ -303,13 +317,11 @@ class CommunicationService:
         # Total count
         total_count = await db.communications.count_documents({"vehicle_id": vehicle_id})
 
-        # Last 30 days count
+        # Last 30 days count (communication_date is stored as datetime)
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-        # Format as ISO with Z suffix to match stored format
-        thirty_days_str = thirty_days_ago.strftime("%Y-%m-%dT%H:%M:%SZ")
         last_30_query = {
             "vehicle_id": vehicle_id,
-            "communication_date": {"$gte": thirty_days_str},
+            "communication_date": {"$gte": thirty_days_ago},
         }
         last_30_count = await db.communications.count_documents(last_30_query)
 

@@ -135,7 +135,7 @@ async def fetch_communications_sync(payload: FetchRequest) -> FetchResult:
         vehicle_id=payload.vehicle_id,
         total_fetched=last_progress.get("total_ids", 0),
         new_count=last_progress.get("new_count", 0),
-        matched_count=last_progress.get("fetched_ids", 0),
+        matched_count=last_progress.get("matched_count", 0),
         duration_seconds=round(duration, 2),
     )
 
