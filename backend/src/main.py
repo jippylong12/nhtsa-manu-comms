@@ -1,13 +1,16 @@
 """NHTSA Manufacturer Communications API - FastAPI Application."""
 
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config import get_settings
-from src.database import connect_to_mongodb, close_mongodb_connection
-from src.vehicles.router import router as vehicles_router
 from src.communications.router import router as communications_router
+from src.config import get_settings
+from src.corpus.router import router as corpus_router
+from src.database import close_mongodb_connection, connect_to_mongodb
+from src.db import close_pool
+from src.vehicles.router import router as vehicles_router
 
 
 @asynccontextmanager
@@ -15,9 +18,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     # Startup
     await connect_to_mongodb()
+    # The Postgres pool is created lazily on first corpus request, so a missing
+    # DATABASE_URL never blocks the Mongo-backed endpoints from starting.
     yield
     # Shutdown
     await close_mongodb_connection()
+    await close_pool()
 
 
 app = FastAPI(
@@ -43,6 +49,7 @@ app.add_middleware(
 # Mount routers
 app.include_router(vehicles_router, prefix="/api")
 app.include_router(communications_router, prefix="/api")
+app.include_router(corpus_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Health"])
