@@ -1,0 +1,397 @@
+"""Vehicle-scoped hybrid retrieval over the Phase A corpus.
+
+Three signals are combined into one ranked list of communications:
+
+  1. pgvector cosine similarity over the document embeddings  (semantic).
+  2. Postgres full-text search over the document tsvector      (lexical).
+  3. A tag boost when the query names a known vehicle system   (structured).
+
+Vector distance and ts_rank live on incomparable scales, so the two ranked
+lists are fused with Reciprocal Rank Fusion (RRF) rather than by normalising one
+onto the other. RRF is rank-based, needs no per-corpus calibration, and is
+robust when one signal is much stronger than the other. The tag boost is added
+to the fused RRF score.
+
+Everything is restricted to the target vehicle through communication_vehicles,
+so a query for one vehicle can never surface another vehicle's-only
+communications. That scoping is the correctness guarantee JIP-379 requires.
+
+The tunable constants below (pool sizes, RRF damping, weights, tag boost) are
+the knobs the JIP-381 quality pass turns; they are deliberately module-level so
+tuning is a one-line change with a documented before/after.
+"""
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+from src.db import get_pool
+from src.jobs.embed import embed_query, to_pgvector
+from src.symptom_search.cost import QueryCost
+
+log = logging.getLogger("symptom_search.retrieval")
+
+# --- Tunable retrieval parameters (JIP-381 tunes these against the golden set).
+VECTOR_POOL = 40  # KNN candidates pulled before fusion
+FTS_POOL = 40  # full-text candidates pulled before fusion
+RRF_K = 60  # RRF damping constant (Cormack et al. default)
+W_VECTOR = 1.0  # weight on the vector list's RRF contribution
+W_FTS = 1.0  # weight on the FTS list's RRF contribution
+TAG_BOOST = 0.004  # added per query-mapped system a document also carries
+DEFAULT_K = 5
+
+# Query phrasing -> vehicle system. `query` terms are matched against the user's
+# words; `doc` terms against the LLM-assigned system tags (which are freeform, so
+# matching is substring-based). A rule fires for a document only when both sides
+# match, so an unrelated document is never boosted.
+SYSTEM_RULES: list[dict[str, list[str]]] = [
+    {
+        "name": "brakes",
+        "query": ["brake", "braking", "abs", "anti-lock", "antilock", "stability", "decelerat"],
+        "doc": ["brake", "abs", "stability", "chassis"],
+    },
+    {
+        "name": "infotainment",
+        "query": [
+            "radio",
+            "screen",
+            "display",
+            "infotainment",
+            "touchscreen",
+            "head unit",
+            "hud",
+            "head-up",
+            "heads up",
+            "heads-up",
+            "cluster",
+            "google",
+            "app",
+            "onstar",
+            "connected service",
+        ],
+        "doc": ["infotainment", "radio", "display", "cluster", "telematics", "hud"],
+    },
+    {
+        "name": "powertrain",
+        "query": [
+            "propulsion",
+            "power loss",
+            "loss of power",
+            "no start",
+            "won't start",
+            "wont start",
+            "stall",
+            "drivetrain",
+            "motor",
+            "drive unit",
+            "reduced power",
+        ],
+        "doc": ["powertrain", "engine", "propulsion", "drivetrain"],
+    },
+    {
+        "name": "electrical",
+        "query": [
+            "electrical",
+            "wiring",
+            "wire",
+            "12 volt",
+            "12-volt",
+            "module",
+            "fuse",
+            "high voltage",
+            "battery",
+            "charge",
+            "charging",
+        ],
+        "doc": ["electrical", "electric"],
+    },
+    {
+        "name": "suspension",
+        "query": ["suspension", "leveling", "air ride", "ride height", "shock", "air leveling"],
+        "doc": ["suspension"],
+    },
+    {
+        "name": "hvac",
+        "query": ["heat", "hvac", "a/c", "air conditioning", "climate", "defrost", "no heat"],
+        "doc": ["hvac", "climate", "heat"],
+    },
+    {
+        "name": "tpms",
+        "query": ["tpms", "tire pressure", "tire", "tyre"],
+        "doc": ["tire pressure", "tpms", "tire"],
+    },
+    {
+        "name": "steering",
+        "query": ["steering", "steer", "steering wheel"],
+        "doc": ["steering"],
+    },
+    {
+        "name": "body",
+        "query": [
+            "door",
+            "hood",
+            "tailgate",
+            "liftgate",
+            "window",
+            "glass",
+            "trunk",
+            "latch",
+            "footwell",
+            "carpet",
+            "water leak",
+            "leak",
+            "seat",
+            "mirror",
+        ],
+        "doc": ["body", "glass"],
+    },
+    {
+        "name": "driver_assist",
+        "query": [
+            "super cruise",
+            "adaptive cruise",
+            "lane keep",
+            "lane depart",
+            "collision",
+            "driver assist",
+            "safety feature",
+            "park assist",
+            "blind zone",
+            "blind spot",
+            "cruise",
+            "camera",
+        ],
+        "doc": ["driver assist", "assistance", "adas", "safety", "collision", "cruise", "camera"],
+    },
+]
+
+
+@dataclass
+class Match:
+    """One retrieved communication, with its ranking provenance."""
+
+    nhtsa_id: str
+    communication_number: Optional[str]
+    communication_type: Optional[str]
+    communication_date: Optional[datetime]
+    llm_summary: Optional[str]
+    symptoms: list[str]
+    systems: list[str]
+    components: list[str]
+    remedy: Optional[str]
+    doc_kind: Optional[str]
+    score: float
+    cosine_sim: Optional[float]
+    vector_rank: Optional[int]
+    fts_rank: Optional[int]
+    matched_systems: list[str]
+
+    def as_dict(self) -> dict:
+        return {
+            "nhtsa_id": self.nhtsa_id,
+            "communication_number": self.communication_number,
+            "communication_type": self.communication_type,
+            "communication_date": self.communication_date,
+            "llm_summary": self.llm_summary,
+            "symptoms": self.symptoms,
+            "systems": self.systems,
+            "components": self.components,
+            "remedy": self.remedy,
+            "doc_kind": self.doc_kind,
+            "score": round(self.score, 6),
+            "cosine_sim": round(self.cosine_sim, 4) if self.cosine_sim is not None else None,
+            "vector_rank": self.vector_rank,
+            "fts_rank": self.fts_rank,
+            "matched_systems": self.matched_systems,
+        }
+
+
+@dataclass
+class RetrievalResult:
+    query: str
+    vehicle_id: int
+    matches: list[Match]
+    cost: QueryCost
+
+
+def mapped_systems(query: str) -> list[str]:
+    """The vehicle systems a query's wording points at."""
+    q = query.lower()
+    return [r["name"] for r in SYSTEM_RULES if any(kw in q for kw in r["query"])]
+
+
+def _doc_matches_rule(rule: dict, systems: list[str]) -> bool:
+    haystack = " ".join(s.lower() for s in systems)
+    return any(tok in haystack for tok in rule["doc"])
+
+
+def _tag_boost(query_systems: set[str], doc_systems: list[str]) -> tuple[float, list[str]]:
+    """Boost a document once per query-mapped system it also carries."""
+    hit = [
+        r["name"]
+        for r in SYSTEM_RULES
+        if r["name"] in query_systems and _doc_matches_rule(r, doc_systems)
+    ]
+    return TAG_BOOST * len(hit), hit
+
+
+_VEHICLE_SCOPE = (
+    "EXISTS (SELECT 1 FROM communication_vehicles cv "
+    "JOIN vehicles v ON v.id = cv.vehicle_id "
+    "WHERE cv.communication_id = c.id AND v.nhtsa_vehicle_id = $2)"
+)
+
+_SELECT_COLS = (
+    "d.id AS doc_id, c.nhtsa_id, c.communication_number, c.communication_type, "
+    "c.communication_date, d.llm_summary, d.symptoms, d.systems, d.components, "
+    "d.remedy, d.doc_kind"
+)
+
+
+async def _vector_candidates(conn, vec_literal: str, vehicle_id: int) -> list[dict]:
+    rows = await conn.fetch(
+        f"""
+        SELECT {_SELECT_COLS}, 1 - (d.embedding <=> $1::vector) AS cosine_sim
+        FROM comm_documents d
+        JOIN communications c ON c.id = d.communication_id
+        WHERE d.embedding IS NOT NULL AND {_VEHICLE_SCOPE}
+        ORDER BY d.embedding <=> $1::vector
+        LIMIT $3
+        """,
+        vec_literal,
+        vehicle_id,
+        VECTOR_POOL,
+    )
+    return [dict(r) for r in rows]
+
+
+async def _fts_candidates(conn, query: str, vehicle_id: int) -> list[dict]:
+    # plainto_tsquery keeps user input from ever being parsed as tsquery
+    # operators; $2 stays the vehicle id so the scope clause is shared verbatim.
+    rows = await conn.fetch(
+        f"""
+        SELECT {_SELECT_COLS},
+               ts_rank(d.search_tsv, plainto_tsquery('english', $1)) AS fts_rank
+        FROM comm_documents d
+        JOIN communications c ON c.id = d.communication_id
+        WHERE d.search_tsv @@ plainto_tsquery('english', $1) AND {_VEHICLE_SCOPE}
+        ORDER BY fts_rank DESC
+        LIMIT $3
+        """,
+        query,
+        vehicle_id,
+        FTS_POOL,
+    )
+    return [dict(r) for r in rows]
+
+
+def _fuse(
+    query: str,
+    vec_rows: list[dict],
+    fts_rows: list[dict],
+    k: int,
+) -> list[Match]:
+    """Reciprocal-rank-fuse the two candidate lists, apply the tag boost, and
+    collapse to one entry per communication (its best-scoring document)."""
+    q_systems = set(mapped_systems(query))
+
+    # Per document: accumulate RRF contributions and keep the richest metadata.
+    docs: dict[int, dict] = {}
+
+    def _ensure(row: dict) -> dict:
+        entry = docs.get(row["doc_id"])
+        if entry is None:
+            entry = {
+                "row": row,
+                "rrf": 0.0,
+                "vector_rank": None,
+                "fts_rank": None,
+                "cosine_sim": None,
+            }
+            docs[row["doc_id"]] = entry
+        return entry
+
+    for rank, row in enumerate(vec_rows, start=1):
+        e = _ensure(row)
+        e["rrf"] += W_VECTOR / (RRF_K + rank)
+        e["vector_rank"] = rank
+        e["cosine_sim"] = row.get("cosine_sim")
+
+    for rank, row in enumerate(fts_rows, start=1):
+        e = _ensure(row)
+        e["rrf"] += W_FTS / (RRF_K + rank)
+        e["fts_rank"] = rank
+
+    # Score each document, then keep the top-scoring document per nhtsa_id.
+    best_by_comm: dict[str, Match] = {}
+    for e in docs.values():
+        row = e["row"]
+        systems = list(row.get("systems") or [])
+        boost, matched = _tag_boost(q_systems, systems)
+        score = e["rrf"] + boost
+        match = Match(
+            nhtsa_id=row["nhtsa_id"],
+            communication_number=row.get("communication_number"),
+            communication_type=row.get("communication_type"),
+            communication_date=row.get("communication_date"),
+            llm_summary=row.get("llm_summary"),
+            symptoms=list(row.get("symptoms") or []),
+            systems=systems,
+            components=list(row.get("components") or []),
+            remedy=row.get("remedy"),
+            doc_kind=row.get("doc_kind"),
+            score=score,
+            cosine_sim=e["cosine_sim"],
+            vector_rank=e["vector_rank"],
+            fts_rank=e["fts_rank"],
+            matched_systems=matched,
+        )
+        existing = best_by_comm.get(match.nhtsa_id)
+        if existing is None or match.score > existing.score:
+            best_by_comm[match.nhtsa_id] = match
+
+    ranked = sorted(best_by_comm.values(), key=lambda m: m.score, reverse=True)
+    return ranked[:k]
+
+
+async def retrieve(
+    vehicle_id: int,
+    query: str,
+    k: int = DEFAULT_K,
+    *,
+    embedding: Optional[list[float]] = None,
+    cost: Optional[QueryCost] = None,
+) -> RetrievalResult:
+    """Retrieve the top-k communications for a symptom query, scoped to a vehicle.
+
+    ``embedding`` may be supplied by a caller that has already vectorised the
+    query (the B2 API embeds once and reuses it); otherwise the query is embedded
+    here. ``cost`` accumulates the embedding cost for per-query reporting.
+    """
+    query = (query or "").strip()
+    cost = cost or QueryCost()
+    if not query:
+        return RetrievalResult(query=query, vehicle_id=vehicle_id, matches=[], cost=cost)
+
+    if embedding is None:
+        embedding = await embed_query(query)
+        cost.record_embed(query)
+
+    vec_literal = to_pgvector(embedding)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        vec_rows = await _vector_candidates(conn, vec_literal, vehicle_id)
+        fts_rows = await _fts_candidates(conn, query, vehicle_id)
+
+    matches = _fuse(query, vec_rows, fts_rows, k)
+    log.info(
+        "retrieve vehicle=%s k=%s -> %d matches (vec=%d fts=%d) top=%.4f",
+        vehicle_id,
+        k,
+        len(matches),
+        len(vec_rows),
+        len(fts_rows),
+        matches[0].score if matches else 0.0,
+    )
+    return RetrievalResult(query=query, vehicle_id=vehicle_id, matches=matches, cost=cost)
