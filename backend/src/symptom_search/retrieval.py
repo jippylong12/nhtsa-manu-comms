@@ -32,13 +32,18 @@ from src.symptom_search.cost import QueryCost
 
 log = logging.getLogger("symptom_search.retrieval")
 
-# --- Tunable retrieval parameters (JIP-381 tunes these against the golden set).
+# --- Retrieval parameters, tuned in JIP-381 against the 39-query golden set.
+# The sweep (see docs/symptom-search-eval.md) found the semantic signal much
+# stronger than lexical FTS for paraphrased symptom queries: weighting vector 4:1
+# over FTS lifted hit@3 65.5%->86.2% and hit@5 82.8%->93.1%. The tag boost tested
+# neutral-to-negative at these weights, so it is kept small (a system-match
+# tiebreaker); values >=0.002 hurt hit@3 by promoting broad multi-system bulletins.
 VECTOR_POOL = 40  # KNN candidates pulled before fusion
 FTS_POOL = 40  # full-text candidates pulled before fusion
 RRF_K = 60  # RRF damping constant (Cormack et al. default)
-W_VECTOR = 1.0  # weight on the vector list's RRF contribution
-W_FTS = 1.0  # weight on the FTS list's RRF contribution
-TAG_BOOST = 0.004  # added per query-mapped system a document also carries
+W_VECTOR = 2.0  # weight on the vector list's RRF contribution
+W_FTS = 0.5  # weight on the FTS list's RRF contribution
+TAG_BOOST = 0.001  # added per query-mapped system a document also carries
 DEFAULT_K = 5
 
 # Query phrasing -> vehicle system. `query` terms are matched against the user's

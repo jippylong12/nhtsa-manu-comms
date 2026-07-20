@@ -161,6 +161,130 @@
       "query": "I keep getting a no key fob detected message even though the fob is in the truck",
       "expected": ["11027936"],
       "note": "PIT6478"
+    },
+
+    {
+      "id": "screen_bricks_black_colloquial",
+      "vehicle_id": 218944,
+      "query": "my whole dash bricks itself, goes totally black and reboots while I am driving",
+      "expected": ["11019013"],
+      "note": "colloquial + multi-system; SB 24-NA-193 black screen / cluster reset while driving"
+    },
+    {
+      "id": "ghost_braking_colloquial",
+      "vehicle_id": 715144,
+      "query": "the truck ghost-brakes on me and jerks to a stop for no reason",
+      "expected": ["11028675", "11028731", "11029963"],
+      "note": "colloquial for unexpected hard braking (N252521591)"
+    },
+    {
+      "id": "damp_floor_vague",
+      "vehicle_id": 685101,
+      "query": "there is a musty damp smell inside and the floor feels wet on one side",
+      "expected": ["11030274"],
+      "note": "vague phrasing of footwell water intrusion"
+    },
+    {
+      "id": "garage_remote_wont_learn_colloquial",
+      "vehicle_id": 715144,
+      "query": "the built-in universal garage remote just will not learn my door",
+      "expected": ["11017773"],
+      "note": "colloquial for garage door opener programming (PIT6368A U118B)"
+    },
+    {
+      "id": "handsfree_cruise_flaky_colloquial",
+      "vehicle_id": 685101,
+      "query": "my hands-free highway cruise keeps dropping out and saying it is not available",
+      "expected": ["11014322"],
+      "note": "colloquial for Super Cruise unavailable (PIC6557D)"
+    },
+    {
+      "id": "hv_warning_charge_capped",
+      "vehicle_id": 685101,
+      "query": "service high voltage warning is on and it will not charge past about a quarter full",
+      "expected": ["11019066"],
+      "note": "PIC6609 service high voltage + charge limited to 26% (distinct from no-heat variant)"
+    },
+
+    {
+      "id": "nm_espresso",
+      "vehicle_id": 685101,
+      "query": "what is the best recipe for a good espresso",
+      "expected": [],
+      "no_match": true,
+      "note": "totally unrelated"
+    },
+    {
+      "id": "nm_diesel_timing_belt",
+      "vehicle_id": 218944,
+      "query": "the diesel engine timing belt is squealing loudly",
+      "expected": [],
+      "no_match": true,
+      "note": "no diesel / no timing belt on an EV"
+    },
+    {
+      "id": "nm_manual_transmission",
+      "vehicle_id": 218944,
+      "query": "the manual transmission grinds every time I shift into third gear",
+      "expected": [],
+      "no_match": true,
+      "note": "no manual transmission"
+    },
+    {
+      "id": "nm_carburetor",
+      "vehicle_id": 715144,
+      "query": "the carburetor is flooding and the choke sticks closed",
+      "expected": [],
+      "no_match": true,
+      "note": "no carburetor on an EV"
+    },
+    {
+      "id": "nm_convertible_top",
+      "vehicle_id": 685101,
+      "query": "the convertible soft top will not retract or fold down",
+      "expected": [],
+      "no_match": true,
+      "note": "not a convertible"
+    },
+    {
+      "id": "nm_exhaust_muffler",
+      "vehicle_id": 715144,
+      "query": "the exhaust is really loud and there is a hole rusted through the muffler",
+      "expected": [],
+      "no_match": true,
+      "note": "no exhaust / muffler on an EV"
+    },
+    {
+      "id": "nm_clutch_pedal",
+      "vehicle_id": 685101,
+      "query": "the clutch pedal goes straight to the floor and will not disengage",
+      "expected": [],
+      "no_match": true,
+      "note": "no clutch"
+    },
+    {
+      "id": "nm_spark_plugs",
+      "vehicle_id": 218944,
+      "query": "how do I change the spark plugs and set the gap",
+      "expected": [],
+      "no_match": true,
+      "note": "no spark plugs on an EV"
+    },
+    {
+      "id": "nm_death_wobble",
+      "vehicle_id": 685101,
+      "query": "bad death wobble in the front end shaking the whole truck at highway speed",
+      "expected": [],
+      "no_match": true,
+      "note": "colloquial front-end steering oscillation; no matching bulletin expected"
+    },
+    {
+      "id": "nm_gas_mileage",
+      "vehicle_id": 218944,
+      "query": "my gas mileage dropped a lot and the fuel gauge is stuck on empty",
+      "expected": [],
+      "no_match": true,
+      "note": "EV has no fuel gauge / gas mileage; probes whether the TOP TIER fuel IB falsely matches"
     }
   ]
 }
