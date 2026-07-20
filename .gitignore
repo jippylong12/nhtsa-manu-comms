@@ -33,3 +33,6 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+# Pipeline PDF archive (local cache)
+.pdf_archive/
+backend/.pdf_archive/

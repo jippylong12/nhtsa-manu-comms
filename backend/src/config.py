@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # Document pipeline
+    pdf_archive_dir: str = ".pdf_archive"
+    pdf_download_concurrency: int = 3
+    # Below this, extraction is treated as garbled and the document is routed to
+    # the vision fallback. The A1 spike measured a corpus minimum of 475
+    # chars/page across 174 documents, so 200 is a safety net that fires on
+    # roughly nothing rather than a routine path.
+    low_yield_chars_per_page: int = 200
+
     # Gemini (structured extraction + embeddings)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite"

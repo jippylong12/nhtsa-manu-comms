@@ -7,6 +7,7 @@ residue behind.
 """
 
 import asyncpg
+import pytest
 import pytest_asyncio
 
 from src.config import get_settings
