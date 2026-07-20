@@ -57,17 +57,21 @@ def _build_filters(
         f.add("c.communication_date >= {}", date_from)
     if date_to:
         f.add("c.communication_date <= {}", date_to)
+    # Tag matching is case-insensitive: the LLM emits both "electrical" and
+    # "Electrical", so a case-sensitive `&&` overlap would silently miss half
+    # the corpus. The filter value is lowercased and compared against each
+    # unnested, lowercased tag.
     if systems:
         f.add(
-            "EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id = c.id "
-            "AND d.systems && {}::text[])",
-            systems,
+            "EXISTS (SELECT 1 FROM comm_documents d, unnest(d.systems) s "
+            "WHERE d.communication_id = c.id AND lower(s) = ANY({}::text[]))",
+            [t.lower() for t in systems],
         )
     if components:
         f.add(
-            "EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id = c.id "
-            "AND d.components && {}::text[])",
-            components,
+            "EXISTS (SELECT 1 FROM comm_documents d, unnest(d.components) s "
+            "WHERE d.communication_id = c.id AND lower(s) = ANY({}::text[]))",
+            [t.lower() for t in components],
         )
     if search:
         # Full-text over both the communication's own vector and its documents',
@@ -139,28 +143,48 @@ async def list_communications(
             (page - 1) * per_page,
         )
 
+        # Fetch every page row's vehicles in ONE query and group in Python,
+        # rather than a query per row. Over a remote database the per-row
+        # version was an N+1 that made a 200-row page take tens of seconds.
+        nhtsa_ids = [r["nhtsa_id"] for r in rows]
+        vehicles_by_comm = await _vehicles_for_many(conn, nhtsa_ids)
+
         result = []
         for r in rows:
             d = dict(r)
-            d["vehicles"] = await _vehicles_for(conn, r["nhtsa_id"])
+            d["vehicles"] = vehicles_by_comm.get(r["nhtsa_id"], [])
             result.append(d)
 
     return result, total
 
 
-async def _vehicles_for(conn, nhtsa_id: str) -> list[dict]:
+async def _vehicles_for_many(conn, nhtsa_ids: list[str]) -> dict[str, list[dict]]:
+    """Vehicles for many communications in a single round trip, keyed by nhtsa_id."""
+    if not nhtsa_ids:
+        return {}
     rows = await conn.fetch(
         """
-        SELECT v.nhtsa_vehicle_id, v.year, v.make, v.model, v.trim
+        SELECT c.nhtsa_id,
+               v.nhtsa_vehicle_id, v.year, v.make, v.model, v.trim
         FROM communication_vehicles cv
         JOIN vehicles v ON v.id = cv.vehicle_id
         JOIN communications c ON c.id = cv.communication_id
-        WHERE c.nhtsa_id = $1
+        WHERE c.nhtsa_id = ANY($1::text[])
         ORDER BY v.year, v.model
         """,
-        nhtsa_id,
+        nhtsa_ids,
     )
-    return [dict(r) for r in rows]
+    grouped: dict[str, list[dict]] = {}
+    for r in rows:
+        d = dict(r)
+        nid = d.pop("nhtsa_id")
+        grouped.setdefault(nid, []).append(d)
+    return grouped
+
+
+async def _vehicles_for(conn, nhtsa_id: str) -> list[dict]:
+    """Vehicles for a single communication (used by the detail endpoint)."""
+    return (await _vehicles_for_many(conn, [nhtsa_id])).get(nhtsa_id, [])
 
 
 async def get_communication(nhtsa_id: str) -> Optional[dict]:
@@ -199,25 +223,29 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
 
 
 async def tag_vocabulary(limit: int = 100) -> dict[str, list[dict]]:
-    """Distinct systems and components with document counts, for filter UIs."""
+    """Distinct systems and components with document counts, for filter UIs.
+
+    Case variants are merged (the LLM emits both "electrical" and "Electrical"),
+    counts summed, and the most frequent surface form kept as the label. This
+    matches the case-insensitive tag filter, so a chip's count reflects exactly
+    what clicking it returns.
+    """
+    # `mode()` picks the most common original casing within each lowercased group.
+    tag_sql = """
+        SELECT label AS tag, total AS count FROM (
+            SELECT lower(s) AS key,
+                   mode() WITHIN GROUP (ORDER BY s) AS label,
+                   count(*) AS total
+            FROM comm_documents d, unnest(d.{col}) s
+            GROUP BY lower(s)
+        ) g
+        ORDER BY total DESC, tag
+        LIMIT $1
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        systems = await conn.fetch(
-            """
-            SELECT s AS tag, count(*) AS count
-            FROM comm_documents d, unnest(d.systems) s
-            GROUP BY s ORDER BY count DESC, tag LIMIT $1
-            """,
-            limit,
-        )
-        components = await conn.fetch(
-            """
-            SELECT s AS tag, count(*) AS count
-            FROM comm_documents d, unnest(d.components) s
-            GROUP BY s ORDER BY count DESC, tag LIMIT $1
-            """,
-            limit,
-        )
+        systems = await conn.fetch(tag_sql.format(col="systems"), limit)
+        components = await conn.fetch(tag_sql.format(col="components"), limit)
     return {
         "systems": [dict(r) for r in systems],
         "components": [dict(r) for r in components],

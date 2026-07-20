@@ -240,9 +240,21 @@ async def test_detail_missing_returns_none(seeded):
 
 
 async def test_tag_vocabulary_counts(seeded):
-    vocab = await service.tag_vocabulary(limit=500)
+    # High limit so the fixture's rare "rotor" component is not truncated: the
+    # real corpus has ~950 distinct components, well past any small top-N.
+    vocab = await service.tag_vocabulary(limit=5000)
     systems = {t["tag"]: t["count"] for t in vocab["systems"]}
     assert systems.get("brakes", 0) >= 1
     assert systems.get("infotainment", 0) >= 1
     components = {t["tag"]: t["count"] for t in vocab["components"]}
     assert components.get("rotor", 0) >= 1
+
+
+async def test_tag_vocabulary_merges_case_variants(seeded):
+    """The LLM emits both 'electrical' and 'Electrical'; the vocabulary must
+    collapse them to one entry so a chip's count matches its filter result."""
+    vocab = await service.tag_vocabulary(limit=5000)
+    system_tags = [t["tag"] for t in vocab["systems"]]
+    # No two entries differ only by case.
+    lowered = [t.lower() for t in system_tags]
+    assert len(lowered) == len(set(lowered)), "case-variant systems were not merged"

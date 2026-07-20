@@ -199,8 +199,106 @@ export interface CommunicationFilters {
     perPage?: number;
 }
 
+// Shape returned by GET /communications/discovery/variants. The backend's
+// get_vehicle_variants builds these camelCase keys directly; the previous
+// PascalCase declaration ({VehicleId, VehicleDescription}) never matched the
+// wire format, which forced the unsound casts in AddVehicleModal and broke the
+// production build.
 export interface VehicleVariant {
-    VehicleId: number;
-    VehicleDescription: string;
+    vehicleId: number;
+    ncapId: number;
+    modelYear: number;
+    make: string;
+    model: string;
+    trim: string;
+    series: string;
+    vehicleDescription: string;
+}
+
+// --- Corpus (Postgres-backed processed pipeline) ---
+
+export type ProcessingStatus = 'pending' | 'processed' | 'failed';
+
+export interface CorpusVehicle {
+    nhtsaVehicleId: number;
+    year: number;
+    make: string;
+    model: string;
+    trim?: string | null;
+}
+
+export interface CorpusDocument {
+    id: number;
+    url: string;
+    docSummary?: string | null;
+    extractionMethod?: string | null;
+    pageCount?: number | null;
+    llmSummary?: string | null;
+    docKind?: string | null;
+    symptoms: string[];
+    systems: string[];
+    components: string[];
+    remedy?: string | null;
+    applicability?: string | null;
+    hasEmbedding: boolean;
+}
+
+export interface CorpusCommunicationSummary {
+    nhtsaId: string;
+    communicationNumber?: string | null;
+    communicationType?: CommType | null;
+    communicationDate?: string | null;
+    summary: string;
+    status: ProcessingStatus;
+    documentCount: number;
+    llmSummary?: string | null;
+    symptoms: string[];
+    systems: string[];
+    vehicles: CorpusVehicle[];
+}
+
+export interface CorpusCommunicationDetail {
+    nhtsaId: string;
+    communicationNumber?: string | null;
+    communicationType?: CommType | null;
+    communicationDate?: string | null;
+    summary: string;
+    detailsSummary?: string | null;
+    status: ProcessingStatus;
+    statusReason?: string | null;
+    processedAt?: string | null;
+    documents: CorpusDocument[];
+    vehicles: CorpusVehicle[];
+}
+
+export interface CorpusListResponse {
+    items: CorpusCommunicationSummary[];
+    total: number;
+    page: number;
+    perPage: number;
+}
+
+export interface TagCount {
+    tag: string;
+    count: number;
+}
+
+export interface TagVocabulary {
+    systems: TagCount[];
+    components: TagCount[];
+}
+
+export interface CorpusFilters {
+    [key: string]: unknown;
+    vehicleId?: number;
+    commType?: CommType;
+    status?: ProcessingStatus;
+    dateFrom?: string;
+    dateTo?: string;
+    systems?: string[];
+    components?: string[];
+    search?: string;
+    page?: number;
+    perPage?: number;
 }
 

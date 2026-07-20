@@ -15,3 +15,12 @@ export const communicationKeys = {
     details: () => [...communicationKeys.all, 'detail'] as const,
     detail: (nhtsaId: number) => [...communicationKeys.details(), nhtsaId] as const,
 };
+
+export const corpusKeys = {
+    all: ['corpus'] as const,
+    lists: () => [...corpusKeys.all, 'list'] as const,
+    list: (filters: Record<string, unknown>) => [...corpusKeys.lists(), filters] as const,
+    details: () => [...corpusKeys.all, 'detail'] as const,
+    detail: (nhtsaId: string) => [...corpusKeys.details(), nhtsaId] as const,
+    tags: () => [...corpusKeys.all, 'tags'] as const,
+};

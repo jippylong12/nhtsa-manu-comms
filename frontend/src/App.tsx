@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider, useAppState, useAppDispatch } from './contexts/AppContext';
 import { AppShell } from './components/layout/AppShell';
 import { Sidebar } from './components/layout/Sidebar';
-import { CommunicationsView } from './features/communications/components/CommunicationsView';
+import { CorpusView } from './features/communications/components/CorpusView';
 import { VehicleGrid } from './features/vehicles/components/VehicleGrid';
 import { AddVehicleModal } from './features/vehicles/components/AddVehicleModal';
 import { useVehiclesQuery, useCreateVehicle, useDeleteVehicle } from './features/vehicles/hooks/useVehicles';
@@ -50,7 +50,7 @@ function Dashboard() {
       }
     >
       {selectedVehicle ? (
-        <CommunicationsView
+        <CorpusView
           vehicleId={selectedVehicle.vehicleId}
           vehicle={selectedVehicle}
           onBack={() => dispatch({ type: 'SELECT_VEHICLE', payload: null })}
