@@ -44,3 +44,9 @@ backend/.pipeline_logs/
 backend/.pipeline.lock
 digest_preview.html
 backend/digest_preview.html
+
+# Generated one-off reports (kept locally, not tracked)
+*-pit-report.html
+
+# Scratch
+/tmp/

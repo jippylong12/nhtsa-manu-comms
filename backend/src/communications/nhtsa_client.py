@@ -145,7 +145,7 @@ class NHTSAClient:
     async def get_models_for_make_year(self, year: int, make: str) -> list[str]:
         """Fetch models for a given year and make using /vehicles/models endpoint."""
         url = f"{self.base_url}/vehicles/models"
-        params = {"modelYear": year, "make": make}
+        params = {"modelYear": year, "make": make, "max": 100}
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.get(url, params=params, headers=self.headers)
@@ -159,7 +159,7 @@ class NHTSAClient:
     async def get_trims_for_model(self, year: int, make: str, model: str) -> list[str]:
         """Fetch available trims for a given Y/M/M using /vehicles/trims endpoint."""
         url = f"{self.base_url}/vehicles/trims"
-        params = {"modelYear": year, "make": make, "model": model}
+        params = {"modelYear": year, "make": make, "model": model, "max": 100}
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.get(url, params=params, headers=self.headers)
@@ -177,7 +177,7 @@ class NHTSAClient:
         /vehicles/{vehicleId}/details for manufacturer communications.
         """
         url = f"{self.base_url}/vehicles/byYmmt"
-        params: dict[str, Any] = {"modelYear": year, "make": make, "model": model}
+        params: dict[str, Any] = {"modelYear": year, "make": make, "model": model, "max": 100}
         if trim:
             params["trim"] = trim
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -260,4 +260,3 @@ def extract_id_to_comm_number(details: dict[str, Any]) -> dict[int, str]:
         except (TypeError, ValueError):
             continue
     return mapping
-

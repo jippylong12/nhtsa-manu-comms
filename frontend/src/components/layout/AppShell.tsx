@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { Group, Panel, Separator } from 'react-resizable-panels';
 import styles from './AppShell.module.css';
 
 interface AppShellProps {
@@ -10,7 +10,7 @@ interface AppShellProps {
 export function AppShell({ sidebar, children }: AppShellProps) {
   return (
     <div className={styles.shell}>
-      <PanelGroup direction="horizontal" autoSaveId="app-layout">
+      <Group orientation="horizontal" id="app-layout">
         <Panel
           defaultSize={20}
           minSize={15}
@@ -23,13 +23,13 @@ export function AppShell({ sidebar, children }: AppShellProps) {
             {sidebar}
           </aside>
         </Panel>
-        <PanelResizeHandle className={styles.resizeHandle} />
+        <Separator className={styles.resizeHandle} />
         <Panel minSize={50} className={styles.mainPanel}>
           <main className={styles.main}>
             {children}
           </main>
         </Panel>
-      </PanelGroup>
+      </Group>
     </div>
   );
 }
