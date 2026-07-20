@@ -137,6 +137,17 @@ async def build_digest(since: Optional[datetime], generated_at: datetime) -> Dig
     )
 
 
+def _safe_link(url: Optional[str]) -> bool:
+    """True only for http(s) URLs.
+
+    `html.escape` neutralizes quote breakout but not the scheme, so a stored
+    `javascript:`/`data:` URL would still render as a live link (dangerous when
+    the dry-run preview HTML is opened in a browser). Document URLs come from
+    the NHTSA API, but they are external data, so allowlist the scheme.
+    """
+    return bool(url) and url.strip().lower().startswith(("http://", "https://"))
+
+
 def render_text(digest: Digest) -> str:
     """Plain-text alternative part."""
     lines = [
@@ -177,7 +188,7 @@ def render_html(digest: Digest) -> str:
             link = (
                 f'<a href="{escape(it.url)}" style="color:#60a5fa;text-decoration:none;'
                 f'font-size:13px;">View source document &rarr;</a>'
-                if it.url
+                if _safe_link(it.url)
                 else ""
             )
             rows.append(
@@ -330,6 +341,12 @@ def main() -> int:
         format="%(asctime)s %(levelname)-7s %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # --since-days is a test-render knob. Combining it with --send would email
+    # an arbitrary window as "new" and then rewrite the real watermark to that
+    # window's max, corrupting it. Refuse the combination.
+    if args.since_days is not None and args.send:
+        parser.error("--since-days is for dry-run rendering only; do not combine it with --send")
 
     async def _main() -> int:
         now = datetime.now(timezone.utc)

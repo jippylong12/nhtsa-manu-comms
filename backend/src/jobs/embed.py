@@ -121,6 +121,18 @@ async def embed_pending(limit: int | None = None, force: bool = False) -> EmbedS
             log.error(msg)
             continue
 
+        # A silent length mismatch between inputs and returned embeddings would
+        # otherwise misalign every doc after the gap with the wrong vector.
+        if len(resp.embeddings) != len(chunk):
+            msg = (
+                f"batch at offset {start}: got {len(resp.embeddings)} embeddings "
+                f"for {len(chunk)} inputs; skipping this batch to avoid misalignment"
+            )
+            stats.failed += len(chunk)
+            stats.errors.append(msg)
+            log.error(msg)
+            continue
+
         async with pool.acquire() as conn:
             for row, emb in zip(chunk, resp.embeddings):
                 values = normalize(list(emb.values))
@@ -130,6 +142,12 @@ async def embed_pending(limit: int | None = None, force: bool = False) -> EmbedS
                         f"doc {row['id']}: got {len(values)} dims, "
                         f"expected {settings.embedding_dimensions}"
                     )
+                    continue
+                if not any(values):
+                    # An all-zero vector has undefined cosine distance in
+                    # pgvector; skip rather than poison KNN results.
+                    stats.failed += 1
+                    stats.errors.append(f"doc {row['id']}: zero-magnitude embedding, skipped")
                     continue
                 await conn.execute(
                     """

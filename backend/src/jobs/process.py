@@ -114,19 +114,32 @@ async def run_llm(limit: int | None, sync: bool) -> None:
         return
 
     names = await llm_stage.submit_batch(limit=limit)
-    if not names:
-        return
-    log.info("submitted %d batch job(s); collecting", len(names))
-    stats = await llm_stage.collect_batch(names)
-    await record_run(
-        "llm",
-        {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": names},
-        stats.tokens_in,
-        stats.tokens_out,
-        stats.cost_usd,
-        ok=stats.failed == 0,
-        error="; ".join(stats.errors[:5]) or None,
-    )
+    if names:
+        log.info("submitted %d batch job(s); collecting", len(names))
+        stats = await llm_stage.collect_batch(names)
+        await record_run(
+            "llm",
+            {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": names},
+            stats.tokens_in,
+            stats.tokens_out,
+            stats.cost_usd,
+            ok=stats.failed == 0,
+            error="; ".join(stats.errors[:5]) or None,
+        )
+
+    # The Batch API path excludes vision-fallback documents; process them
+    # synchronously so their communications are not stranded in `pending`.
+    vision = await llm_stage.run_sync(limit=limit, vision_only=True)
+    if vision.processed or vision.failed:
+        await record_run(
+            "llm",
+            {"processed": vision.processed, "failed": vision.failed, "mode": "vision-sync"},
+            vision.tokens_in,
+            vision.tokens_out,
+            vision.cost_usd,
+            ok=vision.failed == 0,
+            error="; ".join(vision.errors[:5]) or None,
+        )
 
 
 async def run_embed(limit: int | None) -> None:

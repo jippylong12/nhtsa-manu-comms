@@ -27,6 +27,7 @@ import logging
 import os
 import pathlib
 from datetime import datetime, timezone
+from typing import Optional
 
 from src.db import close_pool
 from src.jobs import digest as digest_job
@@ -57,19 +58,32 @@ class _Lock:
         self.path = path
 
     def __enter__(self):
-        if self.path.exists():
-            try:
-                pid = int(self.path.read_text().strip())
-            except (ValueError, OSError):
-                pid = None
+        # Atomic create-or-fail (O_EXCL) so two runs starting close together
+        # cannot both pass a check-then-write and proceed. If it already exists,
+        # inspect the holder and only remove it if the process is truly gone.
+        try:
+            self._acquire()
+        except FileExistsError:
+            pid = self._read_pid()
             if pid and _pid_alive(pid):
                 raise SystemExit(
                     f"another pipeline run is active (pid {pid}, lock {self.path}). Exiting."
                 )
             log.warning("removing stale lockfile from pid %s", pid)
             self.path.unlink(missing_ok=True)
-        self.path.write_text(str(os.getpid()))
+            self._acquire()
         return self
+
+    def _acquire(self) -> None:
+        # "x" opens for exclusive creation, failing atomically if it exists.
+        with open(self.path, "x") as fh:
+            fh.write(str(os.getpid()))
+
+    def _read_pid(self) -> Optional[int]:
+        try:
+            return int(self.path.read_text().strip())
+        except (ValueError, OSError):
+            return None
 
     def __exit__(self, *exc):
         self.path.unlink(missing_ok=True)

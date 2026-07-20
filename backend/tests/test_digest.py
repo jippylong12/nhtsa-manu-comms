@@ -150,3 +150,42 @@ async def test_render_html_and_text_have_content(seeded):
     assert "electrical" in html  # system chip rendered
     # No raw script tags reach the output (escaping is applied to content).
     assert "<script" not in html.lower()
+
+
+def test_safe_link_only_allows_http():
+    assert D._safe_link("https://static.nhtsa.gov/x.pdf") is True
+    assert D._safe_link("http://example.com/x.pdf") is True
+    assert D._safe_link("javascript:alert(1)") is False
+    assert D._safe_link("data:text/html,<script>") is False
+    assert D._safe_link("  JavaScript:alert(1)") is False  # trim + case
+    assert D._safe_link(None) is False
+    assert D._safe_link("") is False
+
+
+def test_render_html_drops_dangerous_url():
+    """A javascript: document URL must not become a live link."""
+    d = D.Digest(
+        generated_at=BASE,
+        since=None,
+        watermark=None,
+        groups=[
+            D.VehicleGroup(
+                label="2099 TEST",
+                items=[
+                    D.DigestItem(
+                        nhtsa_id="X",
+                        communication_type="TSB",
+                        communication_date=BASE,
+                        summary="s",
+                        llm_summary="a summary",
+                        symptoms=[],
+                        systems=[],
+                        url="javascript:alert(document.cookie)",
+                    )
+                ],
+            )
+        ],
+    )
+    html = D.render_html(d)
+    assert "javascript:" not in html
+    assert "View source document" not in html  # link omitted entirely

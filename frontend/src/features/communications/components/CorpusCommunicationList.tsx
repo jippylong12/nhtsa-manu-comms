@@ -143,14 +143,23 @@ function CorpusRow({ comm, onSelectType, onSelectSystem, activeSystems = [] }: R
             <FileText size={14} />
             {comm.documentCount}
           </span>
-          <button className="btn btn-ghost btn-icon btn-sm">
+          <button
+            className="btn btn-ghost btn-icon btn-sm"
+            aria-label={expanded ? 'Collapse details' : 'Expand details'}
+            aria-expanded={expanded}
+            aria-controls={`comm-details-${comm.nhtsaId}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+          >
             {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
           </button>
         </div>
       </div>
 
       {expanded && (
-        <div className={`${styles.details} animate-fade-in`}>
+        <div id={`comm-details-${comm.nhtsaId}`} className={`${styles.details} animate-fade-in`}>
           {detailLoading && <div className="skeleton" style={{ height: 80 }} />}
 
           {detail && (

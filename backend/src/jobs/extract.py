@@ -175,7 +175,7 @@ async def extract_pending(limit: int | None = None, force: bool = False) -> Extr
             FROM comm_documents d
             JOIN communications c ON c.id = d.communication_id
             WHERE ({'TRUE' if force else unextracted})
-              AND c.status <> 'processed'
+              AND c.status = 'pending'
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """
@@ -265,13 +265,16 @@ async def _record_failure(pool, row, reason: str) -> None:
     `failed` row explaining why, so the closeout report can account for it.
     """
     async with pool.acquire() as conn:
+        # Guard on status <> 'processed' so a late failure from a sibling
+        # document can never drag an already-processed communication back to
+        # failed and null its processed_at.
         await conn.execute(
             """
             UPDATE communications
             SET status = 'failed',
                 status_reason = $2,
                 attempts = attempts + 1
-            WHERE id = $1
+            WHERE id = $1 AND status <> 'processed'
             """,
             row["communication_id"],
             f"document {row['url'].rsplit('/', 1)[-1]}: {reason}"[:500],

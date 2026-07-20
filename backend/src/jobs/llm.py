@@ -202,9 +202,10 @@ def _vision_parts(url: str) -> list[types.Part]:
     return parts
 
 
-async def _pending_documents(limit: int | None) -> list[dict]:
+async def _pending_documents(limit: int | None, vision_only: bool = False) -> list[dict]:
     from src.db import get_pool
 
+    vision_filter = "AND d.extraction_method = 'vision-fallback'" if vision_only else ""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -215,6 +216,7 @@ async def _pending_documents(limit: int | None) -> list[dict]:
             WHERE d.llm_summary IS NULL
               AND c.status = 'pending'
               AND (d.extracted_text IS NOT NULL OR d.extraction_method = 'vision-fallback')
+              {vision_filter}
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """
@@ -256,11 +258,13 @@ async def _mark_failed(communication_id: int, reason: str) -> None:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Guard on status <> 'processed': a late LLM failure for one document
+        # must not drag an already-processed communication back to failed.
         await conn.execute(
             """
             UPDATE communications
             SET status='failed', status_reason=$2, attempts=attempts+1
-            WHERE id=$1
+            WHERE id=$1 AND status <> 'processed'
             """,
             communication_id,
             reason[:500],
@@ -291,12 +295,19 @@ async def promote_completed_communications() -> int:
     return n
 
 
-async def run_sync(limit: int | None = None, concurrency: int = 4) -> LLMStats:
-    """Process documents with the standard API. Full price, immediate results."""
+async def run_sync(
+    limit: int | None = None, concurrency: int = 4, vision_only: bool = False
+) -> LLMStats:
+    """Process documents with the standard API. Full price, immediate results.
+
+    `vision_only` restricts the pass to vision-fallback documents, which the
+    Batch API path excludes; the batch runner calls this to mop them up so they
+    are never stranded in `pending`.
+    """
     settings = get_settings()
     client = _client()
     stats = LLMStats()
-    docs = await _pending_documents(limit)
+    docs = await _pending_documents(limit, vision_only=vision_only)
     if not docs:
         log.info("no documents awaiting LLM extraction")
         return stats
@@ -309,7 +320,10 @@ async def run_sync(limit: int | None = None, concurrency: int = 4) -> LLMStats:
             for attempt in (1, 2):
                 try:
                     if doc["extraction_method"] == "vision-fallback":
-                        contents = [types.Content(role="user", parts=_vision_parts(doc["url"]))]
+                        # Rasterizing pages is CPU-bound; keep it off the event
+                        # loop so it doesn't stall the other concurrent handlers.
+                        parts = await asyncio.to_thread(_vision_parts, doc["url"])
+                        contents = [types.Content(role="user", parts=parts)]
                     else:
                         contents = TEXT_PROMPT.format(text=doc["extracted_text"])
 
@@ -319,9 +333,11 @@ async def run_sync(limit: int | None = None, concurrency: int = 4) -> LLMStats:
                         contents=contents,
                         config=_generation_config(),
                     )
+                    # usage_metadata can be absent on a truncated/blocked
+                    # response; treat it as zero rather than raising.
                     usage = resp.usage_metadata
-                    ti = usage.prompt_token_count or 0
-                    to = usage.candidates_token_count or 0
+                    ti = (usage.prompt_token_count or 0) if usage else 0
+                    to = (usage.candidates_token_count or 0) if usage else 0
                     stats.tokens_in += ti
                     stats.tokens_out += to
                     stats.cost_usd += cost_of(ti, to, batch=False)
@@ -425,10 +441,16 @@ async def collect_batch(
             log.warning("batch %s produced no inlined responses (state=%s)", name, job.state)
             continue
 
+        dropped = 0
         for item in job.dest.inlined_responses:
             doc_id = (item.metadata or {}).get("doc_id")
             doc = docs_by_id.get(str(doc_id))
             if doc is None:
+                # A paid result we can't match back to a pending document: the
+                # metadata round-trip failed, or the doc's comm changed state
+                # between submit and collect. Count and log it loudly rather
+                # than silently discarding results the run paid for.
+                dropped += 1
                 continue
             if item.error or item.response is None:
                 stats.failed += 1
@@ -452,6 +474,14 @@ async def collect_batch(
 
             await _store(doc, clean, ti, to, batch=True)
             stats.processed += 1
+
+        if dropped:
+            msg = (
+                f"batch {name}: {dropped} response(s) could not be matched to a "
+                f"pending document and were dropped"
+            )
+            log.warning(msg)
+            stats.errors.append(msg)
 
     await promote_completed_communications()
     log.info("batch collection complete :: %s", stats.summary())

@@ -122,7 +122,7 @@ async def list_communications(
             f"""
             SELECT
                 c.nhtsa_id, c.communication_number, c.communication_type,
-                c.communication_date, c.summary, c.status,
+                c.communication_date, coalesce(c.summary, '') AS summary, c.status,
                 (SELECT count(*) FROM comm_documents d WHERE d.communication_id = c.id) AS document_count,
                 (SELECT d.llm_summary FROM comm_documents d
                  WHERE d.communication_id = c.id AND d.llm_summary IS NOT NULL
@@ -194,8 +194,8 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
         comm = await conn.fetchrow(
             """
             SELECT nhtsa_id, communication_number, communication_type,
-                   communication_date, summary, details_summary, status,
-                   status_reason, processed_at, id
+                   communication_date, coalesce(summary, '') AS summary,
+                   details_summary, status, status_reason, processed_at, id
             FROM communications WHERE nhtsa_id = $1
             """,
             nhtsa_id,

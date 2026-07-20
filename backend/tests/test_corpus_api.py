@@ -107,11 +107,12 @@ async def seeded():
             v1,
         )
 
-        # Comm C: still pending, no documents.
+        # Comm C: still pending, no documents, and NULL summary (the schema
+        # permits it) to guard against the coalesce regression.
         await conn.execute(
             """
             INSERT INTO communications (nhtsa_id, communication_type, communication_date, summary, status)
-            VALUES ($1, 'WA', '2099-03-01', 'Warranty note', 'pending')
+            VALUES ($1, 'WA', '2099-03-01', NULL, 'pending')
             """,
             f"{NS}-C",
         )
@@ -237,6 +238,21 @@ async def test_detail_includes_documents_and_vehicles(seeded):
 
 async def test_detail_missing_returns_none(seeded):
     assert await service.get_communication(f"{NS}-DOESNOTEXIST") is None
+
+
+async def test_null_summary_coalesced_to_empty_string(seeded):
+    """A NULL summary (schema-permitted) must come back as '' from both the list
+    and detail, so the non-optional `summary: str` response field never 500s."""
+    from src.corpus.schemas import CommunicationDetail, CommunicationSummary
+
+    items, _ = await service.list_communications(status="pending", per_page=200)
+    comm_c = next(i for i in items if i["nhtsa_id"] == f"{NS}-C")
+    assert comm_c["summary"] == ""
+    CommunicationSummary(**comm_c)  # must validate without raising
+
+    detail = await service.get_communication(f"{NS}-C")
+    assert detail["summary"] == ""
+    CommunicationDetail(**detail)  # must validate without raising
 
 
 async def test_tag_vocabulary_counts(seeded):

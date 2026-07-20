@@ -40,7 +40,9 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
     const f: CorpusFilters = { vehicleId, perPage: 200 };
     if (search.trim()) f.search = search.trim();
     if (status !== 'all') f.status = status;
-    if (selectedSystems.length > 0) f.systems = selectedSystems;
+    // Sort so selecting the same systems in a different order maps to one
+    // query-key (and one cache entry) rather than fragmenting the cache.
+    if (selectedSystems.length > 0) f.systems = [...selectedSystems].sort();
     if (selectedType) f.commType = selectedType;
     return f;
   }, [vehicleId, search, status, selectedSystems, selectedType]);
@@ -170,7 +172,14 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
                 style={{ '--chip-color': COMM_TYPE_COLORS[selectedType] } as React.CSSProperties}
               >
                 {selectedType}
-                <X size={12} onClick={() => setSelectedType(null)} />
+                <button
+                  type="button"
+                  className={styles.activeChipRemove}
+                  aria-label={`Remove ${selectedType} filter`}
+                  onClick={() => setSelectedType(null)}
+                >
+                  <X size={12} />
+                </button>
               </span>
             )}
           </div>

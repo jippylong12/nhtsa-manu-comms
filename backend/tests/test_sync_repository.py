@@ -84,6 +84,32 @@ async def test_failed_row_also_survives_resync(conn):
     assert row["status_reason"] == "pdf 404"
 
 
+async def test_failure_write_cannot_clobber_a_processed_row(conn):
+    """The guard added to _record_failure / _mark_failed: a late failure for a
+    sibling document must not drag an already-processed communication back."""
+    comm_id, _ = await _insert(conn)
+    await conn.execute(
+        "UPDATE communications SET status='processed', processed_at=now() WHERE id=$1", comm_id
+    )
+
+    # This is the exact guarded UPDATE the failure writers now run.
+    await conn.execute(
+        """
+        UPDATE communications
+        SET status='failed', status_reason='late sibling failure', attempts=attempts+1
+        WHERE id=$1 AND status <> 'processed'
+        """,
+        comm_id,
+    )
+
+    row = await conn.fetchrow(
+        "SELECT status, status_reason, processed_at FROM communications WHERE id=$1", comm_id
+    )
+    assert row["status"] == "processed", "a failure write must not clobber a processed row"
+    assert row["status_reason"] is None
+    assert row["processed_at"] is not None
+
+
 async def test_shared_comm_is_one_row_and_two_links(conn, vehicle):
     """The core reason the schema was redesigned."""
     second = await conn.fetchrow(
