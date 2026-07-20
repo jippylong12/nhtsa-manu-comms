@@ -28,6 +28,11 @@ interface Props {
   onSelectType?: (t: CommType) => void;
   onSelectSystem?: (s: string) => void;
   activeSystems?: string[];
+  // When set, each row gets `id="{anchorPrefix}-{nhtsaId}"` so callers can
+  // scroll a specific communication into view (used by symptom-search citations).
+  anchorPrefix?: string;
+  // nhtsaIds to visually mark as cited in the composed answer.
+  highlightIds?: string[];
 }
 
 const STATUS_META: Record<ProcessingStatus, { label: string; icon: typeof Sparkles; cls: string }> = {
@@ -52,9 +57,18 @@ interface RowProps {
   onSelectType?: (t: CommType) => void;
   onSelectSystem?: (s: string) => void;
   activeSystems?: string[];
+  anchorId?: string;
+  cited?: boolean;
 }
 
-function CorpusRow({ comm, onSelectType, onSelectSystem, activeSystems = [] }: RowProps) {
+function CorpusRow({
+  comm,
+  onSelectType,
+  onSelectSystem,
+  activeSystems = [],
+  anchorId,
+  cited = false,
+}: RowProps) {
   const [expanded, setExpanded] = useState(false);
   // Detail (full document list, remedy, applicability) is fetched lazily on
   // first expand, so the list view stays a single request.
@@ -74,7 +88,11 @@ function CorpusRow({ comm, onSelectType, onSelectSystem, activeSystems = [] }: R
   const isProcessed = comm.status === 'processed';
 
   return (
-    <div className={styles.row} style={{ borderLeftColor: typeColor }}>
+    <div
+      id={anchorId}
+      className={`${styles.row} ${cited ? styles.rowCited : ''}`}
+      style={{ borderLeftColor: typeColor, scrollMarginTop: '80px' }}
+    >
       <div className={styles.header} onClick={() => setExpanded(!expanded)}>
         <div className={styles.info}>
           <div className={styles.topRow}>
@@ -98,6 +116,7 @@ function CorpusRow({ comm, onSelectType, onSelectSystem, activeSystems = [] }: R
             {comm.communicationNumber && (
               <span className={styles.commNumber}>{comm.communicationNumber}</span>
             )}
+            {cited && <span className={styles.citedBadge}>Cited in answer</span>}
           </div>
 
           <h4 className={`${styles.summary} ${isProcessed ? styles.summaryAi : ''}`}>
@@ -255,7 +274,10 @@ export function CorpusCommunicationList({
   onSelectType,
   onSelectSystem,
   activeSystems,
+  anchorPrefix,
+  highlightIds,
 }: Props) {
+  const highlighted = new Set(highlightIds ?? []);
   if (isLoading) {
     return (
       <div className={styles.loading}>
@@ -287,6 +309,8 @@ export function CorpusCommunicationList({
           onSelectType={onSelectType}
           onSelectSystem={onSelectSystem}
           activeSystems={activeSystems}
+          anchorId={anchorPrefix ? `${anchorPrefix}-${comm.nhtsaId}` : undefined}
+          cited={highlighted.has(comm.nhtsaId)}
         />
       ))}
     </div>

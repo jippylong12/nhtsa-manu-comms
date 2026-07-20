@@ -1,12 +1,15 @@
-import { Plus } from 'lucide-react';
+import { Plus, Stethoscope } from 'lucide-react';
 import { SidebarVehicleItem } from './SidebarVehicleItem';
 import styles from './Sidebar.module.css';
 import type { Vehicle } from '../../client';
+import type { AppView } from '../../contexts/AppContext';
 
 interface SidebarProps {
   vehicles: Vehicle[];
   selectedVehicleId: number | null;
+  view: AppView;
   onSelectVehicle: (id: number | null) => void;
+  onOpenSymptomSearch: () => void;
   onAddVehicle: () => void;
   isLoading?: boolean;
 }
@@ -14,17 +17,30 @@ interface SidebarProps {
 export function Sidebar({
   vehicles,
   selectedVehicleId,
+  view,
   onSelectVehicle,
+  onOpenSymptomSearch,
   onAddVehicle,
   isLoading,
 }: SidebarProps) {
   return (
     <div className={styles.sidebar}>
+      <nav className={styles.nav}>
+        <button
+          className={styles.navItem}
+          data-active={view === 'symptom-search'}
+          onClick={onOpenSymptomSearch}
+        >
+          <Stethoscope size={16} />
+          Symptom Search
+        </button>
+      </nav>
+
       <div className={styles.header}>
         <button
           className={styles.overviewButton}
           onClick={() => onSelectVehicle(null)}
-          data-active={selectedVehicleId === null}
+          data-active={view === 'browse' && selectedVehicleId === null}
         >
           All Vehicles
         </button>
@@ -46,7 +62,7 @@ export function Sidebar({
             <SidebarVehicleItem
               key={vehicle.vehicleId}
               vehicle={vehicle}
-              isSelected={vehicle.vehicleId === selectedVehicleId}
+              isSelected={view === 'browse' && vehicle.vehicleId === selectedVehicleId}
               onSelect={() => onSelectVehicle(vehicle.vehicleId)}
             />
           ))

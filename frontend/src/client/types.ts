@@ -314,3 +314,48 @@ export interface CorpusFilters {
     perPage?: number;
 }
 
+// --- Symptom Search (Phase B) ---
+
+export interface SymptomSearchRequest {
+    vehicleId: number;
+    description: string;
+}
+
+export interface SymptomMatch {
+    nhtsaId: string;
+    communicationNumber?: string | null;
+    communicationType?: CommType | null;
+    communicationDate?: string | null;
+    llmSummary?: string | null;
+    symptoms: string[];
+    systems: string[];
+    components: string[];
+    remedy?: string | null;
+    relevanceScore: number;
+    cosineSim?: number | null;
+    // True when the composed answer cited this communication.
+    cited: boolean;
+}
+
+export interface QueryCost {
+    embedTokens: number;
+    embedCostUsd: number;
+    llmModel: string;
+    llmTokensIn: number;
+    llmTokensOut: number;
+    llmCostUsd: number;
+    totalUsd: number;
+}
+
+export interface SymptomSearchResponse {
+    answer: string;
+    refused: boolean;
+    confidence: number;
+    model: string;
+    // False when retrieval succeeded but answer composition could not run.
+    answerGenerated: boolean;
+    matches: SymptomMatch[];
+    citedIds: string[];
+    cost: QueryCost;
+}
+

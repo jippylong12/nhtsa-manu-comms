@@ -45,7 +45,12 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
     );
 
     useEffect(() => {
+        // Sync the selection to freshly loaded variant data: auto-pick when a
+        // model resolves to a single variant, reset when it is ambiguous. This
+        // is a legitimate "sync to async query result" effect; the
+        // set-state-in-effect rule is a false positive here.
         if (variants && variants.length === 1) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSelectedVariant(variants[0] as VehicleVariant);
         } else if (variants && variants.length > 1) {
             setSelectedVariant(null);

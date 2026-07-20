@@ -5,6 +5,39 @@
   padding: var(--space-sm) 0;
 }
 
+.nav {
+  padding: 0 var(--space-sm) var(--space-sm);
+  margin-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.navItem:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.navItem[data-active="true"] {
+  color: var(--color-primary);
+  background: var(--bg-active);
+}
+
 .header {
   display: flex;
   align-items: center;

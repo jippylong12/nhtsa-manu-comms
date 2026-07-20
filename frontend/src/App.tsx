@@ -3,6 +3,7 @@ import { AppProvider, useAppState, useAppDispatch } from './contexts/AppContext'
 import { AppShell } from './components/layout/AppShell';
 import { Sidebar } from './components/layout/Sidebar';
 import { CorpusView } from './features/communications/components/CorpusView';
+import { SymptomSearchView } from './features/symptom-search/components/SymptomSearchView';
 import { VehicleGrid } from './features/vehicles/components/VehicleGrid';
 import { AddVehicleModal } from './features/vehicles/components/AddVehicleModal';
 import { useVehiclesQuery, useCreateVehicle, useDeleteVehicle } from './features/vehicles/hooks/useVehicles';
@@ -13,7 +14,7 @@ const queryClient = new QueryClient({
 });
 
 function Dashboard() {
-  const { selectedVehicleId, showAddModal } = useAppState();
+  const { selectedVehicleId, showAddModal, view } = useAppState();
   const dispatch = useAppDispatch();
 
   const { data: vehiclesData, isLoading: vehiclesLoading } = useVehiclesQuery();
@@ -43,13 +44,17 @@ function Dashboard() {
         <Sidebar
           vehicles={vehicles}
           selectedVehicleId={selectedVehicleId}
+          view={view}
           onSelectVehicle={(id) => dispatch({ type: 'SELECT_VEHICLE', payload: id })}
+          onOpenSymptomSearch={() => dispatch({ type: 'SET_VIEW', payload: 'symptom-search' })}
           onAddVehicle={() => dispatch({ type: 'OPEN_ADD_MODAL' })}
           isLoading={vehiclesLoading}
         />
       }
     >
-      {selectedVehicle ? (
+      {view === 'symptom-search' ? (
+        <SymptomSearchView vehicles={vehicles} initialVehicleId={selectedVehicleId} />
+      ) : selectedVehicle ? (
         <CorpusView
           vehicleId={selectedVehicle.vehicleId}
           vehicle={selectedVehicle}

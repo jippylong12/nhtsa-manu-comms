@@ -23,6 +23,26 @@
   border-color: var(--border-default);
 }
 
+/* A communication cited in the composed symptom-search answer. */
+.rowCited {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px hsla(162, 73%, 46%, 0.15);
+}
+
+.citedBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-accent-light);
+  background: hsla(162, 73%, 46%, 0.14);
+  border: 1px solid hsla(162, 73%, 46%, 0.3);
+  border-radius: var(--radius-full);
+}
+
 .header {
   display: flex;
   justify-content: space-between;
