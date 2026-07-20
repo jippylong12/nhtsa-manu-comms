@@ -71,6 +71,26 @@ const COMM_TYPE_DESCRIPTIONS: Record<CommType, { icon: React.ReactNode; descript
     description: 'Special coverage programs extending warranty for specific components. Often issued for parts with higher-than-expected failure rates.',
     priority: 'medium',
   },
+  BL: {
+    icon: <FileText size={16} />,
+    description: 'Generic bulletins classified from the attached document type. General service or informational content.',
+    priority: 'low',
+  },
+  OL: {
+    icon: <Info size={16} />,
+    description: 'Owner letters mailed to vehicle owners about a program, recall, or important information for their vehicle.',
+    priority: 'low',
+  },
+  DL: {
+    icon: <FileText size={16} />,
+    description: 'Dealer letters sent to dealerships with instructions or information about a service program.',
+    priority: 'low',
+  },
+  MC: {
+    icon: <HelpCircle size={16} />,
+    description: 'Generic manufacturer communications that do not carry a more specific type classification.',
+    priority: 'low',
+  },
   NA: {
     icon: <FileText size={16} />,
     description: 'North American bulletins identified by the XX-NA-XXX format. May contain region-specific service information.',

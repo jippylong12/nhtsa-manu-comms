@@ -14,6 +14,10 @@ export type CommType =
     | 'CSP'   // Customer Satisfaction Program (summary-based)
     | 'RC'    // Recall/Campaign (summary-based)
     | 'SC'    // Special Coverage (summary-based)
+    | 'BL'    // Generic bulletin (document-type based)
+    | 'OL'    // Owner Letter (document-type based)
+    | 'DL'    // Dealer Letter (document-type based)
+    | 'MC'    // Manufacturer Communication (generic catch-all)
     | 'NA'    // NA Bulletin (XX-NA-XXX format) - catchall before OTHER
     | 'OTHER'; // Uncategorized
 
@@ -24,7 +28,7 @@ export type CommPriority = 'high' | 'medium' | 'low';
 export const COMM_PRIORITY_TYPES: Record<CommPriority, CommType[]> = {
     high: ['TSB', 'CSP', 'RC'],           // Safety critical & important
     medium: ['PIT', 'PIC', 'SB', 'TB', 'SU', 'WA', 'SC'],  // Service & technical
-    low: ['PIP', 'IB', 'NA', 'OTHER'],    // Informational
+    low: ['PIP', 'IB', 'BL', 'OL', 'DL', 'MC', 'NA', 'OTHER'],    // Informational
 };
 
 // Standard priority colors (red, yellow, green)
@@ -54,6 +58,10 @@ export const COMM_TYPE_LABELS: Record<CommType, string> = {
     CSP: 'Customer Satisfaction',
     RC: 'Recall/Campaign',
     SC: 'Special Coverage',
+    BL: 'Bulletin',
+    OL: 'Owner Letter',
+    DL: 'Dealer Letter',
+    MC: 'Manufacturer Communication',
     NA: 'NA Bulletin',
     OTHER: 'Other',
 };
@@ -78,6 +86,10 @@ export const COMM_TYPE_COLORS: Record<CommType, string> = {
     // LOW PRIORITY - Green/Blue shades
     PIP: 'hsl(145, 55%, 48%)',       // Green - Parts info
     IB: 'hsl(160, 50%, 45%)',        // Teal-green - Informational
+    BL: 'hsl(170, 45%, 46%)',        // Teal - Generic bulletin
+    OL: 'hsl(190, 45%, 48%)',        // Sky - Owner letter
+    DL: 'hsl(210, 45%, 52%)',        // Blue - Dealer letter
+    MC: 'hsl(200, 30%, 52%)',        // Slate-blue - Manufacturer comm
     NA: 'hsl(180, 45%, 42%)',        // Cyan - NA bulletins
     OTHER: 'hsl(200, 25%, 50%)',     // Gray-blue - Other
 };

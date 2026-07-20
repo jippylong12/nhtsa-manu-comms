@@ -10,7 +10,7 @@ import {
 } from '../hooks/useCorpus';
 
 import type { Vehicle, CommType, CorpusFilters, ProcessingStatus } from '@/client';
-import { COMM_TYPE_COLORS } from '@/client';
+import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
 
 import styles from './CorpusView.module.css';
 
@@ -25,6 +25,11 @@ const STATUS_TABS: { key: ProcessingStatus | 'all'; label: string }[] = [
   { key: 'processed', label: 'Processed' },
   { key: 'pending', label: 'Pending' },
   { key: 'failed', label: 'Unavailable' },
+];
+
+// Type filter options, ordered by how common they are in the corpus.
+const TYPE_OPTIONS: CommType[] = [
+  'PIT', 'SB', 'WA', 'BL', 'PIC', 'IB', 'TSB', 'PIP', 'CSP', 'SU', 'MC', 'RC', 'SC', 'TB', 'NA', 'OTHER',
 ];
 
 export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
@@ -129,16 +134,36 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
         </form>
 
         {/* Status tabs */}
-        <div className={styles.statusTabs}>
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`${styles.statusTab} ${status === tab.key ? styles.statusTabActive : ''}`}
-              onClick={() => setStatus(tab.key)}
+        <div className={styles.controlRow}>
+          <div className={styles.statusTabs}>
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                className={`${styles.statusTab} ${status === tab.key ? styles.statusTabActive : ''}`}
+                onClick={() => setStatus(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Communication-type filter (dropdown) */}
+          <label className={styles.typeSelectWrap}>
+            <Filter size={14} />
+            <select
+              className={styles.typeSelect}
+              value={selectedType ?? ''}
+              onChange={(e) => setSelectedType((e.target.value || null) as CommType | null)}
+              aria-label="Filter by communication type"
             >
-              {tab.label}
-            </button>
-          ))}
+              <option value="">All types</option>
+              {TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {t} — {COMM_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {/* System tag chips */}
