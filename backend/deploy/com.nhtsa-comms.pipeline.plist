@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OPTIONAL nightly scheduler for the NHTSA Comms pipeline.
+
+  This is provided for reference only and is NOT installed by the project.
+  Marcus runs the pipeline manually (`python -m src.jobs.run_pipeline`); load
+  this plist only if you later want unattended nightly runs.
+
+  Before loading:
+    1. Replace ABSOLUTE_REPO_PATH with the real backend path.
+    2. Replace PYTHON_PATH with the interpreter that has the deps installed
+       (e.g. the output of `which python3`).
+    3. Adjust the Hour/Minute in StartCalendarInterval.
+
+  Install:
+    cp deploy/com.nhtsa-comms.pipeline.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/com.nhtsa-comms.pipeline.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.nhtsa-comms.pipeline.plist
+    rm ~/Library/LaunchAgents/com.nhtsa-comms.pipeline.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nhtsa-comms.pipeline</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>PYTHON_PATH</string>
+        <string>-m</string>
+        <string>src.jobs.run_pipeline</string>
+        <string>--send-digest</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>ABSOLUTE_REPO_PATH/backend</string>
+
+    <!-- Run nightly at 03:15 local time. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>3</integer>
+        <key>Minute</key><integer>15</integer>
+    </dict>
+
+    <!-- The runner writes its own per-run logs; these capture anything that
+         escapes to stdout/stderr (e.g. an import error before logging is set up). -->
+    <key>StandardOutPath</key>
+    <string>ABSOLUTE_REPO_PATH/backend/.pipeline_logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>ABSOLUTE_REPO_PATH/backend/.pipeline_logs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

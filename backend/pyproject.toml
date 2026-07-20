@@ -15,6 +15,7 @@ dependencies = [
     "asyncpg>=0.29.0",
     "pymupdf>=1.24.0",
     "google-genai>=0.3.0",
+    "resend>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,7 @@ ignore = []
 # in the LLM prompt, inline SQL subqueries, and test asserts that read worse
 # wrapped than whole.
 "src/jobs/llm.py" = ["E501"]
+"src/jobs/digest.py" = ["E501"]
 "src/corpus/service.py" = ["E501"]
 "tests/*" = ["E501"]
 "src/config.py" = ["E501"]

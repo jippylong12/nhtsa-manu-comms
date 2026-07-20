@@ -36,3 +36,11 @@ Thumbs.db
 # Pipeline PDF archive (local cache)
 .pdf_archive/
 backend/.pdf_archive/
+
+# Pipeline runtime artifacts
+.pipeline_logs/
+backend/.pipeline_logs/
+.pipeline.lock
+backend/.pipeline.lock
+digest_preview.html
+backend/digest_preview.html
