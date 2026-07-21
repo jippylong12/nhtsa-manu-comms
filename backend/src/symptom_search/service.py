@@ -75,16 +75,6 @@ async def search(
         cited_ids = composed.cited_ids
         confidence = composed.confidence
         used_model = composed.model
-        # A gated refusal never calls the model, so it has no composition row.
-        if cost.llm_tokens_in or cost.llm_tokens_out:
-            await record_usage(
-                "answer_compose",
-                cost.llm_model or used_model,
-                tokens_in=cost.llm_tokens_in,
-                tokens_out=cost.llm_tokens_out,
-                query_id=query_id,
-                meta={"vehicle_id": vehicle_id, "refused": refused},
-            )
     except ComposeError as e:
         # Retrieval already succeeded; degrade to showing matches without a
         # composed answer rather than failing the whole request.
@@ -95,6 +85,24 @@ async def search(
         confidence = max((m.cosine_sim or 0.0) for m in result.matches) if result.matches else 0.0
         used_model = model or ""
         answer_generated = False
+
+    # Metered outside the try/except on purpose: composition can fail *after* the
+    # model has answered and been billed (a response that will not parse), and
+    # that spend must not escape the ledger. A gated refusal never reaches the
+    # model, so it records no tokens and no row.
+    if cost.llm_tokens_in or cost.llm_tokens_out:
+        await record_usage(
+            "answer_compose",
+            cost.llm_model or used_model,
+            tokens_in=cost.llm_tokens_in,
+            tokens_out=cost.llm_tokens_out,
+            query_id=query_id,
+            meta={
+                "vehicle_id": vehicle_id,
+                "refused": refused,
+                "answer_generated": answer_generated,
+            },
+        )
 
     # A refusal is a first-class no-match answer: do not show weak matches
     # alongside it, or the honest "nothing matched" reads as "here are matches".

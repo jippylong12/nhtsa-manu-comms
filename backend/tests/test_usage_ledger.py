@@ -69,13 +69,9 @@ def test_symptom_search_costs_use_the_same_rates():
 # --------------------------------------------------------------------------- #
 # record_usage
 # --------------------------------------------------------------------------- #
-def test_record_usage_rejects_an_unknown_kind():
-    import asyncio
-
+async def test_record_usage_rejects_an_unknown_kind():
     with pytest.raises(ValueError):
-        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-            record_usage("not_a_kind", "gemini-3.1-flash-lite")
-        )
+        await record_usage("not_a_kind", "gemini-3.1-flash-lite")
 
 
 async def test_record_usage_writes_a_row_with_derived_cost():
@@ -206,3 +202,49 @@ def test_ledger_kinds_match_the_database_constraint():
     constraint = re.search(r"kind IN \(([^)]+)\)", sql, re.S).group(1)
     in_sql = set(re.findall(r"'([a-z_]+)'", constraint))
     assert in_sql == set(KINDS)
+
+
+async def test_a_billed_composition_that_fails_to_parse_is_still_metered(monkeypatch):
+    """Composition can be billed and *then* fail (an unparseable response).
+
+    That spend must still reach the ledger, or a billable call escapes metering.
+    """
+    _needs_db()
+    from src.db import get_pool
+    from src.symptom_search import compose as compose_mod
+    from src.symptom_search import service
+
+    # A response the model was paid for, but which will not parse.
+    def _unparseable(model: str, prompt: str):
+        return "not json at all", 700, 200
+
+    monkeypatch.setattr(compose_mod, "_generate", _unparseable)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        before = await conn.fetchval(
+            "SELECT count(*) FROM usage_events WHERE kind = 'answer_compose'"
+        )
+
+    result = await service.search(218944, "the tailgate will not open")
+    # The request degrades rather than failing outright...
+    assert result["answer_generated"] is False
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT tokens_in, tokens_out, cost_usd, meta
+            FROM usage_events WHERE kind = 'answer_compose'
+            ORDER BY id DESC LIMIT 1
+            """
+        )
+        after = await conn.fetchval(
+            "SELECT count(*) FROM usage_events WHERE kind = 'answer_compose'"
+        )
+
+    # ...but the tokens it was billed for are on the ledger.
+    assert after == before + 1, "a billed composition escaped the ledger"
+    assert row["tokens_in"] == 700 and row["tokens_out"] == 200
+    assert float(row["cost_usd"]) == pytest.approx(
+        pricing.cost_of("gemini-3.1-flash-lite", 700, 200), rel=1e-6
+    )

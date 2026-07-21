@@ -144,9 +144,13 @@ async def summarise(
             date_from,
             date_to,
         )
+        # Deliberately uncapped: a LIMIT here would silently stop the daily
+        # breakdown summing to the totals above, which is the one property this
+        # endpoint promises. The series is one row per day with spend, and
+        # callers bound it with date_from/date_to.
         by_day = await conn.fetch(
             f"SELECT date_trunc('day', occurred_at) AS day, {_AGG} FROM usage_events {_RANGE} "
-            "GROUP BY 1 ORDER BY 1 DESC LIMIT 90",
+            "GROUP BY 1 ORDER BY 1 DESC",
             date_from,
             date_to,
         )
