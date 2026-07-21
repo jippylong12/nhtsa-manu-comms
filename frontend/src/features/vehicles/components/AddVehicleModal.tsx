@@ -1,7 +1,8 @@
 /* Add Vehicle Modal Component - Full Discovery Flow */
 
 import { useState, useEffect } from 'react';
-import { X, Plus, Car, Check, Loader2 } from 'lucide-react';
+import { X, Plus, Car, Check, Loader2, AlertCircle } from 'lucide-react';
+import type { VehicleVariant } from '@/client';
 import {
     useDiscoveryYears,
     useDiscoveryMakes,
@@ -17,17 +18,6 @@ interface Props {
     isLoading?: boolean;
 }
 
-interface VehicleVariant {
-    vehicleId: number;
-    ncapId: number;
-    modelYear: number;
-    make: string;
-    model: string;
-    trim: string;
-    series: string;
-    vehicleDescription: string;
-}
-
 export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props) {
     const [selectedYear, setSelectedYear] = useState<number | null>(null);
     const [selectedMake, setSelectedMake] = useState<string>('');
@@ -38,23 +28,29 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
     const { data: years, isLoading: loadingYears } = useDiscoveryYears();
     const { data: makes, isLoading: loadingMakes } = useDiscoveryMakes(selectedYear);
     const { data: models, isLoading: loadingModels } = useDiscoveryModels(selectedYear, selectedMake);
-    const { data: variants, isLoading: loadingVariants } = useDiscoveryVariants(
-        selectedYear,
-        selectedMake,
-        selectedModel
-    );
+    const {
+        data: variants,
+        isLoading: loadingVariants,
+        isError,
+        isPaused,
+    } = useDiscoveryVariants(selectedYear, selectedMake, selectedModel);
+
+    // A failed lookup does not always land in `isError`. When React Query decides
+    // the browser is offline it parks the query at fetchStatus "paused" with
+    // status still "pending", so isError and isLoading are both false and the
+    // modal would render nothing at all. Treat both as "could not resolve".
+    const variantsFailed = isError || isPaused;
 
     useEffect(() => {
-        // Sync the selection to freshly loaded variant data: auto-pick when a
-        // model resolves to a single variant, reset when it is ambiguous. This
-        // is a legitimate "sync to async query result" effect; the
-        // set-state-in-effect rule is a false positive here.
-        if (variants && variants.length === 1) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setSelectedVariant(variants[0] as VehicleVariant);
-        } else if (variants && variants.length > 1) {
-            setSelectedVariant(null);
-        }
+        // Sync the selection to freshly loaded variant data. Manufacturer
+        // communications are identical across every variant of a year/make/model
+        // (verified against the NHTSA API), so the first one is always taken and
+        // the user is never asked to pick a trim. This is a legitimate "sync to
+        // async query result" effect; the set-state-in-effect rule is a false
+        // positive here.
+        if (!variants) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSelectedVariant(variants.length > 0 ? variants[0] : null);
     }, [variants]);
 
     if (!isOpen) return null;
@@ -168,34 +164,38 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                             </select>
                         </div>
 
-                        {/* Step 4: Variant Selection (if multiple) */}
-                        {selectedModel && variants && variants.length > 1 && (
-                            <div className={styles.variantSelection}>
-                                <label className="input-label">Select Trim/Style</label>
-                                <div className={styles.variantGrid}>
-                                    {(variants as VehicleVariant[]).map((v) => (
-                                        <button
-                                            key={v.vehicleId}
-                                            type="button"
-                                            className={`${styles.variantCard} ${selectedVariant?.vehicleId === v.vehicleId ? styles.variantCardSelected : ''}`}
-                                            onClick={() => setSelectedVariant(v)}
-                                        >
-                                            <span className={styles.variantTrim}>{v.trim}</span>
-                                            <span className={styles.variantSeries}>{v.series}</span>
-                                            {selectedVariant?.vehicleId === v.vehicleId && (
-                                                <Check size={16} className={styles.variantCheck} />
-                                            )}
-                                        </button>
-                                    ))}
+                        {/* Resolving the NHTSA vehicleId for the chosen year/make/model */}
+                        {selectedModel && loadingVariants && (
+                            <div className={styles.loadingVariants} role="status">
+                                <Loader2 size={20} className={styles.spinner} />
+                                <span>Finding this vehicle...</span>
+                            </div>
+                        )}
+
+                        {/* The lookup itself failed. Without this the modal would
+                            sit blank, since there is no picker left to fall back on. */}
+                        {selectedModel && !loadingVariants && variantsFailed && (
+                            <div className={styles.vehicleNotFound} role="alert">
+                                <AlertCircle size={18} />
+                                <div>
+                                    <strong>Could not look up this vehicle</strong>
+                                    <span className={styles.variantDetails}>
+                                        Reselect the model to try again.
+                                    </span>
                                 </div>
                             </div>
                         )}
 
-                        {/* Loading state for variants */}
-                        {selectedModel && loadingVariants && (
-                            <div className={styles.loadingVariants}>
-                                <Loader2 size={20} className={styles.spinner} />
-                                <span>Finding vehicle variants...</span>
+                        {/* No NHTSA record for this combination */}
+                        {selectedModel && !loadingVariants && !variantsFailed && variants?.length === 0 && (
+                            <div className={styles.vehicleNotFound} role="alert">
+                                <AlertCircle size={18} />
+                                <div>
+                                    <strong>No NHTSA record for this vehicle</strong>
+                                    <span className={styles.variantDetails}>
+                                        Try a different model or year.
+                                    </span>
+                                </div>
                             </div>
                         )}
 
@@ -208,7 +208,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                         {selectedVariant.modelYear} {selectedVariant.make} {selectedVariant.model}
                                     </strong>
                                     <span className={styles.variantDetails}>
-                                        {selectedVariant.trim} {selectedVariant.series} · ID: {selectedVariant.vehicleId}
+                                        ID: {selectedVariant.vehicleId}
                                     </span>
                                 </div>
                             </div>

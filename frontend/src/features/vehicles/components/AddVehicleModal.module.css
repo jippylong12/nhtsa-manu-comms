@@ -64,61 +64,6 @@
   padding-right: 2.5rem;
 }
 
-.variantSelection {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.variantGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--space-sm);
-}
-
-.variantCard {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-md);
-  background: var(--bg-hover);
-  border: 2px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: var(--font-sans);
-}
-
-.variantCard:hover {
-  border-color: var(--color-primary);
-  background: var(--bg-active);
-}
-
-.variantCardSelected {
-  border-color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-}
-
-.variantTrim {
-  font-weight: var(--font-weight-semibold);
-  font-size: 0.9rem;
-  color: var(--text-primary);
-}
-
-.variantSeries {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.variantCheck {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  color: var(--color-primary);
-}
-
 .loadingVariants {
   display: flex;
   align-items: center;
@@ -149,13 +94,26 @@
   color: var(--color-success);
 }
 
-.vehicleConfirmed div {
+.vehicleNotFound {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-warning);
+}
+
+.vehicleConfirmed div,
+.vehicleNotFound div {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.vehicleConfirmed strong {
+.vehicleConfirmed strong,
+.vehicleNotFound strong {
   color: var(--text-primary);
 }
 
