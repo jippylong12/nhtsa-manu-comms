@@ -11,7 +11,11 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // 5175, not Vite's default 5173: that port is reserved for another project.
+    // strictPort makes startup fail loudly instead of silently drifting to the
+    // next free port, which makes the dev URL unpredictable.
+    port: 5175,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
