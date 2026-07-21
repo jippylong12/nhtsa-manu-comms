@@ -22,6 +22,7 @@ tuning is a one-line change with a documented before/after.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -172,6 +173,33 @@ SYSTEM_RULES: list[dict[str, list[str]]] = [
 ]
 
 
+# Manufacturers republish a bulletin under the same number with a revision
+# suffix (PIT6202 -> PIT6202A -> ... -> PIT6202C), and each revision arrives as
+# its own NHTSA record. Half this corpus is such revisions, so a symptom search
+# would otherwise return the same bulletin four times. These patterns strip the
+# revision marker to get the family stem.
+#
+# Deliberately conservative: a trailing letter only counts when it follows a
+# digit, and a trailing -NN only when the body is a long campaign id. That keeps
+# real numbers like 24-NA-125, 653.30, and N242484500 intact.
+_LETTER_REVISION = re.compile(r"^(.*\d)([A-Z])$")
+_DASH_REVISION = re.compile(r"^([A-Z]?\d{6,})-\d{1,2}$")
+
+
+def revision_stem(number: Optional[str]) -> Optional[str]:
+    """The bulletin-family stem for a communication number, or None."""
+    if not number or not number.strip():
+        return None
+    n = number.strip().upper()
+    m = _DASH_REVISION.match(n)
+    if m:
+        return m.group(1)
+    m = _LETTER_REVISION.match(n)
+    if m:
+        return m.group(1)
+    return n
+
+
 @dataclass
 class Match:
     """One retrieved communication, with its ranking provenance."""
@@ -191,6 +219,8 @@ class Match:
     vector_rank: Optional[int]
     fts_rank: Optional[int]
     matched_systems: list[str]
+    # How many older revisions of this bulletin were folded into this result.
+    superseded_count: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -209,6 +239,7 @@ class Match:
             "vector_rank": self.vector_rank,
             "fts_rank": self.fts_rank,
             "matched_systems": self.matched_systems,
+            "superseded_count": self.superseded_count,
         }
 
 
@@ -356,8 +387,43 @@ def _fuse(
         if existing is None or match.score > existing.score:
             best_by_comm[match.nhtsa_id] = match
 
-    ranked = sorted(best_by_comm.values(), key=lambda m: m.score, reverse=True)
+    # Collapse revision families before truncating, so folding four revisions
+    # into one frees a slot for a genuinely different bulletin.
+    ranked = sorted(_collapse_revisions(best_by_comm.values()), key=lambda m: m.score, reverse=True)
     return ranked[:k]
+
+
+def _revision_recency(m: Match) -> tuple:
+    """Sort key picking the current revision of a bulletin family.
+
+    Newest publication date wins; the number breaks ties (PIT6202C > PIT6202A).
+    ``timestamp()`` avoids comparing naive against timezone-aware datetimes.
+    """
+    d = m.communication_date
+    return (d is not None, d.timestamp() if d else 0.0, m.communication_number or "")
+
+
+def _collapse_revisions(matches) -> list[Match]:
+    """Keep one entry per bulletin family: the current revision.
+
+    The family inherits the best score any of its revisions scored, so an older
+    revision matching strongly still ranks the family highly, and records how
+    many revisions it stands in for.
+    """
+    families: dict[str, list[Match]] = {}
+    for m in matches:
+        stem = revision_stem(m.communication_number)
+        # Unnumbered communications can't be grouped; key them by their own id.
+        families.setdefault(stem or f"\0id\0{m.nhtsa_id}", []).append(m)
+
+    collapsed: list[Match] = []
+    for members in families.values():
+        current = max(members, key=_revision_recency)
+        if len(members) > 1:
+            current.score = max(x.score for x in members)
+            current.superseded_count = len(members) - 1
+        collapsed.append(current)
+    return collapsed
 
 
 async def retrieve(

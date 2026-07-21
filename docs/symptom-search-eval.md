@@ -121,9 +121,16 @@ written *without* looking at the documents.
 - **Colloquial feature names.** `handsfree_cruise_flaky_colloquial` ("hands-free
   highway cruise") retrieves other Super Cruise bulletins ahead of the exact
   golden one. Grounded, but the target lands at rank > 5.
-- **Multi-revision bulletin families** (24-NA-125, N252521591, PIT6366) have
-  several equally-correct revisions; the eval accepts any as a hit, which is the
-  correct semantics for a user who just needs the right bulletin.
+- **Multi-revision bulletin families** — *fixed after dogfooding.* Manufacturers
+  republish a bulletin under the same number with a revision suffix (PIT6202 ->
+  PIT6202A -> ... -> PIT6202D), and each revision is its own NHTSA record. 406 of
+  the 805 numbered communications in this corpus are such revisions, so a search
+  for "hood ajar" returned the same bulletin four times. Retrieval now collapses
+  a family to its current revision (newest publication date), inherits the best
+  score any revision achieved, and reports `supersededCount` so the UI can show
+  "latest of 5 revisions". The stem rule is deliberately conservative — a
+  trailing letter only counts after a digit, a trailing `-NN` only on a long
+  campaign id — so 24-NA-125, 653.30, and N242484500 are left intact.
 - **Citation set varies run to run.** The model is temperature 0 but not
   perfectly deterministic; which grounded documents it cites can shift slightly
   between runs. Every cited id is still guaranteed to be in the retrieved set by

@@ -34,6 +34,8 @@ class SymptomMatch(CamelModel):
     cosine_sim: Optional[float] = None
     # True when the composed answer cited this communication.
     cited: bool = False
+    # Older revisions of this same bulletin that were folded into this result.
+    superseded_count: int = 0
 
 
 class QueryCostOut(CamelModel):

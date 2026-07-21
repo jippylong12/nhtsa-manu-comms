@@ -50,6 +50,7 @@ function toSummary(m: SymptomMatch): CorpusCommunicationSummary {
     symptoms: m.symptoms,
     systems: m.systems,
     vehicles: [],
+    supersededCount: m.supersededCount,
   };
 }
 

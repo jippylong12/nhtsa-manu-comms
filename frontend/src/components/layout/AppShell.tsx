@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import styles from './AppShell.module.css';
 
@@ -7,7 +7,29 @@ interface AppShellProps {
   children: ReactNode;
 }
 
+/** Re-measure the layout when the tab becomes visible.
+ *
+ * A page loaded into a background tab renders with `innerWidth === 0`, so the
+ * panel group sizes itself against a zero-width container. Browsers normally
+ * fire a resize once the tab is shown, but not reliably, which can leave the
+ * layout collapsed until a manual refresh. Nudging a resize on visibility
+ * change makes that self-correcting.
+ */
+function useRelayoutOnVisible() {
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        window.dispatchEvent(new Event('resize'));
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+}
+
 export function AppShell({ sidebar, children }: AppShellProps) {
+  useRelayoutOnVisible();
+
   return (
     <div className={styles.shell}>
       <Group orientation="horizontal" id="app-layout">

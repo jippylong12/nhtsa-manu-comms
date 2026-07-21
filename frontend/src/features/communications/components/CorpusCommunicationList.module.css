@@ -29,6 +29,20 @@
   box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px hsla(162, 73%, 46%, 0.15);
 }
 
+/* Marks a result that stands in for a family of bulletin revisions. */
+.revisionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
 .citedBadge {
   display: inline-flex;
   align-items: center;

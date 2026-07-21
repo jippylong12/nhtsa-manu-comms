@@ -92,6 +92,7 @@ async def search(
             "relevance_score": round(m.score, 6),
             "cosine_sim": round(m.cosine_sim, 4) if m.cosine_sim is not None else None,
             "cited": m.nhtsa_id in cited_ids,
+            "superseded_count": m.superseded_count,
         }
         for m in visible
     ]

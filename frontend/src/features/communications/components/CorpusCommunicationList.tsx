@@ -117,6 +117,14 @@ function CorpusRow({
               <span className={styles.commNumber}>{comm.communicationNumber}</span>
             )}
             {cited && <span className={styles.citedBadge}>Cited in answer</span>}
+            {!!comm.supersededCount && (
+              <span
+                className={styles.revisionBadge}
+                title="Earlier revisions of this same bulletin were folded into this result"
+              >
+                latest of {comm.supersededCount + 1} revisions
+              </span>
+            )}
           </div>
 
           <h4 className={`${styles.summary} ${isProcessed ? styles.summaryAi : ''}`}>

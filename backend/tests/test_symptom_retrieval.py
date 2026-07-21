@@ -7,11 +7,19 @@ query embedding so they never call the embeddings API: the point is proving the
 vehicle filter holds, not retrieval quality.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from src.config import get_settings
 from src.symptom_search import retrieval
-from src.symptom_search.retrieval import Match, _fuse, mapped_systems, retrieve
+from src.symptom_search.retrieval import (
+    Match,
+    _fuse,
+    mapped_systems,
+    retrieve,
+    revision_stem,
+)
 
 # NHTSA vehicleIds present in the corpus.
 VEH_SILVERADO_24 = 218944
@@ -112,6 +120,78 @@ def test_match_as_dict_rounds_and_serialises():
     assert d["score"] == round(0.123456789, 6)
     assert d["cosine_sim"] == round(0.987654, 4)
     assert d["fts_rank"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Bulletin revision families
+# --------------------------------------------------------------------------- #
+def test_revision_stem_strips_letter_revisions():
+    assert revision_stem("PIT6202A") == "PIT6202"
+    assert revision_stem("PIT6202") == "PIT6202"
+    assert revision_stem("PIE0788C") == "PIE0788"
+    assert revision_stem("PIT5832V") == "PIT5832"
+
+
+def test_revision_stem_strips_campaign_revisions():
+    assert revision_stem("N252521591-02") == "N252521591"
+    assert revision_stem("N252521591-04") == "N252521591"
+
+
+def test_revision_stem_leaves_real_numbers_intact():
+    """The suffix rules must not mangle numbers whose tail is not a revision."""
+    for number in ("24-NA-125", "23-NA-151", "653.30", "N242484500"):
+        assert revision_stem(number) == number
+
+
+def test_revision_stem_handles_missing_number():
+    assert revision_stem(None) is None
+    assert revision_stem("   ") is None
+
+
+def _dated(doc_id, nhtsa_id, number, day):
+    return _row(
+        doc_id,
+        nhtsa_id,
+        communication_number=number,
+        communication_date=datetime(2024, 9, day, tzinfo=timezone.utc),
+    )
+
+
+def test_fuse_collapses_revision_family_to_current_revision():
+    """PIT6202/A/B/C are one bulletin; only the newest should survive."""
+    rows = [
+        _dated(1, "1001", "PIT6202", 9),
+        _dated(2, "1002", "PIT6202A", 12),
+        _dated(3, "1003", "PIT6202B", 22),
+        _dated(4, "1004", "PIT6202C", 25),
+    ]
+    matches = _fuse("hood ajar message", rows, [], k=10)
+    assert len(matches) == 1
+    assert matches[0].communication_number == "PIT6202C"  # newest revision
+    assert matches[0].superseded_count == 3
+
+
+def test_fuse_keeps_distinct_bulletins_separate():
+    rows = [
+        _dated(1, "1001", "PIT6202A", 9),
+        _dated(2, "1002", "24-NA-125", 12),
+        _dated(3, "1003", "653.30", 22),
+    ]
+    matches = _fuse("anything", rows, [], k=10)
+    assert len(matches) == 3
+    assert all(m.superseded_count == 0 for m in matches)
+
+
+def test_collapsed_family_inherits_best_score():
+    """An older revision matching strongly must still rank the family highly."""
+    old_strong = _dated(1, "1001", "PIT6202", 9)  # vector rank 1
+    new_weak = _dated(2, "1002", "PIT6202C", 25)  # vector rank 2
+    other = _dated(3, "2001", "PIT9999", 25)  # vector rank 3
+    matches = _fuse("q", [old_strong, new_weak, other], [], k=10)
+    family = next(m for m in matches if m.communication_number == "PIT6202C")
+    # Inherited rank-1 score, so it outranks the unrelated rank-3 bulletin.
+    assert family.score >= matches[0].score
+    assert family.superseded_count == 1
 
 
 # --------------------------------------------------------------------------- #

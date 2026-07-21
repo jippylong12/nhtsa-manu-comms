@@ -267,6 +267,8 @@ export interface CorpusCommunicationSummary {
     symptoms: string[];
     systems: string[];
     vehicles: CorpusVehicle[];
+    // Set by symptom search when older revisions of this bulletin were folded in.
+    supersededCount?: number;
 }
 
 export interface CorpusCommunicationDetail {
@@ -335,6 +337,8 @@ export interface SymptomMatch {
     cosineSim?: number | null;
     // True when the composed answer cited this communication.
     cited: boolean;
+    // Older revisions of this bulletin folded into this result.
+    supersededCount: number;
 }
 
 export interface QueryCost {
