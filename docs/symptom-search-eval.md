@@ -146,6 +146,15 @@ written *without* looking at the documents.
   "latest of 5 revisions". The stem rule is deliberately conservative — a
   trailing letter only counts after a digit, a trailing `-NN` only on a long
   campaign id — so 24-NA-125, 653.30, and N242484500 are left intact.
+
+  The family is then re-resolved against the database
+  (`_resolve_revision_families`), because collapsing alone only sees revisions
+  that scored into the candidate pool: it would happily label a card "latest of
+  4 revisions" while a fifth, newer revision sat in the corpus unretrieved. The
+  lookup returns the vehicle's complete family, so the count is the true family
+  size and the card always shows the newest revision on file. It stays scoped to
+  the vehicle, so the substitution can never introduce a communication that
+  vehicle does not have.
 - **Citation set varies run to run.** The model is temperature 0 but not
   perfectly deterministic; which grounded documents it cites can shift slightly
   between runs. Every cited id is still guaranteed to be in the retrieved set by

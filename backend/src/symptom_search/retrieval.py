@@ -426,6 +426,81 @@ def _collapse_revisions(matches) -> list[Match]:
     return collapsed
 
 
+async def _resolve_revision_families(conn, vehicle_id: int, matches: list[Match]) -> list[Match]:
+    """Correct each match against its complete revision family in the database.
+
+    ``_collapse_revisions`` can only see the revisions that scored into the
+    candidate pool, so its "current revision" and count are relative to that
+    sample. This re-resolves both against every revision the vehicle actually
+    has: if a newer revision exists but was never retrieved, the match is
+    swapped for it, and ``superseded_count`` becomes the true family size minus
+    one. Without this, a card could claim "latest of 4 revisions" while a fifth,
+    newer revision sat in the corpus unmentioned.
+
+    The lookup stays scoped to the vehicle, so the substitution can never
+    introduce a communication that vehicle does not have.
+    """
+    wanted = {revision_stem(m.communication_number) for m in matches if m.communication_number}
+    wanted.discard(None)
+    if not wanted:
+        return matches
+
+    # Prefix match narrows the scan; revision_stem below is the real authority,
+    # so an over-broad LIKE only costs a few extra rows.
+    rows = await conn.fetch(
+        """
+        SELECT c.nhtsa_id, c.communication_number, c.communication_type,
+               c.communication_date, d.llm_summary, d.symptoms, d.systems,
+               d.components, d.remedy, d.doc_kind
+        FROM communications c
+        JOIN communication_vehicles cv ON cv.communication_id = c.id
+        JOIN vehicles v ON v.id = cv.vehicle_id
+        LEFT JOIN LATERAL (
+            SELECT llm_summary, symptoms, systems, components, remedy, doc_kind
+            FROM comm_documents dd WHERE dd.communication_id = c.id
+            ORDER BY dd.id LIMIT 1
+        ) d ON true
+        WHERE v.nhtsa_vehicle_id = $1
+          AND c.communication_number IS NOT NULL
+          AND c.communication_number ILIKE ANY($2::text[])
+        """,
+        vehicle_id,
+        [s + "%" for s in wanted],
+    )
+
+    families: dict[str, list[dict]] = {}
+    for r in rows:
+        stem = revision_stem(r["communication_number"])
+        if stem in wanted:
+            families.setdefault(stem, []).append(dict(r))
+
+    def _recency(row: dict) -> tuple:
+        d = row.get("communication_date")
+        return (d is not None, d.timestamp() if d else 0.0, row.get("communication_number") or "")
+
+    for m in matches:
+        family = families.get(revision_stem(m.communication_number) or "")
+        if not family:
+            continue
+        m.superseded_count = len(family) - 1
+        newest = max(family, key=_recency)
+        if newest["nhtsa_id"] == m.nhtsa_id:
+            continue
+        # A newer revision exists that retrieval never saw; show it instead. The
+        # score is kept: it is why this bulletin surfaced at all.
+        m.nhtsa_id = newest["nhtsa_id"]
+        m.communication_number = newest["communication_number"]
+        m.communication_type = newest["communication_type"] or m.communication_type
+        m.communication_date = newest["communication_date"]
+        m.llm_summary = newest["llm_summary"] or m.llm_summary
+        m.symptoms = list(newest["symptoms"] or [])
+        m.systems = list(newest["systems"] or [])
+        m.components = list(newest["components"] or [])
+        m.remedy = newest["remedy"] or m.remedy
+        m.doc_kind = newest["doc_kind"] or m.doc_kind
+    return matches
+
+
 async def retrieve(
     vehicle_id: int,
     query: str,
@@ -454,8 +529,8 @@ async def retrieve(
     async with pool.acquire() as conn:
         vec_rows = await _vector_candidates(conn, vec_literal, vehicle_id)
         fts_rows = await _fts_candidates(conn, query, vehicle_id)
-
-    matches = _fuse(query, vec_rows, fts_rows, k)
+        matches = _fuse(query, vec_rows, fts_rows, k)
+        matches = await _resolve_revision_families(conn, vehicle_id, matches)
     log.info(
         "retrieve vehicle=%s k=%s -> %d matches (vec=%d fts=%d) top=%.4f",
         vehicle_id,

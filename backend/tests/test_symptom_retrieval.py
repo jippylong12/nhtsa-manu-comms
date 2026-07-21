@@ -270,3 +270,44 @@ def test_matches_expected_rejects_an_unrelated_bulletin():
     from src.eval.run_eval import matches_expected
 
     assert not matches_expected("99999999", "24-NA-125", {"10242304"}, {"PIT6018"})
+
+
+async def test_revision_count_matches_the_full_family_in_the_database():
+    """The 'latest of N revisions' claim must reflect every revision the vehicle
+    has, not just the ones that scored into the candidate pool."""
+    _needs_db()
+    from src.db import get_pool
+
+    result = await retrieve(
+        VEH_SILVERADO_24, "hood ajar message on the dash", k=6, embedding=DUMMY_EMBEDDING
+    )
+    families = [m for m in result.matches if m.superseded_count]
+    if not families:
+        pytest.skip("no revision family surfaced for this probe query")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        for m in families:
+            stem = revision_stem(m.communication_number)
+            rows = await conn.fetch(
+                """
+                SELECT c.nhtsa_id, c.communication_number, c.communication_date
+                FROM communications c
+                JOIN communication_vehicles cv ON cv.communication_id = c.id
+                JOIN vehicles v ON v.id = cv.vehicle_id
+                WHERE v.nhtsa_vehicle_id = $1 AND c.communication_number ILIKE $2
+                """,
+                VEH_SILVERADO_24,
+                stem + "%",
+            )
+            family = [r for r in rows if revision_stem(r["communication_number"]) == stem]
+            assert m.superseded_count == len(family) - 1, f"{stem}: count is not the full family"
+
+            newest = max(
+                family,
+                key=lambda r: (
+                    r["communication_date"] is not None,
+                    r["communication_date"].timestamp() if r["communication_date"] else 0.0,
+                ),
+            )
+            assert m.nhtsa_id == newest["nhtsa_id"], f"{stem}: not the newest revision on file"
