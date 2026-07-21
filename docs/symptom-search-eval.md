@@ -83,6 +83,34 @@ not an improvement for a short consumer-facing answer. Escalation criteria if
 this changes: hallucinated citations > 0, or grounded rate materially below
 Flash on a future golden-set expansion.
 
+## Confidence-gate recalibration (post-B3 dogfooding)
+
+The refusal gate was initially set at cosine **0.65**, derived from golden queries
+scoring >= 0.668 against absurd controls scoring <= 0.624. Real use exposed that
+as over-fitted: the golden queries were authored *from* the documents, so they
+scored unusually high, while real user queries are shorter and vaguer and land at
+**0.62-0.72** — straddling the threshold. On the 653-communication 2024 Silverado,
+legitimate searches were silently refused:
+
+| query | top-k cosine | at 0.65 | at 0.55 |
+|---|---|---|---|
+| `battery` | 0.646 | refused | answered (5 cited bulletins) |
+| `screen` | 0.622 | refused | answered |
+| `check engine light` | 0.637 | refused | answered |
+| `brakes` | 0.650 | answered (borderline) | answered |
+
+**Fix: threshold lowered to 0.55.** The cosine gate is only a cheap pre-filter to
+avoid LLM spend on obvious garbage; correctness is owned by the model's own
+relevance judgment plus the citation guard. Re-running the full 39-query eval
+after the change confirmed the safety properties are unchanged: **10/10 no-match
+queries still refused, 0 false answers, 0 hallucinated citations**, grounded
+29/29, hit@k identical. Cost rose only from $0.000302 to $0.000356 per query,
+since absurd queries now reach the model instead of being cut for free.
+
+**Lesson:** a golden set authored from the corpus measures retrieval well but
+over-estimates real-world query confidence. Calibrate thresholds against queries
+written *without* looking at the documents.
+
 ## Known failure modes
 
 - **Near-duplicate infotainment bulletins.** `ipc_radio_blank_after_update`

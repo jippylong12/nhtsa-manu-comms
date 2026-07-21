@@ -5,9 +5,10 @@ that cites nhtsa_ids inline. Two guards bracket the call:
 
   * A retrieval-confidence gate (before the call). If the best match's cosine
     similarity is below CONFIDENCE_THRESHOLD, a refusal is returned without
-    spending an LLM call. The threshold comes from the B1 eval data: matching
-    golden queries scored top-1 cosine >= 0.668, deliberately unrelated queries
-    <= 0.624, so 0.65 separates them with margin.
+    spending an LLM call. This gate is only a cheap pre-filter for obviously
+    unrelated input; it is NOT the correctness mechanism. Relevance is decided
+    by the model plus the citation guard below, so the gate is deliberately
+    loose (see CONFIDENCE_THRESHOLD).
 
   * A citation guard (after the call). Every nhtsa_id the model cites must be in
     the retrieved set. A fabricated id is stripped from the answer text and the
@@ -33,8 +34,14 @@ from src.symptom_search.retrieval import Match
 
 log = logging.getLogger("symptom_search.compose")
 
-# From the B1 eval data (see module docstring). Re-validated in JIP-381.
-CONFIDENCE_THRESHOLD = 0.65
+# Cheap pre-filter only. The original 0.65 came from golden queries that were
+# authored FROM the documents, so they scored unusually high (>= 0.668) against
+# absurd controls (<= 0.624). Real user queries ("battery", "screen", "check
+# engine light") land at 0.62-0.72, straddling that line, so 0.65 silently
+# refused legitimate searches on a 653-communication vehicle. Relevance is the
+# model's job (plus the citation guard), so this gate is set low enough to catch
+# only clearly-unrelated input and let the model judge everything else.
+CONFIDENCE_THRESHOLD = 0.55
 # How many retrieved communications are handed to the composer.
 TOP_K_FOR_ANSWER = 5
 # Keep each document's summary bounded so the prompt stays small and cheap.
