@@ -8,21 +8,13 @@ token; keep them in sync with ``src/jobs/embed.py`` and ``src/jobs/llm.py``.
 
 from dataclasses import dataclass
 
-# gemini-embedding-001, list price per input token. Matches embed.PRICE_IN.
-PRICE_EMBED_IN = 0.15 / 1e6
+from src.usage import pricing
 
-# gemini-3.1-flash-lite sync list price per token. Matches llm.PRICE_IN/OUT.
-PRICE_LLM_IN = 0.25 / 1e6
-PRICE_LLM_OUT = 1.50 / 1e6
-
-# gemini-3-flash-preview list price per token, for the B2 model comparison.
-PRICE_FLASH_IN = 0.30 / 1e6
-PRICE_FLASH_OUT = 2.50 / 1e6
-
-_LLM_PRICES = {
-    "gemini-3.1-flash-lite": (PRICE_LLM_IN, PRICE_LLM_OUT),
-    "gemini-3-flash-preview": (PRICE_FLASH_IN, PRICE_FLASH_OUT),
-}
+# Re-exported from the canonical rate table in src/usage/pricing.py so the
+# per-query figures shown to the user and the ledger totals cannot drift apart.
+PRICE_EMBED_IN = pricing.rate_for("gemini-embedding-001").input_per_token
+PRICE_LLM_IN = pricing.rate_for("gemini-3.1-flash-lite").input_per_token
+PRICE_LLM_OUT = pricing.rate_for("gemini-3.1-flash-lite").output_per_token
 
 
 def approx_tokens(text: str) -> int:
@@ -39,8 +31,7 @@ def approx_tokens(text: str) -> int:
 def llm_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     """Cost of one composition call. Falls back to Flash-Lite pricing for an
     unrecognised model rather than silently reporting zero."""
-    price_in, price_out = _LLM_PRICES.get(model, (PRICE_LLM_IN, PRICE_LLM_OUT))
-    return tokens_in * price_in + tokens_out * price_out
+    return pricing.cost_of(model, tokens_in, tokens_out)
 
 
 @dataclass

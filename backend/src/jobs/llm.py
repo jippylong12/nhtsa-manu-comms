@@ -21,12 +21,16 @@ from google.genai import types
 
 from src.config import get_settings
 from src.jobs.extract import archive_path
+from src.usage import pricing
+from src.usage.ledger import record_usage
 
 log = logging.getLogger("llm")
 
-# Sync list price per 1M tokens for gemini-3.1-flash-lite; batch is half.
-PRICE_IN, PRICE_OUT = 0.25 / 1e6, 1.50 / 1e6
-BATCH_DISCOUNT = 0.5
+# Pricing lives in src/usage/pricing.py so the ledger and the jobs can never
+# disagree about what a call cost.
+PRICE_IN = pricing.rate_for("gemini-3.1-flash-lite").input_per_token
+PRICE_OUT = pricing.rate_for("gemini-3.1-flash-lite").output_per_token
+BATCH_DISCOUNT = pricing.BATCH_DISCOUNT
 
 # Inlined batch payloads are chunked so a single request stays a reasonable
 # size; the corpus is ~1700 input tokens per document.
@@ -170,8 +174,7 @@ def validate(payload: Any) -> tuple[Optional[dict], Optional[str]]:
 
 
 def cost_of(tokens_in: int, tokens_out: int, batch: bool) -> float:
-    raw = tokens_in * PRICE_IN + tokens_out * PRICE_OUT
-    return raw * BATCH_DISCOUNT if batch else raw
+    return pricing.cost_of(get_settings().gemini_model, tokens_in, tokens_out, batch=batch)
 
 
 def _client() -> genai.Client:
@@ -341,6 +344,17 @@ async def run_sync(
                     stats.tokens_in += ti
                     stats.tokens_out += to
                     stats.cost_usd += cost_of(ti, to, batch=False)
+                    # Metered here rather than after a successful store: a
+                    # response that fails validation was still paid for.
+                    await record_usage(
+                        "llm_extract",
+                        settings.gemini_model,
+                        tokens_in=ti,
+                        tokens_out=to,
+                        communication_id=doc["communication_id"],
+                        document_id=doc["id"],
+                        meta={"path": "sync", "attempt": attempt},
+                    )
 
                     clean, err = validate(resp.text)
                     if err:
@@ -464,6 +478,18 @@ async def collect_batch(
             stats.tokens_in += ti
             stats.tokens_out += to
             stats.cost_usd += cost_of(ti, to, batch=True)
+            # Metered before validation: a batch response that fails the schema
+            # was still billed.
+            await record_usage(
+                "llm_extract",
+                get_settings().gemini_model,
+                tokens_in=ti,
+                tokens_out=to,
+                batch=True,
+                communication_id=doc["communication_id"],
+                document_id=doc["id"],
+                meta={"path": "batch", "job": name},
+            )
 
             clean, err = validate(item.response.text)
             if err:

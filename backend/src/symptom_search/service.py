@@ -6,13 +6,16 @@ and the vector is handed to retrieval so it is never embedded twice.
 """
 
 import logging
+import uuid
 from typing import Optional
 
+from src.config import get_settings
 from src.db import get_pool
 from src.jobs.embed import embed_query
 from src.symptom_search.compose import ComposeError, compose
 from src.symptom_search.cost import QueryCost
 from src.symptom_search.retrieval import retrieve
+from src.usage.ledger import record_usage
 
 log = logging.getLogger("symptom_search.service")
 
@@ -48,10 +51,19 @@ async def search(
     """Run a symptom query end to end and return the API payload as a dict."""
     description = (description or "").strip()
     cost = QueryCost()
+    # Ties this query's ledger rows (embedding + composition) together.
+    query_id = uuid.uuid4().hex
 
     # Embed once, record its cost, and reuse the vector for retrieval.
     embedding = await embed_query(description)
     cost.record_embed(description)
+    await record_usage(
+        "search_embed",
+        get_settings().gemini_embedding_model,
+        tokens_in=cost.embed_tokens,
+        query_id=query_id,
+        meta={"vehicle_id": vehicle_id},
+    )
 
     result = await retrieve(vehicle_id, description, k=RETRIEVE_K, embedding=embedding, cost=cost)
 
@@ -63,6 +75,16 @@ async def search(
         cited_ids = composed.cited_ids
         confidence = composed.confidence
         used_model = composed.model
+        # A gated refusal never calls the model, so it has no composition row.
+        if cost.llm_tokens_in or cost.llm_tokens_out:
+            await record_usage(
+                "answer_compose",
+                cost.llm_model or used_model,
+                tokens_in=cost.llm_tokens_in,
+                tokens_out=cost.llm_tokens_out,
+                query_id=query_id,
+                meta={"vehicle_id": vehicle_id, "refused": refused},
+            )
     except ComposeError as e:
         # Retrieval already succeeded; degrade to showing matches without a
         # composed answer rather than failing the whole request.

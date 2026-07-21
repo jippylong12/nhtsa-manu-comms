@@ -16,11 +16,14 @@ from google import genai
 from google.genai import types
 
 from src.config import get_settings
+from src.usage.ledger import record_usage
+from src.usage.pricing import rate_for
 
 log = logging.getLogger("embed")
 
-# gemini-embedding-001 list price per 1M input tokens.
-PRICE_IN = 0.15 / 1e6
+# Pricing lives in src/usage/pricing.py so the ledger and the jobs can never
+# disagree about what a call cost.
+PRICE_IN = rate_for("gemini-embedding-001").input_per_token
 BATCH_SIZE = 50
 
 
@@ -166,6 +169,13 @@ async def embed_pending(limit: int | None = None, force: bool = False) -> EmbedS
         approx_tokens = sum(len(t) for t in texts) // 4
         stats.tokens_in += approx_tokens
         stats.cost_usd += approx_tokens * PRICE_IN
+        await record_usage(
+            "embed",
+            settings.gemini_embedding_model,
+            tokens_in=approx_tokens,
+            unit_count=len(chunk),
+            meta={"batch_offset": start},
+        )
         log.info("  embedded %d/%d", min(start + BATCH_SIZE, len(rows)), len(rows))
 
     log.info("embedding complete :: %s", stats.summary())
