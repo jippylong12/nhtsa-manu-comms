@@ -5,11 +5,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Optional
 from bson import ObjectId
 from dateutil import parser as dateutil_parser
+from pymongo import UpdateOne
+from pymongo.errors import PyMongoError
 
 from src.database import get_database
 from src.vehicles.service import VehicleService
 from src.communications.nhtsa_client import (
     NHTSAClient,
+    build_vehicle_description,
     extract_comm_ids_from_details,
     extract_id_to_summary,
     extract_id_to_comm_number,
@@ -380,11 +383,105 @@ class CommunicationService:
         return await client.get_trims_for_model(year, make, model)
 
     @staticmethod
+    def _catalog_row_to_variant(doc: dict[str, Any]) -> dict[str, Any]:
+        """Map a vehicle_catalog row onto the byYmmt response shape."""
+        return {
+            "vehicleId": doc.get("vehicle_id"),
+            "ncapId": doc.get("ncap_id"),
+            "modelYear": doc.get("year"),
+            "make": doc.get("make"),
+            "model": doc.get("model"),
+            "trim": doc.get("trim"),
+            "series": doc.get("series"),
+            "vehicleDescription": build_vehicle_description(
+                doc.get("model"), doc.get("trim"), doc.get("series")
+            ),
+        }
+
+    @staticmethod
+    async def _read_cached_variants(year: int, make: str, model: str) -> list[dict[str, Any]]:
+        """Read every cached variant for a year/make/model, or [] on a cache miss.
+
+        Rows are written by this service and by seed_vehicle_catalog.py, both of
+        which uppercase make and model, so the lookup uppercases too. Sorted by
+        vehicle_id so a cache hit returns the same order every time.
+        """
+        db = get_database()
+        cursor = db.vehicle_catalog.find(
+            {"year": int(year), "make": make.upper(), "model": model.upper()}
+        ).sort("vehicle_id", 1)
+        return [CommunicationService._catalog_row_to_variant(doc) async for doc in cursor]
+
+    @staticmethod
+    async def _cache_variants(
+        year: int, make: str, model: str, variants: list[dict[str, Any]]
+    ) -> None:
+        """Upsert resolved variants into vehicle_catalog, keyed on vehicle_id.
+
+        vehicle_id is NHTSA's globally unique variant key and already carries a
+        unique index, so it is the upsert key. Rows match the shape written by
+        seed_vehicle_catalog.py.
+
+        Writing is best effort. Concurrent upserts of the same vehicle_id race on
+        the unique index and raise a duplicate-key error, and that must not fail
+        a request whose variants have already been resolved.
+        """
+        operations = []
+        for variant in variants:
+            vehicle_id = variant.get("vehicleId")
+            if not vehicle_id:
+                continue
+            operations.append(
+                UpdateOne(
+                    {"vehicle_id": vehicle_id},
+                    {
+                        "$set": {
+                            "vehicle_id": vehicle_id,
+                            "ncap_id": variant.get("ncapId"),
+                            "year": int(year),
+                            "make": make.upper(),
+                            "model": (variant.get("model") or model).upper(),
+                            "trim": variant.get("trim"),
+                            "series": variant.get("series"),
+                            "cached_at": datetime.now(timezone.utc),
+                        }
+                    },
+                    upsert=True,
+                )
+            )
+
+        if not operations:
+            return
+
+        db = get_database()
+        try:
+            await db.vehicle_catalog.bulk_write(operations, ordered=False)
+        except PyMongoError as e:
+            print(f"vehicle_catalog cache write skipped for {year} {make} {model}: {e}")
+
+    @staticmethod
     async def get_discovery_variants(
         year: int, make: str, model: str, trim: str | None = None
     ) -> list[dict[str, Any]]:
-        """Get vehicle variants with correct vehicleId from NHTSA API."""
-        client = NHTSAClient()
-        return await client.get_vehicle_variants(year, make, model, trim)
+        """Get vehicle variants with correct vehicleId, cached in vehicle_catalog.
+
+        The first request for a year/make/model pays the NHTSA byYmmt round-trip
+        and populates the cache; every later request is served from Mongo. The
+        cache always holds the complete variant set for a YMM, so an optional
+        trim filter is applied in memory rather than by NHTSA. byYmmt matches
+        trim case-insensitively, so this does too.
+        """
+        variants = await CommunicationService._read_cached_variants(year, make, model)
+
+        if not variants:
+            client = NHTSAClient()
+            variants = await client.get_vehicle_variants(year, make, model)
+            await CommunicationService._cache_variants(year, make, model, variants)
+
+        if trim:
+            wanted = trim.casefold()
+            variants = [v for v in variants if (v.get("trim") or "").casefold() == wanted]
+
+        return variants
 
 

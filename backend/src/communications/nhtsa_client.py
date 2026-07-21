@@ -197,11 +197,22 @@ class NHTSAClient:
                         "model": r.get("vehicleModel"),
                         "trim": r.get("trim"),
                         "series": r.get("series"),
-                        "vehicleDescription": f"{r.get('vehicleModel', '')} {r.get('trim', '')} {r.get('series', '')}".strip(),
+                        "vehicleDescription": build_vehicle_description(
+                            r.get("vehicleModel"), r.get("trim"), r.get("series")
+                        ),
                     })
                 return variants
             except httpx.RequestError:
                 return []
+
+
+def build_vehicle_description(model: str | None, trim: str | None, series: str | None) -> str:
+    """Join the human-readable parts of a variant, skipping missing pieces.
+
+    Shared with the vehicle_catalog cache read path so a cached variant renders
+    identically to a live one.
+    """
+    return " ".join(part for part in (model, trim, series) if part)
 
 
 def extract_comm_ids_from_details(details: dict[str, Any]) -> list[int]:

@@ -30,6 +30,10 @@ async def connect_to_mongodb() -> None:
     await database.db.communications.create_index("vehicle_id")
     await database.db.communications.create_index("communication_date")
     await database.db.searches.create_index("created_at")
+    # vehicle_catalog is the YMM -> vehicleId cache. Index names match the ones
+    # seed_vehicle_catalog.py creates so warm-started catalogs stay compatible.
+    await database.db.vehicle_catalog.create_index("vehicle_id", unique=True)
+    await database.db.vehicle_catalog.create_index([("year", 1), ("make", 1), ("model", 1)])
 
     print(f"Connected to MongoDB: {settings.mongodb_database}")
 
