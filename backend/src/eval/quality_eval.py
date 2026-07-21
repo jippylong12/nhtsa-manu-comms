@@ -24,8 +24,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.db import close_pool
-from src.eval.run_eval import GOLDEN_PATH, load_golden
+from src.db import close_pool, get_pool
+from src.eval.run_eval import GOLDEN_PATH, _expected_stems, load_golden, matches_expected
 from src.symptom_search import service
 
 # Queries treated as "hardest" for the model comparison: colloquial, vague,
@@ -111,12 +111,25 @@ async def run_quality(
     if only_ids:
         queries = [q for q in queries if q["id"] in only_ids]
 
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        stems_by_query = await _expected_stems(conn, queries)
+
     report = QualityReport(model=model or "default")
     for q in queries:
         res = await service.search(q["vehicle_id"], q["query"], model=model)
         returned = [m["nhtsa_id"] for m in res["matches"]]
         expected = set(q.get("expected", []))
-        hit_rank = next((i for i, nid in enumerate(returned, 1) if nid in expected), None)
+        stems = stems_by_query.get(q["id"], set())
+        # Scored at bulletin-family level; see run_eval.matches_expected.
+        hit_rank = next(
+            (
+                i
+                for i, m in enumerate(res["matches"], 1)
+                if matches_expected(m["nhtsa_id"], m["communication_number"], expected, stems)
+            ),
+            None,
+        )
         hallucinated = [c for c in res["cited_ids"] if c not in set(returned)]
         report.rows.append(
             Row(

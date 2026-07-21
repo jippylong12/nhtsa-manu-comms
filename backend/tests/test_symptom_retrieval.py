@@ -246,3 +246,27 @@ async def test_single_vehicle_document_never_leaks_across_vehicles():
         VEH_EQUINOX_25, "spots on my windows", k=10, embedding=DUMMY_EMBEDDING
     )
     assert only_silverado not in {m.nhtsa_id for m in scoped_other.matches}
+
+
+# --------------------------------------------------------------------------- #
+# Eval scores at bulletin-family level
+# --------------------------------------------------------------------------- #
+def test_matches_expected_accepts_a_newer_revision_of_the_same_bulletin():
+    """Retrieval returns the current revision, so the eval must not demand the
+    historical nhtsa_id the golden set happened to record."""
+    from src.eval.run_eval import matches_expected
+
+    # Expected PIT6018F; retrieval returned the newer PIT6018J under a new id.
+    assert matches_expected("99999999", "PIT6018J", {"10242304"}, {"PIT6018"})
+
+
+def test_matches_expected_still_matches_on_exact_id():
+    from src.eval.run_eval import matches_expected
+
+    assert matches_expected("10242304", None, {"10242304"}, set())
+
+
+def test_matches_expected_rejects_an_unrelated_bulletin():
+    from src.eval.run_eval import matches_expected
+
+    assert not matches_expected("99999999", "24-NA-125", {"10242304"}, {"PIT6018"})

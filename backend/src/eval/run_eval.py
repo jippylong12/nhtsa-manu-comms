@@ -23,13 +23,33 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from src.db import close_pool, get_pool
 from src.symptom_search.cost import QueryCost
-from src.symptom_search.retrieval import retrieve
+from src.symptom_search.retrieval import retrieve, revision_stem
 
 GOLDEN_PATH = Path(__file__).parent / "golden_set.json"
 HIT_KS = (1, 3, 5)
+
+
+def matches_expected(
+    nhtsa_id: str,
+    number: Optional[str],
+    expected_ids: set[str],
+    expected_stems: set[str],
+) -> bool:
+    """Whether a retrieved communication answers the query.
+
+    Scored at bulletin-family level, not exact nhtsa_id: a family (PIT6304B ->
+    PIT6304D) is one bulletin republished, and retrieval deliberately returns its
+    current revision. Pinning the historical id the golden set happened to record
+    would penalise returning the newer, correct revision.
+    """
+    if nhtsa_id in expected_ids:
+        return True
+    stem = revision_stem(number)
+    return bool(stem and stem in expected_stems)
 
 
 @dataclass
@@ -114,12 +134,30 @@ async def _preflight(conn, queries: list[dict]) -> list[str]:
     return problems
 
 
+async def _expected_stems(conn, queries: list[dict]) -> dict[str, set[str]]:
+    """Query id -> the bulletin-family stems of its expected communications."""
+    out: dict[str, set[str]] = {}
+    for q in queries:
+        ids = q.get("expected") or []
+        if not ids:
+            out[q["id"]] = set()
+            continue
+        rows = await conn.fetch(
+            "SELECT communication_number FROM communications WHERE nhtsa_id = ANY($1::text[])",
+            list(ids),
+        )
+        stems = {revision_stem(r["communication_number"]) for r in rows}
+        out[q["id"]] = {s for s in stems if s}
+    return out
+
+
 async def evaluate(golden_path: Path = GOLDEN_PATH, retrieve_k: int = 10) -> EvalReport:
     queries = load_golden(golden_path)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         problems = await _preflight(conn, queries)
+        stems_by_query = await _expected_stems(conn, queries)
     if problems:
         raise SystemExit(
             "Golden set fixture errors (fix before trusting metrics):\n  " + "\n  ".join(problems)
@@ -133,7 +171,15 @@ async def evaluate(golden_path: Path = GOLDEN_PATH, retrieve_k: int = 10) -> Eva
         report.total_embed_cost_usd += qcost.embed_cost_usd
         retrieved = [m.nhtsa_id for m in result.matches]
         expected = set(q.get("expected", []))
-        hit_rank = next((i for i, nid in enumerate(retrieved, 1) if nid in expected), None)
+        stems = stems_by_query.get(q["id"], set())
+        hit_rank = next(
+            (
+                i
+                for i, m in enumerate(result.matches, 1)
+                if matches_expected(m.nhtsa_id, m.communication_number, expected, stems)
+            ),
+            None,
+        )
         report.results.append(
             QueryResult(
                 id=q["id"],
