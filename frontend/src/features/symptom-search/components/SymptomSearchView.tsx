@@ -2,7 +2,16 @@
    citing the manufacturer communications that match. */
 
 import { useState } from 'react';
-import { Stethoscope, Search, Sparkles, X, AlertCircle, Lightbulb } from 'lucide-react';
+import {
+  Stethoscope,
+  Search,
+  Sparkles,
+  X,
+  AlertCircle,
+  Lightbulb,
+  Car,
+  ArrowRight,
+} from 'lucide-react';
 
 import { CorpusCommunicationList } from '../../communications/components/CorpusCommunicationList';
 import { useSymptomSearch } from '../hooks/useSymptomSearch';
@@ -125,11 +134,34 @@ export function SymptomSearchView({ vehicles, initialVehicleId }: Props) {
           </p>
         </header>
 
-        {/* Search form */}
-        <div className={`${styles.searchCard} glass-card`}>
-          <div className={styles.controls}>
-            <label className={styles.vehicleSelectWrap}>
-              <span className={styles.controlLabel}>Vehicle</span>
+        {/* Ask bar — the focal point of the page */}
+        <div className={styles.askBar}>
+          <div className={styles.askMain}>
+            <Search size={22} className={styles.askIcon} />
+            <textarea
+              className={styles.askInput}
+              placeholder="Ask a question or type a part or symptom…"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={2}
+              aria-label="Ask a question or describe a symptom"
+            />
+            {description && (
+              <button
+                type="button"
+                className={styles.clearBtn}
+                onClick={clear}
+                aria-label="Clear (Esc)"
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
+
+          <div className={styles.askFooter}>
+            <label className={styles.vehiclePill}>
+              <Car size={15} />
               <select
                 className={styles.vehicleSelect}
                 value={vehicleId ?? ''}
@@ -144,51 +176,33 @@ export function SymptomSearchView({ vehicles, initialVehicleId }: Props) {
                 ))}
               </select>
             </label>
-          </div>
 
-          <div className={styles.inputWrap}>
-            <textarea
-              className={styles.textarea}
-              placeholder="e.g. the truck shudders and jerks when I brake hard on the highway"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={3}
-              aria-label="Describe the symptom"
-            />
-            {description && (
+            <div className={styles.askActions}>
+              <span className={styles.hint}>Enter to search · Esc to clear</span>
               <button
-                type="button"
-                className={styles.clearBtn}
-                onClick={clear}
-                aria-label="Clear (Esc)"
+                className={`btn btn-primary ${styles.askSubmit}`}
+                onClick={runSearch}
+                disabled={!canSearch}
               >
-                <X size={16} />
+                Search
+                <ArrowRight size={16} />
               </button>
-            )}
-          </div>
-
-          <div className={styles.actionRow}>
-            <span className={styles.hint}>Enter to search · Shift+Enter for a new line · Esc to clear</span>
-            <button className="btn btn-primary" onClick={runSearch} disabled={!canSearch}>
-              <Search size={16} />
-              Search
-            </button>
-          </div>
-
-          {!data && !isPending && (
-            <div className={styles.examples}>
-              <span className={styles.examplesLabel}>
-                <Lightbulb size={13} /> Try
-              </span>
-              {EXAMPLES.map((ex) => (
-                <button key={ex} className={styles.exampleChip} onClick={() => setDescription(ex)}>
-                  {ex}
-                </button>
-              ))}
             </div>
-          )}
+          </div>
         </div>
+
+        {!data && !isPending && (
+          <div className={styles.examples}>
+            <span className={styles.examplesLabel}>
+              <Lightbulb size={13} /> Try
+            </span>
+            {EXAMPLES.map((ex) => (
+              <button key={ex} className={styles.exampleChip} onClick={() => setDescription(ex)}>
+                {ex}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Results */}
         {isPending && (

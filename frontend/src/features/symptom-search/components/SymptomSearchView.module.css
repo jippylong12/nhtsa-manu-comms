@@ -36,94 +36,73 @@
   line-height: var(--leading-normal);
 }
 
-/* --- Search card --- */
-.searchCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-}
-
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-}
-
-.vehicleSelectWrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.controlLabel {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-secondary);
-}
-
-.vehicleSelect {
-  padding: var(--space-sm) var(--space-md);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-base);
-  background: var(--bg-elevated);
+/* --- Ask bar (the focal search input) --- */
+.askBar {
+  background: var(--bg-surface);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  min-width: 220px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  margin-bottom: var(--space-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.vehicleSelect:focus {
-  outline: none;
+.askBar:focus-within {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-glow);
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--color-primary-glow);
 }
 
-.inputWrap {
-  position: relative;
+.askMain {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
 }
 
-.textarea {
-  width: 100%;
-  padding: var(--space-md);
-  padding-right: 2.5rem;
+.askIcon {
+  color: var(--text-muted);
+  margin-top: 8px;
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.askBar:focus-within .askIcon {
+  color: var(--color-primary);
+}
+
+.askInput {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
   font-family: var(--font-sans);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-lg);
   line-height: var(--leading-normal);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
   color: var(--text-primary);
-  resize: vertical;
-  min-height: 80px;
-  transition: all var(--transition-fast);
+  resize: none;
+  min-height: 48px;
 }
 
-.textarea:focus {
+.askInput:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-glow);
 }
 
-.textarea::placeholder {
+.askInput::placeholder {
   color: var(--text-muted);
 }
 
 .clearBtn {
-  position: absolute;
-  top: var(--space-sm);
-  right: var(--space-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-xs);
+  margin-top: 2px;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
   transition: all var(--transition-fast);
 }
 
@@ -132,12 +111,53 @@
   background: var(--bg-hover);
 }
 
-.actionRow {
+.askFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
   flex-wrap: wrap;
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vehiclePill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding-left: var(--space-sm);
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.vehiclePill:hover {
+  border-color: var(--border-strong);
+}
+
+.vehicleSelect {
+  padding: var(--space-xs) var(--space-sm) var(--space-xs) 4px;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-full);
+}
+
+.vehicleSelect:focus {
+  outline: none;
+}
+
+.askActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
 }
 
 .hint {
@@ -145,13 +165,16 @@
   color: var(--text-muted);
 }
 
+.askSubmit {
+  padding: var(--space-sm) var(--space-lg);
+}
+
 .examples {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-xl);
 }
 
 .examplesLabel {
@@ -362,21 +385,21 @@
     padding: 0 var(--space-md);
   }
 
-  .vehicleSelect {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .controls {
+  .askFooter {
     flex-direction: column;
-  }
-
-  .actionRow {
-    flex-direction: column-reverse;
     align-items: stretch;
   }
 
-  .actionRow .btn {
-    width: 100%;
+  .vehiclePill {
+    justify-content: center;
+  }
+
+  .askActions {
+    justify-content: space-between;
+  }
+
+  .askSubmit {
+    flex: 1;
+    justify-content: center;
   }
 }
