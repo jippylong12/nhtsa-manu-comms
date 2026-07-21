@@ -39,15 +39,29 @@ brew services list | grep mongo
 ### 2. Start Backend
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-pip install -e .
-uvicorn src.main:app --reload --port 8000
+scripts/dev-api.sh            # 127.0.0.1:8000, runs from any directory
+scripts/dev-api.sh --reload   # extra arguments pass through to uvicorn
 ```
 
 Backend API will be available at `http://localhost:8000`.
 API docs at `http://localhost:8000/docs`.
+
+> **Use the script, not a bare `uvicorn src.main:app`.** `src` is a generic
+> top-level package name, and an editable install of another project can put its
+> own `src` on `sys.path` for every interpreter on the machine. Start uvicorn
+> from anywhere except `backend/` and it will quietly serve *that* project
+> instead: the server boots cleanly, logs a normal startup, and then 404s every
+> route, which looks exactly like the database has been wiped. The script pins
+> the import with `--app-dir` and refuses to start if anything still shadows it.
+
+First-time setup, if you want an isolated environment:
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+pip install -e .
+```
 
 ### 3. Start Frontend
 
@@ -57,7 +71,7 @@ npm install
 npm run dev
 ```
 
-Frontend will be available at `http://localhost:5173`.
+Frontend will be available at `http://localhost:5175`.
 
 ## Features
 
