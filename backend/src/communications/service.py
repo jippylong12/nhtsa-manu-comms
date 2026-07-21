@@ -1,6 +1,7 @@
 """Business logic for Communications feature."""
 
 import asyncio
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Optional
 from bson import ObjectId
@@ -36,15 +37,63 @@ class CommunicationService:
     """Service layer for communication operations."""
 
     @staticmethod
-    def _product_matches(comm: dict[str, Any], year: str, model: str) -> bool:
-        """Check if communication references the target product."""
-        products = comm.get("associatedProducts") or []
-        for p in products:
-            p_year = str(p.get("productYear", "")).strip()
-            p_model = str(p.get("productModel", "")).strip()
-            if p_year == year and p_model.upper() == model.upper():
-                return True
-        return False
+    def _model_matches(stored: str, product: str) -> bool:
+        """Whether a tracked vehicle's model and a bulletin's product model agree.
+
+        Two NHTSA endpoints name the same vehicle differently. /vehicles/models,
+        which fills the add-vehicle dropdown, returns cab-style-qualified names
+        like "F-150 SUPER CREW", while a bulletin's associatedProducts carries
+        the base model "F-150". Exact equality therefore never matched for those
+        vehicles. Accept the pair when one name is a whole-token prefix of the
+        other, in either direction.
+
+        Comparing whole tokens rather than raw substrings is what keeps "F-150"
+        away from "F-1500".
+        """
+        stored_tokens = stored.upper().split()
+        product_tokens = product.upper().split()
+        if not stored_tokens or not product_tokens:
+            return False
+
+        if len(stored_tokens) <= len(product_tokens):
+            shorter, longer = stored_tokens, product_tokens
+        else:
+            shorter, longer = product_tokens, stored_tokens
+        return longer[: len(shorter)] == shorter
+
+    @staticmethod
+    def _product_match_query(vehicle_id: int, year: str, model: str) -> dict[str, Any]:
+        """Build the Mongo query counting a vehicle's matching communications.
+
+        Mirrors _model_matches. Year and model are matched inside a single
+        $elemMatch so they have to describe the same product rather than two
+        unrelated entries in the array.
+
+        Every pattern is escaped: model names are NHTSA data and really do carry
+        regex metacharacters, for example "CLA 350 4MATIC (EV)" and "2500
+        SPRINTER PASSENGER VAN (12-PASSENGER)". Unescaped, those parentheses
+        become groups and match the wrong text, and a name containing "[" makes
+        Mongo reject the query outright.
+        """
+        query: dict[str, Any] = {"vehicle_id": vehicle_id}
+        element: dict[str, Any] = {}
+
+        if year:
+            element["product_year"] = year
+
+        if model:
+            tokens = model.split()
+            prefixes = [" ".join(tokens[:index]) for index in range(1, len(tokens) + 1)]
+            # Either the bulletin names a prefix of the tracked model, or it
+            # names something that extends it.
+            element["$or"] = [
+                {"product_model": {"$regex": f"^{re.escape(prefix)}$", "$options": "i"}}
+                for prefix in prefixes
+            ] + [{"product_model": {"$regex": rf"^{re.escape(model)}\s", "$options": "i"}}]
+
+        if element:
+            query["associated_products"] = {"$elemMatch": element}
+        return query
 
     @staticmethod
     def _matches_keywords(summary: Optional[str], keywords: list[str]) -> list[str]:
@@ -283,12 +332,7 @@ class CommunicationService:
             }
 
         # Step 3: Count matches
-        match_query = {"vehicle_id": vehicle_id}
-        if year:
-            match_query["associated_products.product_year"] = year
-        if model:
-            match_query["associated_products.product_model"] = {"$regex": model, "$options": "i"}
-
+        match_query = CommunicationService._product_match_query(vehicle_id, year, model)
         matched_count = await db.communications.count_documents(match_query)
 
         # Update vehicle stats

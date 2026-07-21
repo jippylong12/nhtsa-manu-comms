@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.config import get_settings
 from src.communications.schemas import get_comm_type
+from src.communications.service import CommunicationService
 
 
 async def backfill_communication_types():
@@ -41,5 +42,50 @@ async def backfill_communication_types():
     client.close()
 
 
+async def backfill_comm_counts():
+    """Recount comm_count for every vehicle using the current matching rules.
+
+    Vehicles whose model name carries a cab or body style, such as "F-150 SUPER
+    CREW", were counted with a matcher that required the bulletin's product
+    model to be identical. NHTSA names that product "F-150", so those vehicles
+    stored comm_count 0 even though every communication had been fetched. The
+    count is only refreshed on fetch, so existing records stay wrong until this
+    recounts them.
+    """
+    settings = get_settings()
+    client = AsyncIOMotorClient(settings.mongodb_url)
+    db = client[settings.mongodb_database]
+
+    updated = 0
+    async for vehicle in db.vehicles.find({}):
+        vehicle_id = vehicle.get("vehicle_id")
+        if vehicle_id is None:
+            continue
+
+        query = CommunicationService._product_match_query(
+            vehicle_id, vehicle.get("year") or "", vehicle.get("model") or ""
+        )
+        recounted = await db.communications.count_documents(query)
+
+        if recounted != vehicle.get("comm_count"):
+            await db.vehicles.update_one(
+                {"_id": vehicle["_id"]}, {"$set": {"comm_count": recounted}}
+            )
+            updated += 1
+            print(
+                f"  {vehicle.get('year')} {vehicle.get('model')}: "
+                f"{vehicle.get('comm_count')} -> {recounted}"
+            )
+
+    print(f"Backfill complete. Updated {updated} vehicles.")
+    client.close()
+
+
 if __name__ == "__main__":
-    asyncio.run(backfill_communication_types())
+    import sys
+
+    target = sys.argv[1] if len(sys.argv) > 1 else "communication_types"
+    if target == "comm_counts":
+        asyncio.run(backfill_comm_counts())
+    else:
+        asyncio.run(backfill_communication_types())
