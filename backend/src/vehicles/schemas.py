@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def to_camel(string: str) -> str:
@@ -38,10 +39,17 @@ class VehicleCreate(CamelModel):
 
 
 class VehicleUpdate(CamelModel):
-    """Schema for updating a vehicle."""
+    """Schema for updating a vehicle.
+
+    make and trim are settable: the router has always forwarded them, so
+    without the fields every PATCH raised AttributeError before it reached the
+    service.
+    """
 
     year: Optional[str] = None
     model: Optional[str] = None
+    make: Optional[str] = None
+    trim: Optional[str] = None
     keywords: Optional[list[str]] = None
 
 
@@ -51,13 +59,17 @@ class VehicleUpdate(CamelModel):
 class VehicleResponse(CamelModel):
     """Schema for vehicle response."""
 
-    id: str = Field(..., alias="_id", description="MongoDB document ID")
+    id: str = Field(..., description="Row ID in the canonical store")
     vehicle_id: int = Field(..., description="NHTSA Vehicle ID")
     year: str = Field(..., description="Model year")
     model: str = Field(..., description="Model name")
+    make: Optional[str] = Field(None, description="Make, as recorded by the pipeline")
+    trim: Optional[str] = Field(None, description="Trim, from the NHTSA byYmmt variant")
     keywords: list[str] = Field(default_factory=list, description="Filter keywords")
-    last_fetched: Optional[datetime] = Field(None, description="Last API fetch time")
-    comm_count: int = Field(0, description="Number of communications found")
+    last_fetched: Optional[datetime] = Field(None, description="Last time NHTSA was queried")
+    comm_count: int = Field(
+        0, description="Communications in the corpus for this vehicle, derived on read"
+    )
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Record last update timestamp")
 

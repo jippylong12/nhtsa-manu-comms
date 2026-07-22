@@ -96,12 +96,15 @@ export const COMM_TYPE_COLORS: Record<CommType, string> = {
 
 // Vehicles
 export interface Vehicle {
-    _id: string;
+    id: string;
     vehicleId: number;
     year: string;
     model: string;
+    make?: string | null;
+    trim?: string | null;
     keywords: string[];
     lastFetched: string | null;
+    /** Communications in the corpus for this vehicle, derived on read. */
     commCount: number;
     createdAt: string;
     updatedAt: string;
@@ -121,6 +124,8 @@ export interface VehicleCreate {
 export interface VehicleUpdate {
     year?: string;
     model?: string;
+    make?: string;
+    trim?: string;
     keywords?: string[];
 }
 

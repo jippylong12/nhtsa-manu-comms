@@ -20,8 +20,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     # Startup
     await connect_to_mongodb()
-    # The Postgres pool is created lazily on first corpus request, so a missing
-    # DATABASE_URL never blocks the Mongo-backed endpoints from starting.
+    # The Postgres pool is created lazily on first use. Since JIP-416 that
+    # includes /api/vehicles, so a missing DATABASE_URL now surfaces as a failed
+    # request rather than a failed startup.
     yield
     # Shutdown
     await close_mongodb_connection()

@@ -122,17 +122,27 @@ async def upsert_vehicle(
     trim: Optional[str] = None,
     keywords: Optional[list[str]] = None,
 ) -> tuple[int, bool]:
-    """Insert or refresh a tracked vehicle. Returns ``(id, was_inserted)``."""
+    """Insert or refresh a tracked vehicle. Returns ``(id, was_inserted)``.
+
+    An upsert never destroys information the caller did not supply. Since
+    JIP-416 this table is the only store, so a re-add that omitted the make
+    would otherwise overwrite a known 'HONDA' with the 'UNKNOWN' placeholder,
+    and an add with no keywords would silently clear the ones already
+    configured. `update_vehicle` is the way to clear a field on purpose.
+    """
     row = await conn.fetchrow(
         """
         INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model, trim, keywords)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (nhtsa_vehicle_id) DO UPDATE SET
             year     = EXCLUDED.year,
-            make     = EXCLUDED.make,
             model    = EXCLUDED.model,
-            trim     = EXCLUDED.trim,
-            keywords = EXCLUDED.keywords,
+            -- 'UNKNOWN' is the absence of a make, not a make.
+            make     = CASE WHEN EXCLUDED.make = 'UNKNOWN'
+                            THEN vehicles.make ELSE EXCLUDED.make END,
+            trim     = coalesce(EXCLUDED.trim, vehicles.trim),
+            keywords = CASE WHEN EXCLUDED.keywords = '{}'::text[]
+                            THEN vehicles.keywords ELSE EXCLUDED.keywords END,
             -- Upserting a vehicle means tracking it. Without this, removing a
             -- vehicle and adding it back would leave active false, and
             -- tracked_vehicles filters on active, so sync would ignore it

@@ -4,12 +4,11 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.vehicles.schemas import (
     VehicleCreate,
-    VehicleUpdate,
-    VehicleResponse,
     VehicleListResponse,
+    VehicleResponse,
+    VehicleUpdate,
 )
 from src.vehicles.service import VehicleService
-
 
 router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
 
@@ -23,14 +22,18 @@ router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
 )
 async def create_vehicle(payload: VehicleCreate) -> VehicleResponse:
     """Add a new vehicle to track for manufacturer communications."""
-    vehicle = await VehicleService.create_vehicle(
-        vehicle_id=payload.vehicle_id,
-        year=payload.year,
-        model=payload.model,
-        keywords=payload.keywords,
-        make=payload.make,
-        trim=payload.trim,
-    )
+    try:
+        vehicle = await VehicleService.create_vehicle(
+            vehicle_id=payload.vehicle_id,
+            year=payload.year,
+            model=payload.model,
+            keywords=payload.keywords,
+            make=payload.make,
+            trim=payload.trim,
+        )
+    except ValueError as e:
+        # The year column is an integer; the API takes it as a string.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return VehicleResponse(**vehicle)
 
 
@@ -73,14 +76,17 @@ async def get_vehicle(vehicle_id: int) -> VehicleResponse:
 )
 async def update_vehicle(vehicle_id: int, payload: VehicleUpdate) -> VehicleResponse:
     """Update a vehicle's tracking configuration."""
-    vehicle = await VehicleService.update_vehicle(
-        vehicle_id=vehicle_id,
-        year=payload.year,
-        model=payload.model,
-        keywords=payload.keywords,
-        make=payload.make,
-        trim=payload.trim,
-    )
+    try:
+        vehicle = await VehicleService.update_vehicle(
+            vehicle_id=vehicle_id,
+            year=payload.year,
+            model=payload.model,
+            keywords=payload.keywords,
+            make=payload.make,
+            trim=payload.trim,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")
     return VehicleResponse(**vehicle)
@@ -89,11 +95,15 @@ async def update_vehicle(vehicle_id: int, payload: VehicleUpdate) -> VehicleResp
 @router.delete(
     "/{vehicle_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a tracked vehicle",
-    response_description="Vehicle deleted successfully",
+    summary="Stop tracking a vehicle",
+    response_description="Vehicle removed successfully",
 )
 async def delete_vehicle(vehicle_id: int) -> None:
-    """Delete a vehicle and all its associated communications."""
+    """Stop tracking a vehicle.
+
+    Deactivates rather than deletes, so bulletins shared with other vehicles
+    keep their links. The vehicle disappears from the API either way.
+    """
     deleted = await VehicleService.delete_vehicle(vehicle_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Vehicle not found")

@@ -1,62 +1,65 @@
-"""Business logic for Vehicles feature."""
+"""Business logic for Vehicles feature.
 
-import logging
-from datetime import datetime, timezone
+Postgres is the only store (JIP-416). The mirror that JIP-414 added, which kept
+a Mongo document and a Postgres row in step, is gone along with the drift it
+allowed: `repo.tracked_vehicles` and `/api/vehicles` now read the same rows.
+
+`comm_count` is derived from `communication_vehicles` on every read rather than
+kept as a column. A stored count is exactly what let a vehicle card claim 389
+communications above a detail page showing none.
+"""
+
+from datetime import datetime
 from typing import Any, Optional
-from bson import ObjectId
 
-from src.database import get_database
+import asyncpg
 
-log = logging.getLogger("vehicles")
+from src.db import get_pool
+from src.jobs import repository as repo
+
+# The wire shape in one place. comm_count is a correlated subquery rather than a
+# GROUP BY join so a vehicle with no corpus still returns a row reading zero,
+# instead of dropping out of the list entirely.
+_VEHICLE_COLUMNS = """
+    v.id, v.nhtsa_vehicle_id, v.year, v.make, v.model, v.trim, v.keywords,
+    v.last_fetched_at, v.created_at, v.updated_at,
+    (SELECT count(*) FROM communication_vehicles cv WHERE cv.vehicle_id = v.id)
+        AS comm_count
+"""
+
+
+def _to_response(row: asyncpg.Record) -> dict[str, Any]:
+    """Map a vehicles row onto the keys VehicleResponse expects.
+
+    `year` goes back out as a string. It is an integer column and always was a
+    string over the wire, and widening the API type would be a frontend change
+    for no gain.
+    """
+    return {
+        "id": str(row["id"]),
+        "vehicle_id": row["nhtsa_vehicle_id"],
+        "year": str(row["year"]),
+        "model": row["model"],
+        "make": row["make"],
+        "trim": row["trim"],
+        "keywords": list(row["keywords"]),
+        "last_fetched": row["last_fetched_at"],
+        "comm_count": row["comm_count"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _parse_year(year: str) -> int:
+    """Coerce the API's string year to the integer column, or explain why not."""
+    try:
+        return int(str(year).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"year must be a number, got {year!r}") from None
 
 
 class VehicleService:
     """Service layer for vehicle operations."""
-
-    @staticmethod
-    async def _register_with_pipeline(
-        vehicle_id: int,
-        year: str,
-        model: str,
-        make: str | None,
-        trim: str | None,
-        keywords: list[str] | None,
-    ) -> None:
-        """Mirror a tracked vehicle into the Postgres vehicles table.
-
-        The pipeline takes its worklist from `repository.tracked_vehicles`,
-        which reads Postgres, while the UI writes here to Mongo. Without this
-        mirror a vehicle added in the app is invisible to sync, so its
-        communications never reach the corpus and the detail page stays empty
-        while the card shows a healthy count. See JIP-414.
-
-        Best effort on purpose: Postgres being unreachable should not stop
-        someone adding a vehicle. A failure is logged loudly and
-        `sync --import-vehicles` still repairs it.
-        """
-        try:
-            from src.db import get_pool
-            from src.jobs import repository as repo
-
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                await repo.upsert_vehicle(
-                    conn,
-                    nhtsa_vehicle_id=vehicle_id,
-                    year=int(year),
-                    make=(make or "UNKNOWN").upper(),
-                    model=model.upper(),
-                    trim=trim,
-                    keywords=keywords or [],
-                )
-        except Exception as e:  # noqa: BLE001 - never block the add
-            log.warning(
-                "vehicle %s was not registered with the pipeline (%s: %s); "
-                "run `python -m src.jobs.sync --import-vehicles` to repair",
-                vehicle_id,
-                type(e).__name__,
-                e,
-            )
 
     @staticmethod
     async def create_vehicle(
@@ -67,78 +70,66 @@ class VehicleService:
         make: str | None = None,
         trim: str | None = None,
     ) -> dict[str, Any]:
-        """Create a new vehicle to track."""
-        db = get_database()
-        now = datetime.now(timezone.utc)
+        """Track a vehicle, or reactivate and refresh one already known.
 
-        document = {
-            "vehicle_id": vehicle_id,
-            "year": year,
-            "model": model.upper(),
-            "keywords": keywords or [],
-            "last_fetched": None,
-            "comm_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-        # Upsert to handle duplicates gracefully
-        result = await db.vehicles.update_one(
-            {"vehicle_id": vehicle_id},
-            {"$setOnInsert": document},
-            upsert=True,
-        )
-
-        await VehicleService._register_with_pipeline(
-            vehicle_id, year, model, make, trim, keywords
-        )
-
-        if result.upserted_id:
-            document["_id"] = str(result.upserted_id)
-        else:
-            # Already exists, fetch it
-            existing = await db.vehicles.find_one({"vehicle_id": vehicle_id})
-            if existing:
-                existing["_id"] = str(existing["_id"])
-                return existing
-
-        return document
+        The pipeline takes its worklist from this table, so the vehicle is
+        visible to sync the moment this returns. There is no bootstrap step.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row_id, _ = await repo.upsert_vehicle(
+                conn,
+                nhtsa_vehicle_id=vehicle_id,
+                year=_parse_year(year),
+                make=(make or "UNKNOWN").upper(),
+                model=model.upper(),
+                trim=trim,
+                keywords=keywords or [],
+            )
+            row = await conn.fetchrow(
+                f"SELECT {_VEHICLE_COLUMNS} FROM vehicles v WHERE v.id = $1", row_id
+            )
+        return _to_response(row)
 
     @staticmethod
     async def get_vehicle(vehicle_id: int) -> Optional[dict[str, Any]]:
-        """Get a vehicle by its NHTSA ID."""
-        db = get_database()
-        vehicle = await db.vehicles.find_one({"vehicle_id": vehicle_id})
-        if vehicle:
-            vehicle["_id"] = str(vehicle["_id"])
-        return vehicle
+        """Get a tracked vehicle by its NHTSA ID, or None if it is not tracked.
 
-    @staticmethod
-    async def get_vehicle_by_id(doc_id: str) -> Optional[dict[str, Any]]:
-        """Get a vehicle by its MongoDB document ID."""
-        db = get_database()
-        vehicle = await db.vehicles.find_one({"_id": ObjectId(doc_id)})
-        if vehicle:
-            vehicle["_id"] = str(vehicle["_id"])
-        return vehicle
+        Deactivated vehicles are not found. A soft delete has to look like a
+        delete from the outside, or a removed vehicle would stay addressable and
+        the list and the detail endpoint would disagree about whether it exists.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT {_VEHICLE_COLUMNS} FROM vehicles v
+                WHERE v.nhtsa_vehicle_id = $1 AND v.active
+                """,
+                vehicle_id,
+            )
+        return _to_response(row) if row else None
 
     @staticmethod
     async def list_vehicles(
         page: int = 1,
         per_page: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List all tracked vehicles with pagination."""
-        db = get_database()
-        skip = (page - 1) * per_page
-
-        cursor = db.vehicles.find().sort("created_at", -1).skip(skip).limit(per_page)
-        vehicles = []
-        async for vehicle in cursor:
-            vehicle["_id"] = str(vehicle["_id"])
-            vehicles.append(vehicle)
-
-        total = await db.vehicles.count_documents({})
-        return vehicles, total
+        """List tracked vehicles with pagination, newest first."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT {_VEHICLE_COLUMNS} FROM vehicles v
+                WHERE v.active
+                ORDER BY v.created_at DESC, v.id DESC
+                LIMIT $1 OFFSET $2
+                """,
+                per_page,
+                (page - 1) * per_page,
+            )
+            total = await conn.fetchval("SELECT count(*) FROM vehicles WHERE active")
+        return [_to_response(r) for r in rows], total
 
     @staticmethod
     async def update_vehicle(
@@ -146,77 +137,99 @@ class VehicleService:
         year: Optional[str] = None,
         model: Optional[str] = None,
         keywords: Optional[list[str]] = None,
+        make: Optional[str] = None,
+        trim: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update a vehicle's tracking configuration."""
-        db = get_database()
-        update_fields: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
+        """Update a vehicle's tracking configuration.
+
+        Only the fields actually supplied are touched, so PATCHing keywords
+        cannot blank the make. Unlike `create_vehicle`, an explicit empty list
+        here does clear the keywords; that is what the caller asked for.
+        """
+        assignments: list[str] = []
+        params: list[Any] = []
+
+        def assign(column: str, value: Any) -> None:
+            params.append(value)
+            assignments.append(f"{column} = ${len(params)}")
 
         if year is not None:
-            update_fields["year"] = year
+            assign("year", _parse_year(year))
         if model is not None:
-            update_fields["model"] = model.upper()
+            assign("model", model.upper())
         if keywords is not None:
-            update_fields["keywords"] = keywords
+            assign("keywords", keywords)
+        if make is not None:
+            assign("make", make.upper())
+        if trim is not None:
+            assign("trim", trim)
 
-        result = await db.vehicles.find_one_and_update(
-            {"vehicle_id": vehicle_id},
-            {"$set": update_fields},
-            return_document=True,
-        )
-        if result:
-            result["_id"] = str(result["_id"])
-        return result
+        if not assignments:
+            # An empty PATCH is not an error; the caller still expects the
+            # vehicle back, or a 404 if it is not tracked.
+            return await VehicleService.get_vehicle(vehicle_id)
+
+        params.append(vehicle_id)
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Two statements rather than one UPDATE ... RETURNING wrapped in a
+            # CTE: the rest of a statement reads the snapshot taken before its
+            # data-modifying CTE ran, so a single statement would hand back the
+            # row as it was before the update.
+            row_id = await conn.fetchval(
+                f"""
+                UPDATE vehicles SET {", ".join(assignments)}
+                WHERE nhtsa_vehicle_id = ${len(params)} AND active
+                RETURNING id
+                """,
+                *params,
+            )
+            if row_id is None:
+                return None
+            row = await conn.fetchrow(
+                f"SELECT {_VEHICLE_COLUMNS} FROM vehicles v WHERE v.id = $1", row_id
+            )
+        return _to_response(row)
 
     @staticmethod
     async def delete_vehicle(vehicle_id: int) -> bool:
-        """Delete a vehicle and its associated communications."""
-        db = get_database()
-        result = await db.vehicles.delete_one({"vehicle_id": vehicle_id})
-        # Also delete associated communications
-        await db.communications.delete_many({"vehicle_id": vehicle_id})
-        await VehicleService._deregister_from_pipeline(vehicle_id)
-        return result.deleted_count > 0
+        """Stop tracking a vehicle. Returns False if it was not tracked.
+
+        Deactivates rather than deletes. `communication_vehicles` hangs off this
+        row with ON DELETE CASCADE, and a bulletin shared with other vehicles
+        would take their links with it. `tracked_vehicles` filters on `active`,
+        so clearing the flag is enough to stop the pipeline polling it.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE vehicles SET active = false
+                WHERE nhtsa_vehicle_id = $1 AND active
+                RETURNING id
+                """,
+                vehicle_id,
+            )
+        return row is not None
 
     @staticmethod
-    async def _deregister_from_pipeline(vehicle_id: int) -> None:
-        """Stop the pipeline polling a vehicle the user removed.
-
-        Deactivates rather than deletes: the corpus links communications to
-        vehicles, and a shared bulletin belongs to other vehicles too, so
-        removing the row would take their history with it. `tracked_vehicles`
-        filters on `active`, so clearing the flag is enough to stop the polling.
-        """
-        try:
-            from src.db import get_pool
-
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE vehicles SET active = false WHERE nhtsa_vehicle_id = $1",
-                    vehicle_id,
-                )
-        except Exception as e:  # noqa: BLE001 - never block the delete
-            log.warning(
-                "vehicle %s still active in the pipeline (%s: %s); sync will keep polling it",
+    async def touch_fetched_at(vehicle_id: int, at: Optional[datetime] = None) -> None:
+        """Record that NHTSA was just asked about this vehicle."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE vehicles SET last_fetched_at = coalesce($2, now()) "
+                "WHERE nhtsa_vehicle_id = $1",
                 vehicle_id,
-                type(e).__name__,
-                e,
+                at,
             )
 
     @staticmethod
-    async def update_fetch_stats(
-        vehicle_id: int,
-        comm_count: int,
-    ) -> None:
-        """Update the fetch statistics for a vehicle."""
-        db = get_database()
-        await db.vehicles.update_one(
-            {"vehicle_id": vehicle_id},
-            {
-                "$set": {
-                    "last_fetched": datetime.now(timezone.utc),
-                    "comm_count": comm_count,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-        )
+    async def update_fetch_stats(vehicle_id: int, comm_count: int) -> None:
+        """Legacy hook from the Mongo fetch path.
+
+        `comm_count` is accepted and ignored: it is derived from the corpus now,
+        and writing a caller's idea of it back is the drift this milestone
+        exists to remove. Deleted along with its one caller in JIP-417.
+        """
+        await VehicleService.touch_fetched_at(vehicle_id)
