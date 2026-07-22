@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { VehicleCreate } from '@/client';
 import { AppProvider, useAppState, useAppDispatch } from './contexts/AppContext';
 import { AppShell } from './components/layout/AppShell';
 import { Sidebar } from './components/layout/Sidebar';
@@ -25,7 +26,7 @@ function Dashboard() {
   const vehicles = vehiclesData?.items ?? [];
   const selectedVehicle = vehicles.find(v => v.vehicleId === selectedVehicleId) ?? null;
 
-  const handleAddVehicle = (data: { vehicleId: number; year: string; model: string; keywords: string[] }) => {
+  const handleAddVehicle = (data: VehicleCreate) => {
     createVehicle(data, { onSuccess: () => dispatch({ type: 'CLOSE_ADD_MODAL' }) });
   };
 

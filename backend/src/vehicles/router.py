@@ -28,6 +28,8 @@ async def create_vehicle(payload: VehicleCreate) -> VehicleResponse:
         year=payload.year,
         model=payload.model,
         keywords=payload.keywords,
+        make=payload.make,
+        trim=payload.trim,
     )
     return VehicleResponse(**vehicle)
 
@@ -76,6 +78,8 @@ async def update_vehicle(vehicle_id: int, payload: VehicleUpdate) -> VehicleResp
         year=payload.year,
         model=payload.model,
         keywords=payload.keywords,
+        make=payload.make,
+        trim=payload.trim,
     )
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")

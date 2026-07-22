@@ -132,7 +132,12 @@ async def upsert_vehicle(
             make     = EXCLUDED.make,
             model    = EXCLUDED.model,
             trim     = EXCLUDED.trim,
-            keywords = EXCLUDED.keywords
+            keywords = EXCLUDED.keywords,
+            -- Upserting a vehicle means tracking it. Without this, removing a
+            -- vehicle and adding it back would leave active false, and
+            -- tracked_vehicles filters on active, so sync would ignore it
+            -- forever.
+            active   = true
         RETURNING id, (xmax = 0) AS inserted
         """,
         nhtsa_vehicle_id,

@@ -1,14 +1,62 @@
 """Business logic for Vehicles feature."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 from bson import ObjectId
 
 from src.database import get_database
 
+log = logging.getLogger("vehicles")
+
 
 class VehicleService:
     """Service layer for vehicle operations."""
+
+    @staticmethod
+    async def _register_with_pipeline(
+        vehicle_id: int,
+        year: str,
+        model: str,
+        make: str | None,
+        trim: str | None,
+        keywords: list[str] | None,
+    ) -> None:
+        """Mirror a tracked vehicle into the Postgres vehicles table.
+
+        The pipeline takes its worklist from `repository.tracked_vehicles`,
+        which reads Postgres, while the UI writes here to Mongo. Without this
+        mirror a vehicle added in the app is invisible to sync, so its
+        communications never reach the corpus and the detail page stays empty
+        while the card shows a healthy count. See JIP-414.
+
+        Best effort on purpose: Postgres being unreachable should not stop
+        someone adding a vehicle. A failure is logged loudly and
+        `sync --import-vehicles` still repairs it.
+        """
+        try:
+            from src.db import get_pool
+            from src.jobs import repository as repo
+
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await repo.upsert_vehicle(
+                    conn,
+                    nhtsa_vehicle_id=vehicle_id,
+                    year=int(year),
+                    make=(make or "UNKNOWN").upper(),
+                    model=model.upper(),
+                    trim=trim,
+                    keywords=keywords or [],
+                )
+        except Exception as e:  # noqa: BLE001 - never block the add
+            log.warning(
+                "vehicle %s was not registered with the pipeline (%s: %s); "
+                "run `python -m src.jobs.sync --import-vehicles` to repair",
+                vehicle_id,
+                type(e).__name__,
+                e,
+            )
 
     @staticmethod
     async def create_vehicle(
@@ -16,6 +64,8 @@ class VehicleService:
         year: str,
         model: str,
         keywords: list[str] | None = None,
+        make: str | None = None,
+        trim: str | None = None,
     ) -> dict[str, Any]:
         """Create a new vehicle to track."""
         db = get_database()
@@ -37,6 +87,10 @@ class VehicleService:
             {"vehicle_id": vehicle_id},
             {"$setOnInsert": document},
             upsert=True,
+        )
+
+        await VehicleService._register_with_pipeline(
+            vehicle_id, year, model, make, trim, keywords
         )
 
         if result.upserted_id:
@@ -120,7 +174,34 @@ class VehicleService:
         result = await db.vehicles.delete_one({"vehicle_id": vehicle_id})
         # Also delete associated communications
         await db.communications.delete_many({"vehicle_id": vehicle_id})
+        await VehicleService._deregister_from_pipeline(vehicle_id)
         return result.deleted_count > 0
+
+    @staticmethod
+    async def _deregister_from_pipeline(vehicle_id: int) -> None:
+        """Stop the pipeline polling a vehicle the user removed.
+
+        Deactivates rather than deletes: the corpus links communications to
+        vehicles, and a shared bulletin belongs to other vehicles too, so
+        removing the row would take their history with it. `tracked_vehicles`
+        filters on `active`, so clearing the flag is enough to stop the polling.
+        """
+        try:
+            from src.db import get_pool
+
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE vehicles SET active = false WHERE nhtsa_vehicle_id = $1",
+                    vehicle_id,
+                )
+        except Exception as e:  # noqa: BLE001 - never block the delete
+            log.warning(
+                "vehicle %s still active in the pipeline (%s: %s); sync will keep polling it",
+                vehicle_id,
+                type(e).__name__,
+                e,
+            )
 
     @staticmethod
     async def update_fetch_stats(

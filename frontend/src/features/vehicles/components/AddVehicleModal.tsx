@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { X, Plus, Car, Check, Loader2, AlertCircle } from 'lucide-react';
-import type { VehicleVariant } from '@/client';
+import type { VehicleCreate, VehicleVariant } from '@/client';
 import {
     useDiscoveryYears,
     useDiscoveryMakes,
@@ -14,7 +14,7 @@ import styles from './AddVehicleModal.module.css';
 interface Props {
     isOpen: boolean;
     onClose: () => void;
-    onSubmit: (data: { vehicleId: number; year: string; model: string; keywords: string[] }) => void;
+    onSubmit: (data: VehicleCreate) => void;
     isLoading?: boolean;
 }
 
@@ -84,6 +84,8 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
             vehicleId: selectedVariant.vehicleId,
             year: String(selectedVariant.modelYear),
             model: selectedVariant.model,
+            make: selectedVariant.make,
+            trim: selectedVariant.trim,
             keywords: keywordList,
         });
     };

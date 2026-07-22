@@ -111,6 +111,10 @@ export interface VehicleCreate {
     vehicleId: number;
     year: string;
     model: string;
+    // Carried through so the pipeline records the real make instead of
+    // inferring it from the model name. See JIP-414.
+    make?: string;
+    trim?: string;
     keywords?: string[];
 }
 

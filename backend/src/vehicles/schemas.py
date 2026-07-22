@@ -30,6 +30,8 @@ class VehicleCreate(CamelModel):
     vehicle_id: int = Field(..., description="NHTSA Vehicle ID")
     year: str = Field(..., description="Model year (e.g., '2024')")
     model: str = Field(..., description="Model name (e.g., 'SILVERADO EV')")
+    make: Optional[str] = Field(None, description="Make, from the NHTSA byYmmt variant")
+    trim: Optional[str] = Field(None, description="Trim, from the NHTSA byYmmt variant")
     keywords: list[str] = Field(
         default_factory=list, description="Keywords to filter communications"
     )
