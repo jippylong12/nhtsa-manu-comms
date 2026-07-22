@@ -26,6 +26,15 @@ from src.usage.ledger import record_usage
 
 log = logging.getLogger("llm")
 
+# How many times a communication may fail LLM extraction before it stops being
+# retried. Document selection keys on status='pending', so a failure that is
+# written straight to 'failed' is never seen again; most LLM errors are
+# transient and deserve another pass.
+MAX_LLM_ATTEMPTS = 3
+
+# Retries deliberately leave temperature 0. See _generation_config.
+RETRY_TEMPERATURE = 0.3
+
 # Pricing lives in src/usage/pricing.py so the ledger and the jobs can never
 # disagree about what a call cost.
 PRICE_IN = pricing.rate_for("gemini-3.1-flash-lite").input_per_token
@@ -184,11 +193,19 @@ def _client() -> genai.Client:
     return genai.Client(api_key=settings.gemini_api_key)
 
 
-def _generation_config() -> types.GenerateContentConfig:
+def _generation_config(temperature: float = 0.0) -> types.GenerateContentConfig:
+    """Generation settings. Temperature 0 by default, for reproducible extraction.
+
+    Retries raise it deliberately. At temperature 0 the model is effectively
+    deterministic, so re-asking after a malformed response returns the same
+    malformed response and the retry buys nothing. The failure this guards
+    against is a degenerate repetition loop that runs until the output cap and
+    truncates mid-token, which a different sampling path escapes.
+    """
     return types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=RESPONSE_SCHEMA,
-        temperature=0.0,
+        temperature=temperature,
     )
 
 
@@ -256,7 +273,21 @@ async def _store(doc: dict, clean: dict, tokens_in: int, tokens_out: int, batch:
         )
 
 
-async def _mark_failed(communication_id: int, reason: str) -> None:
+async def _mark_failed(communication_id: int, reason: str, retryable: bool = True) -> None:
+    """Record an LLM failure, leaving it retryable until the budget runs out.
+
+    Document selection requires `status = 'pending'`, so writing 'failed'
+    immediately took the document out of circulation permanently. That is too
+    harsh for an LLM error, which is usually transient: one 2018 F-150 bulletin
+    was lost to a single malformed response even though the document itself was
+    a perfectly ordinary two-page PDF.
+
+    Until MAX_LLM_ATTEMPTS is reached the communication goes back to 'pending'
+    with the reason recorded, so the next run picks it up. After that it is
+    genuinely 'failed' and stops consuming budget.
+
+    Pass retryable=False for something re-asking cannot fix.
+    """
     from src.db import get_pool
 
     pool = await get_pool()
@@ -266,11 +297,18 @@ async def _mark_failed(communication_id: int, reason: str) -> None:
         await conn.execute(
             """
             UPDATE communications
-            SET status='failed', status_reason=$2, attempts=attempts+1
-            WHERE id=$1 AND status <> 'processed'
+            SET attempts = attempts + 1,
+                status_reason = $2,
+                status = CASE
+                    WHEN $3 AND attempts + 1 < $4 THEN 'pending'
+                    ELSE 'failed'
+                END
+            WHERE id = $1 AND status <> 'processed'
             """,
             communication_id,
             reason[:500],
+            retryable,
+            MAX_LLM_ATTEMPTS,
         )
 
 
@@ -334,7 +372,9 @@ async def run_sync(
                         client.models.generate_content,
                         model=settings.gemini_model,
                         contents=contents,
-                        config=_generation_config(),
+                        config=_generation_config(
+                            temperature=0.0 if attempt == 1 else RETRY_TEMPERATURE
+                        ),
                     )
                     # usage_metadata can be absent on a truncated/blocked
                     # response; treat it as zero rather than raising.
