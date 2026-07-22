@@ -9,7 +9,7 @@ import fitz
 import pytest
 
 from src.config import get_settings
-from src.jobs.extract import archive_path, extract_text
+from src.jobs.extract import _strip_unstorable, archive_path, extract_text
 
 
 def _make_pdf(path, pages_text: list[str]) -> None:
@@ -131,3 +131,44 @@ def test_archive_path_rejects_traversal():
 
     assert ".." not in path.name
     assert path.name.endswith(".pdf")
+
+
+# --------------------------------------------------------------------------- #
+# Text Postgres refuses to store
+# --------------------------------------------------------------------------- #
+def test_nul_bytes_are_stripped_from_extracted_text():
+    """A malformed PDF can yield NUL bytes. Postgres rejects them outright with
+    'invalid byte sequence for encoding UTF8: 0x00', which aborted the run."""
+    assert _strip_unstorable("brake\x00 shudder") == "brake shudder"
+
+
+def test_lone_surrogates_are_stripped():
+    """Survive Python, fail on the UTF-8 encode into the driver."""
+    assert _strip_unstorable("rotor\ud800 wear") == "rotor wear"
+
+
+def test_ordinary_text_is_untouched():
+    body = "Front brake rotors may cause a shudder.\nSee §6.2 — “Remedy”.\t(2020)"
+    assert _strip_unstorable(body) == body
+
+
+def test_cleaned_text_survives_a_utf8_encode():
+    """The property the database actually needs."""
+    _strip_unstorable("a\x00b\ud800c").encode("utf-8")
+
+
+def test_extracted_text_from_a_nul_bearing_pdf_is_storable(tmp_path):
+    path = tmp_path / "nul.pdf"
+    body = (
+        "This bulletin describes a condition where the vehicle exhibits "
+        "a shudder during light acceleration. "
+    ) * 12
+    _make_pdf(path, [body, body])
+    raw = path.read_bytes()
+
+    result = extract_text(path)
+
+    assert result.ok
+    assert "\x00" not in (result.text or "")
+    (result.text or "").encode("utf-8")
+    assert path.read_bytes() == raw, "extraction must not rewrite the archived pdf"

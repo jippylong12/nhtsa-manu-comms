@@ -108,6 +108,26 @@ async def download(
     return None, last_error or "download failed", False
 
 
+def _strip_unstorable(text: str) -> str:
+    """Remove code points Postgres refuses to store in a text column.
+
+    A malformed PDF can yield NUL bytes, and Postgres rejects those outright
+    with "invalid byte sequence for encoding UTF8: 0x00", which used to abort
+    the whole extraction run. The surrogate range is dropped for the same
+    reason: it survives Python but not a UTF-8 encode on the way to the driver.
+
+    Only these code points go; everything else is left alone so the low-yield
+    heuristic still sees the document as PyMuPDF read it.
+    """
+    cleaned = text.replace("\x00", "")
+    try:
+        cleaned.encode("utf-8")
+    except UnicodeEncodeError:
+        # Lone surrogates: encode with errors="ignore" to drop exactly those.
+        cleaned = cleaned.encode("utf-8", "ignore").decode("utf-8")
+    return cleaned
+
+
 def extract_text(path: pathlib.Path) -> ExtractionResult:
     """Extract text with PyMuPDF and apply the low-yield heuristic.
 
@@ -131,7 +151,7 @@ def extract_text(path: pathlib.Path) -> ExtractionResult:
     if not pages:
         return ExtractionResult(error="pdf has zero pages")
 
-    full = "\n".join(pages)
+    full = _strip_unstorable("\n".join(pages))
     n_pages = len(pages)
     total = len(full)
     alpha = sum(c.isalpha() for c in full)
@@ -232,7 +252,22 @@ async def extract_pending(limit: int | None = None, force: bool = False) -> Extr
 
             await _store(pool, row["id"], result)
 
-        await asyncio.gather(*(handle(r) for r in rows))
+        async def handle_isolated(row) -> None:
+            """One unusable document must cost one document, not the run.
+
+            gather() propagates the first exception, so before this an
+            unexpected error partway through a batch of several hundred threw
+            away every sibling still in flight and left them pending.
+            """
+            try:
+                await handle(row)
+            except Exception as e:  # noqa: BLE001 - one bad document, keep going
+                stats.failed += 1
+                stats.errors.append(f"{row['url']}: {type(e).__name__}: {e}")
+                log.warning("%s: %s: %s", row["url"], type(e).__name__, e)
+                await _record_failure(pool, row, f"{type(e).__name__}: {e}")
+
+        await asyncio.gather(*(handle_isolated(r) for r in rows))
 
     log.info("extraction complete :: %s", stats.summary())
     return stats
