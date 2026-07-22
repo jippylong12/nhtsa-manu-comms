@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { VehicleCreate } from '@/client';
 import { AppProvider, useAppState, useAppDispatch } from './contexts/AppContext';
@@ -8,7 +9,7 @@ import { SymptomSearchView } from './features/symptom-search/components/SymptomS
 import { VehicleGrid } from './features/vehicles/components/VehicleGrid';
 import { AddVehicleModal } from './features/vehicles/components/AddVehicleModal';
 import { useVehiclesQuery, useCreateVehicle, useDeleteVehicle } from './features/vehicles/hooks/useVehicles';
-import { useFetchCommunications } from './features/communications/hooks/useCommunications';
+import { useRefreshFlow } from './features/refresh/hooks/useRefresh';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 1000 * 60 * 5, retry: 1 } },
@@ -21,7 +22,11 @@ function Dashboard() {
   const { data: vehiclesData, isLoading: vehiclesLoading } = useVehiclesQuery();
   const { mutate: createVehicle, isPending: isCreating } = useCreateVehicle();
   const { mutate: deleteVehicle } = useDeleteVehicle();
-  const { fetch: fetchComms, progress, isFetching, reset } = useFetchCommunications();
+
+  // Which card's refresh button was pressed. The flow follows one vehicle at a
+  // time, matching the server, which permits a single run at a time.
+  const [refreshTarget, setRefreshTarget] = useState<number | null>(null);
+  const gridRefresh = useRefreshFlow(refreshTarget);
 
   const vehicles = vehiclesData?.items ?? [];
   const selectedVehicle = vehicles.find(v => v.vehicleId === selectedVehicleId) ?? null;
@@ -37,6 +42,11 @@ function Dashboard() {
         dispatch({ type: 'SELECT_VEHICLE', payload: null });
       }
     }
+  };
+
+  const handleRefresh = (vehicleId: number) => {
+    setRefreshTarget(vehicleId);
+    gridRefresh.ask(vehicleId);
   };
 
   return (
@@ -67,11 +77,10 @@ function Dashboard() {
           isLoading={vehiclesLoading}
           onSelectVehicle={(id) => dispatch({ type: 'SELECT_VEHICLE', payload: id })}
           onDeleteVehicle={handleDeleteVehicle}
-          onFetchComms={(vehicleId) => fetchComms(vehicleId, false)}
+          onRefreshVehicle={handleRefresh}
           onAddVehicle={() => dispatch({ type: 'OPEN_ADD_MODAL' })}
-          isFetching={isFetching}
-          progress={progress}
-          onDismissProgress={reset}
+          refresh={gridRefresh}
+          refreshTargetId={refreshTarget}
         />
       )}
 

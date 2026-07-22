@@ -236,6 +236,63 @@ export interface VehicleVariant {
     vehicleDescription: string;
 }
 
+// --- Refresh (runs the pipeline for one vehicle) ---
+
+/** What a refresh would do. Asking costs nothing. */
+export interface RefreshPreview {
+    vehicleId: number;
+    listedByNhtsa: number;
+    newBulletins: number;
+    /** Already in the corpus for this vehicle but never analysed. */
+    unfinishedDocuments: number;
+    documentsToProcess: number;
+    upToDate: boolean;
+    estimatedCostLowUsd: number;
+    estimatedCostHighUsd: number;
+    /** Ready to show, e.g. "about $0.03". */
+    estimatedCostText: string;
+    estimatedSeconds: number;
+    /** Ready to show, e.g. "around 4 minutes". */
+    estimatedDurationText: string;
+    costPerDocumentUsd: number;
+}
+
+export type RefreshStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+/** The stages, in the order they run. Named for the user, not the pipeline. */
+export type RefreshStage = 'sync' | 'read' | 'analyse' | 'index' | 'finalise';
+
+export const REFRESH_STAGES: { key: RefreshStage; label: string }[] = [
+    { key: 'sync', label: 'Fetching from NHTSA' },
+    { key: 'read', label: 'Reading documents' },
+    { key: 'analyse', label: 'Analysing' },
+    { key: 'index', label: 'Indexing' },
+    { key: 'finalise', label: 'Finishing up' },
+];
+
+export interface RefreshRun {
+    id: number;
+    vehicleId: number;
+    status: RefreshStatus;
+    stage: RefreshStage | null;
+    stageNote: string | null;
+    done: number;
+    total: number;
+    expectedDocuments: number;
+    estimatedCostUsd: number;
+    /** Metered spend for this run, set when it finishes. */
+    actualCostUsd: number | null;
+    counts: Record<string, unknown>;
+    /** Why it failed, or what it could not finish on a partial success. */
+    error: string | null;
+    startedAt: string;
+    heartbeatAt: string;
+    finishedAt: string | null;
+}
+
+export const isRefreshActive = (run: RefreshRun | null | undefined): boolean =>
+    run?.status === 'queued' || run?.status === 'running';
+
 // --- Corpus (Postgres-backed processed pipeline) ---
 
 export type ProcessingStatus = 'pending' | 'processed' | 'failed';

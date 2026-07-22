@@ -160,6 +160,24 @@ async def upsert_vehicle(
     return row["id"], row["inserted"]
 
 
+def vehicle_scope(param: str, comm_id: str = "c.id") -> str:
+    """SQL restricting a stage query to one tracked vehicle, or to all of them.
+
+    Written once because the four stage queries have to agree exactly: an
+    in-app refresh quotes a price for one vehicle's backlog and must then
+    process that backlog and no other, or the bill will not match the estimate.
+
+    `param` is the ``$n`` placeholder holding the NHTSA vehicle id. A NULL there
+    means "every vehicle", which is what the CLI jobs pass.
+    """
+    return (
+        f"({param}::int IS NULL OR EXISTS ("
+        f" SELECT 1 FROM communication_vehicles cv"
+        f" JOIN vehicles v ON v.id = cv.vehicle_id"
+        f" WHERE cv.communication_id = {comm_id} AND v.nhtsa_vehicle_id = {param}))"
+    )
+
+
 async def existing_nhtsa_ids(conn: asyncpg.Connection, nhtsa_ids: list[str]) -> set[str]:
     """Return the subset of ids already present, so sync can skip refetching them."""
     if not nhtsa_ids:

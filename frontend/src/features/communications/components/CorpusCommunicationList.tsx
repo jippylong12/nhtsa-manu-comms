@@ -35,9 +35,13 @@ interface Props {
   highlightIds?: string[];
 }
 
+// "Pending" was pipeline bookkeeping in the user's face: it only means anything
+// if you know there is a separate analysis stage. From the outside a bulletin is
+// either ready or still being worked on, and the refresh progress panel says
+// which. See JIP-419.
 const STATUS_META: Record<ProcessingStatus, { label: string; icon: typeof Sparkles; cls: string }> = {
   processed: { label: 'Analyzed', icon: Sparkles, cls: 'statusProcessed' },
-  pending: { label: 'Pending', icon: Clock, cls: 'statusPending' },
+  pending: { label: 'Analyzing', icon: Clock, cls: 'statusPending' },
   failed: { label: 'No document', icon: AlertCircle, cls: 'statusFailed' },
 };
 

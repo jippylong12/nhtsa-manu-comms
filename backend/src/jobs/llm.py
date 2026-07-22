@@ -222,8 +222,13 @@ def _vision_parts(url: str) -> list[types.Part]:
     return parts
 
 
-async def _pending_documents(limit: int | None, vision_only: bool = False) -> list[dict]:
+async def _pending_documents(
+    limit: int | None,
+    vision_only: bool = False,
+    nhtsa_vehicle_id: int | None = None,
+) -> list[dict]:
     from src.db import get_pool
+    from src.jobs.repository import vehicle_scope
 
     vision_filter = "AND d.extraction_method = 'vision-fallback'" if vision_only else ""
     pool = await get_pool()
@@ -236,10 +241,12 @@ async def _pending_documents(limit: int | None, vision_only: bool = False) -> li
             WHERE d.llm_summary IS NULL
               AND c.status = 'pending'
               AND (d.extracted_text IS NOT NULL OR d.extraction_method = 'vision-fallback')
+              AND {vehicle_scope('$1')}
               {vision_filter}
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
-            """
+            """,
+            nhtsa_vehicle_id,
         )
     return [dict(r) for r in rows]
 
@@ -337,7 +344,10 @@ async def promote_completed_communications() -> int:
 
 
 async def run_sync(
-    limit: int | None = None, concurrency: int = 4, vision_only: bool = False
+    limit: int | None = None,
+    concurrency: int = 4,
+    vision_only: bool = False,
+    nhtsa_vehicle_id: int | None = None,
 ) -> LLMStats:
     """Process documents with the standard API. Full price, immediate results.
 
@@ -348,7 +358,9 @@ async def run_sync(
     settings = get_settings()
     client = _client()
     stats = LLMStats()
-    docs = await _pending_documents(limit, vision_only=vision_only)
+    docs = await _pending_documents(
+        limit, vision_only=vision_only, nhtsa_vehicle_id=nhtsa_vehicle_id
+    )
     if not docs:
         log.info("no documents awaiting LLM extraction")
         return stats
@@ -425,7 +437,7 @@ async def run_sync(
     return stats
 
 
-async def submit_batch(limit: int | None = None) -> list[str]:
+async def submit_batch(limit: int | None = None, nhtsa_vehicle_id: int | None = None) -> list[str]:
     """Submit pending documents as Batch API jobs. Returns job names.
 
     Vision-fallback documents are excluded: they are a rare path and are
@@ -434,7 +446,9 @@ async def submit_batch(limit: int | None = None) -> list[str]:
     settings = get_settings()
     client = _client()
     docs = [
-        d for d in await _pending_documents(limit) if d["extraction_method"] != "vision-fallback"
+        d
+        for d in await _pending_documents(limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        if d["extraction_method"] != "vision-fallback"
     ]
     if not docs:
         log.info("nothing to submit")

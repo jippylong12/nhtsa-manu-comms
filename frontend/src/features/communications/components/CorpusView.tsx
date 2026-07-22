@@ -1,13 +1,15 @@
 /* Corpus View - processed pipeline output: LLM summaries, tags, FTS search */
 
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Search, Filter, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Search, Filter, RefreshCw, Sparkles, X } from 'lucide-react';
 
 import { CorpusCommunicationList } from './CorpusCommunicationList';
 import {
   useCorpusCommunicationsQuery,
   useCorpusTagsQuery,
 } from '../hooks/useCorpus';
+import { RefreshSurface } from '../../refresh/components/RefreshSurface';
+import { useRefreshFlow } from '../../refresh/hooks/useRefresh';
 
 import type { Vehicle, CommType, CorpusFilters, ProcessingStatus } from '@/client';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
@@ -20,10 +22,14 @@ interface CorpusViewProps {
   onBack: () => void;
 }
 
+// "Processed" and "Pending" stopped being a distinction the user has to care
+// about once a refresh always finishes the job; both were pipeline bookkeeping
+// leaking into the interface. "Unavailable" is real and stays: NHTSA publishes
+// some bulletins with no document attached, and no amount of processing will
+// produce one.
 const STATUS_TABS: { key: ProcessingStatus | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'processed', label: 'Processed' },
-  { key: 'pending', label: 'Pending' },
+  { key: 'processed', label: 'Analyzed' },
   { key: 'failed', label: 'Unavailable' },
 ];
 
@@ -40,6 +46,9 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
   const [selectedType, setSelectedType] = useState<CommType | null>(null);
 
   const { data: tagsData } = useCorpusTagsQuery(vehicleId);
+  // Its own flow instance, so arriving here mid-run picks the run up from the
+  // server rather than showing an empty page.
+  const refresh = useRefreshFlow(vehicleId);
 
   const filters: CorpusFilters = useMemo(() => {
     const f: CorpusFilters = { vehicleId, perPage: 200 };
@@ -73,6 +82,11 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
   const hasActiveFilters =
     search.trim() || status !== 'all' || selectedSystems.length > 0 || selectedType;
 
+  // "This vehicle has nothing" is a different situation from "your filters
+  // matched nothing", and only the first one is worth offering a load for.
+  const isEmptyVehicle =
+    !isLoading && !hasActiveFilters && (data?.total ?? 0) === 0 && !refresh.isActive;
+
   const clearAll = () => {
     setSearchInput('');
     setSearch('');
@@ -101,7 +115,21 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
               {processedCount > 0 && ` · ${processedCount} analyzed on this page`}
             </p>
           </div>
+          <button
+            className="btn btn-ghost"
+            onClick={() => refresh.ask(vehicleId)}
+            disabled={refresh.isAsking || refresh.isStarting || refresh.isActive}
+            title="Check NHTSA for new bulletins"
+          >
+            <RefreshCw
+              size={16}
+              className={refresh.isActive || refresh.isAsking ? styles.spinning : ''}
+            />
+            {refresh.isActive ? 'Loading' : 'Refresh'}
+          </button>
         </div>
+
+        <RefreshSurface flow={refresh} />
 
         {/* Search */}
         <form onSubmit={handleSubmit} className={styles.searchForm}>
@@ -210,13 +238,36 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
           </div>
         )}
 
-        <CorpusCommunicationList
-          communications={items}
-          isLoading={isLoading}
-          onSelectType={(t) => setSelectedType((prev) => (prev === t ? null : t))}
-          onSelectSystem={toggleSystem}
-          activeSystems={selectedSystems}
-        />
+        {isEmptyVehicle ? (
+          // A newly added vehicle used to land on "No communications found",
+          // which reads like a broken page rather than one waiting to be
+          // filled. Offering the run beats starting it automatically now that
+          // the flow confirms before spending anything.
+          <div className={`empty-state glass-card ${styles.emptyState}`}>
+            <Sparkles className="empty-state-icon" size={56} />
+            <h3 className="empty-state-title">Nothing loaded for this vehicle yet</h3>
+            <p className="empty-state-description">
+              Fetch its manufacturer communications from NHTSA and analyse them. You will see
+              the cost before anything runs.
+            </p>
+            <button
+              className="btn btn-primary"
+              onClick={() => refresh.ask(vehicleId)}
+              disabled={refresh.isAsking || refresh.isStarting}
+            >
+              <RefreshCw size={18} className={refresh.isAsking ? styles.spinning : ''} />
+              {refresh.isAsking ? 'Checking NHTSA...' : 'Load bulletins'}
+            </button>
+          </div>
+        ) : (
+          <CorpusCommunicationList
+            communications={items}
+            isLoading={isLoading}
+            onSelectType={(t) => setSelectedType((prev) => (prev === t ? null : t))}
+            onSelectSystem={toggleSystem}
+            activeSystems={selectedSystems}
+          />
+        )}
       </div>
     </div>
   );

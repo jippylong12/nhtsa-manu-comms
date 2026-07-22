@@ -2,8 +2,9 @@
 
 import { Plus, Car } from 'lucide-react';
 import { VehicleCard } from './VehicleCard';
-import { FetchProgressBar } from '../../communications/components/FetchProgress';
-import type { Vehicle, FetchProgress } from '@/client';
+import { RefreshSurface } from '../../refresh/components/RefreshSurface';
+import type { useRefreshFlow } from '../../refresh/hooks/useRefresh';
+import type { Vehicle } from '@/client';
 
 import styles from './VehicleGrid.module.css';
 
@@ -12,11 +13,11 @@ interface VehicleGridProps {
   isLoading: boolean;
   onSelectVehicle: (vehicleId: number) => void;
   onDeleteVehicle: (vehicleId: number) => void;
-  onFetchComms: (vehicleId: number) => void;
+  onRefreshVehicle: (vehicleId: number) => void;
   onAddVehicle: () => void;
-  isFetching: boolean;
-  progress: FetchProgress | null;
-  onDismissProgress: () => void;
+  refresh: ReturnType<typeof useRefreshFlow>;
+  /** The vehicle whose refresh button was pressed, if any. */
+  refreshTargetId: number | null;
 }
 
 export function VehicleGrid({
@@ -24,11 +25,10 @@ export function VehicleGrid({
   isLoading,
   onSelectVehicle,
   onDeleteVehicle,
-  onFetchComms,
+  onRefreshVehicle,
   onAddVehicle,
-  isFetching,
-  progress,
-  onDismissProgress,
+  refresh,
+  refreshTargetId,
 }: VehicleGridProps) {
   return (
     <div className={styles.page}>
@@ -53,7 +53,7 @@ export function VehicleGrid({
           </div>
         </div>
 
-        <FetchProgressBar progress={progress} onDismiss={onDismissProgress} />
+        <RefreshSurface flow={refresh} />
 
         {isLoading ? (
           <div className={styles.vehiclesGrid}>
@@ -82,10 +82,15 @@ export function VehicleGrid({
               <VehicleCard
                 key={vehicle.vehicleId}
                 vehicle={vehicle}
-                onFetch={onFetchComms}
+                onRefresh={onRefreshVehicle}
                 onDelete={onDeleteVehicle}
                 onSelect={onSelectVehicle}
-                isFetching={isFetching}
+                // Only the card actually being refreshed spins. Before, every
+                // card in the grid did.
+                isRefreshing={
+                  refreshTargetId === vehicle.vehicleId &&
+                  (refresh.isAsking || refresh.isStarting || refresh.isActive)
+                }
               />
             ))}
           </div>

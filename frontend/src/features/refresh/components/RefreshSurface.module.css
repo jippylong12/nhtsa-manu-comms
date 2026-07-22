@@ -1,0 +1,30 @@
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: var(--space-lg, 1.25rem);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.09));
+  border-radius: 10px;
+  background: var(--color-surface, #16181d);
+  font-size: 0.875rem;
+  color: var(--color-text, #e6e8ee);
+}
+
+.notice span {
+  flex: 1;
+  min-width: 0;
+}
+
+.ok {
+  color: hsl(145, 60%, 45%);
+}
+
+.bad {
+  border-left: 3px solid hsl(0, 75%, 55%);
+  color: var(--color-text, #e6e8ee);
+}
+
+.bad svg {
+  color: hsl(0, 75%, 55%);
+}

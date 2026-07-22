@@ -16,6 +16,11 @@ export const communicationKeys = {
     detail: (nhtsaId: number) => [...communicationKeys.details(), nhtsaId] as const,
 };
 
+export const refreshKeys = {
+    all: ['refresh'] as const,
+    run: (vehicleId: number) => [...refreshKeys.all, 'run', vehicleId] as const,
+};
+
 export const corpusKeys = {
     all: ['corpus'] as const,
     lists: () => [...corpusKeys.all, 'list'] as const,

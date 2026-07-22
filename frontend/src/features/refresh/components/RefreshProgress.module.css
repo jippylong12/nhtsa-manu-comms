@@ -1,0 +1,165 @@
+.panel {
+  margin-bottom: var(--space-lg, 1.25rem);
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.09));
+  border-left: 3px solid var(--color-primary, #3b82f6);
+  border-radius: 10px;
+  background: var(--color-surface, #16181d);
+}
+
+.failed {
+  border-left-color: hsl(0, 75%, 55%);
+}
+
+.partial {
+  border-left-color: hsl(45, 90%, 50%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--color-primary, #3b82f6);
+}
+
+.iconDone {
+  color: hsl(145, 60%, 45%);
+}
+
+.iconFailed {
+  color: hsl(0, 75%, 55%);
+}
+
+.iconPartial {
+  color: hsl(45, 90%, 50%);
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.headline strong {
+  font-size: 0.9375rem;
+  font-weight: 550;
+  color: var(--color-text, #e6e8ee);
+}
+
+.summary {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted, #8b90a0);
+}
+
+.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.15rem;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #8b90a0);
+}
+
+.marker {
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-text, #e6e8ee);
+}
+
+.dot {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.done .marker {
+  background: hsl(145, 60%, 45%);
+  color: #07130c;
+}
+
+.now {
+  color: var(--color-text, #e6e8ee);
+  font-weight: 550;
+}
+
+.now .marker {
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+  /* The pulse is the difference between "queued and working" and "frozen"
+     during the analysis stage, which reports nothing for minutes at a time. */
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.todo {
+  opacity: 0.5;
+}
+
+.scale,
+.reason {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--color-text-muted, #8b90a0);
+}
+
+.retry {
+  margin-left: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary, #3b82f6);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning,
+  .now .marker {
+    animation: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .stages {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}

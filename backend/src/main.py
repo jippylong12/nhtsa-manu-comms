@@ -10,6 +10,7 @@ from src.config import get_settings
 from src.corpus.router import router as corpus_router
 from src.database import close_mongodb_connection, connect_to_mongodb
 from src.db import close_pool
+from src.refresh.router import router as refresh_router
 from src.symptom_search.router import router as symptom_search_router
 from src.usage.router import router as usage_router
 from src.vehicles.router import router as vehicles_router
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(vehicles_router, prefix="/api")
 app.include_router(communications_router, prefix="/api")
 app.include_router(corpus_router, prefix="/api")
+app.include_router(refresh_router, prefix="/api")
 app.include_router(symptom_search_router, prefix="/api")
 app.include_router(usage_router, prefix="/api")
 

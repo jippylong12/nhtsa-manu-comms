@@ -214,9 +214,19 @@ def extract_text(path: pathlib.Path) -> ExtractionResult:
     return result
 
 
-async def extract_pending(limit: int | None = None, force: bool = False) -> ExtractStats:
-    """Download and extract every document that does not yet have text."""
+async def extract_pending(
+    limit: int | None = None,
+    force: bool = False,
+    nhtsa_vehicle_id: int | None = None,
+) -> ExtractStats:
+    """Download and extract every document that does not yet have text.
+
+    `nhtsa_vehicle_id` restricts the pass to one tracked vehicle, which is what
+    an in-app refresh needs so its bill matches the estimate it quoted. None
+    means every vehicle, which is what the CLI passes.
+    """
     from src.db import get_pool
+    from src.jobs.repository import vehicle_scope
 
     settings = get_settings()
     stats = ExtractStats()
@@ -235,9 +245,11 @@ async def extract_pending(limit: int | None = None, force: bool = False) -> Extr
             JOIN communications c ON c.id = d.communication_id
             WHERE ({'TRUE' if force else unextracted})
               AND c.status = 'pending'
+              AND {vehicle_scope('$1')}
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
-            """
+            """,
+            nhtsa_vehicle_id,
         )
 
     if not rows:
@@ -355,7 +367,7 @@ async def _record_failure(pool, row, reason: str) -> None:
         )
 
 
-async def mark_documentless_communications() -> int:
+async def mark_documentless_communications(nhtsa_vehicle_id: int | None = None) -> int:
     """Flag pending communications that have no attached PDF at all.
 
     NHTSA lists some communications without publishing a document. They can
@@ -363,16 +375,19 @@ async def mark_documentless_communications() -> int:
     than sitting in `pending` forever and skewing the drain metrics.
     """
     from src.db import get_pool
+    from src.jobs.repository import vehicle_scope
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            """
+            f"""
             UPDATE communications c
             SET status = 'failed', status_reason = 'no associated documents published by NHTSA'
             WHERE c.status = 'pending'
               AND NOT EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id = c.id)
-            """
+              AND {vehicle_scope('$1')}
+            """,
+            nhtsa_vehicle_id,
         )
     n = int(result.split()[-1]) if result else 0
     if n:

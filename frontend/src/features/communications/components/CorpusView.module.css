@@ -30,6 +30,26 @@
   gap: 2px;
 }
 
+.emptyState {
+  margin-top: var(--space-lg);
+}
+
+.spinning {
+  animation: corpus-spin 1s linear infinite;
+}
+
+@keyframes corpus-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
+  }
+}
+
 .vehicleYear {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);

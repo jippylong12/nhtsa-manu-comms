@@ -18,8 +18,18 @@ class NHTSAClient:
             "Accept": "application/json",
         }
 
-    async def get_vehicle_details(self, vehicle_id: int) -> dict[str, Any]:
-        """Fetch vehicle details including manufacturer communications list."""
+    async def get_vehicle_details(self, vehicle_id: int, max_retries: int = 3) -> dict[str, Any]:
+        """Fetch vehicle details including manufacturer communications list.
+
+        Retries transient upstream failures, which `get_safety_issue` has always
+        done and this did not. NHTSA returns a 504 on this endpoint often enough
+        to see one in ordinary use, and a single unlucky response would
+        otherwise fail the in-app refresh preview outright and abort a sync
+        before it looked at a single bulletin.
+
+        Raises the last httpx error once the retries are exhausted; callers
+        translate it into something the user can act on.
+        """
         url = f"{self.base_url}/vehicles/{vehicle_id}/details"
         params = {
             "data": "complaints,recalls,investigations,manufacturercommunications",
@@ -28,9 +38,23 @@ class NHTSAClient:
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, params=params, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
+            for attempt in range(max_retries):
+                last = attempt == max_retries - 1
+                try:
+                    response = await client.get(url, params=params, headers=self.headers)
+                    # 403 is NHTSA's rate limit, 5xx its own trouble. Both pass
+                    # on a later attempt; a 404 will not, so it is not retried.
+                    if (response.status_code == 403 or response.status_code >= 500) and not last:
+                        await asyncio.sleep(2**attempt)  # 1s, 2s
+                        continue
+                    response.raise_for_status()
+                    return response.json()
+                except httpx.RequestError:
+                    if last:
+                        raise
+                    await asyncio.sleep(2**attempt)
+        # Unreachable: the final attempt either returns or raises.
+        raise RuntimeError("unreachable")
 
     async def get_safety_issue(self, nhtsa_id: int, max_retries: int = 3) -> dict[str, Any] | None:
         """Fetch a single manufacturer communication by NHTSA ID with retry logic."""

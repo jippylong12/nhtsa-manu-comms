@@ -7,13 +7,13 @@ import styles from './VehicleCard.module.css';
 
 interface Props {
     vehicle: Vehicle;
-    onFetch: (vehicleId: number) => void;
+    onRefresh: (vehicleId: number) => void;
     onDelete: (vehicleId: number) => void;
     onSelect: (vehicleId: number) => void;
-    isFetching?: boolean;
+    isRefreshing?: boolean;
 }
 
-export function VehicleCard({ vehicle, onFetch, onDelete, onSelect, isFetching }: Props) {
+export function VehicleCard({ vehicle, onRefresh, onDelete, onSelect, isRefreshing }: Props) {
     const lastFetched = vehicle.lastFetched
         ? format(new Date(vehicle.lastFetched), 'MMM d, yyyy h:mm a')
         : 'Never';
@@ -28,11 +28,11 @@ export function VehicleCard({ vehicle, onFetch, onDelete, onSelect, isFetching }
                 <div className={styles.vehicleActions}>
                     <button
                         className="btn btn-ghost btn-icon"
-                        onClick={() => onFetch(vehicle.vehicleId)}
-                        disabled={isFetching}
-                        title="Fetch latest communications"
+                        onClick={() => onRefresh(vehicle.vehicleId)}
+                        disabled={isRefreshing}
+                        title="Check NHTSA for new bulletins"
                     >
-                        <RefreshCw size={18} className={isFetching ? styles.animateSpin : ''} />
+                        <RefreshCw size={18} className={isRefreshing ? styles.animateSpin : ''} />
                     </button>
                     <button
                         className="btn btn-ghost btn-icon"
@@ -51,7 +51,7 @@ export function VehicleCard({ vehicle, onFetch, onDelete, onSelect, isFetching }
                 </div>
                 <div className={styles.stat}>
                     <Calendar size={16} />
-                    <span>Last fetched: {lastFetched}</span>
+                    <span>Last checked: {lastFetched}</span>
                 </div>
             </div>
 

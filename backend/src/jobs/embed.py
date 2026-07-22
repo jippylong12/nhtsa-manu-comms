@@ -75,8 +75,13 @@ def to_pgvector(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
 
 
-async def embed_pending(limit: int | None = None, force: bool = False) -> EmbedStats:
+async def embed_pending(
+    limit: int | None = None,
+    force: bool = False,
+    nhtsa_vehicle_id: int | None = None,
+) -> EmbedStats:
     from src.db import get_pool
+    from src.jobs.repository import vehicle_scope
 
     settings = get_settings()
     if not settings.gemini_api_key:
@@ -89,13 +94,15 @@ async def embed_pending(limit: int | None = None, force: bool = False) -> EmbedS
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id, llm_summary, symptoms, systems, components
-            FROM comm_documents
-            WHERE llm_summary IS NOT NULL
-              {'' if force else 'AND embedding IS NULL'}
-            ORDER BY id
+            SELECT d.id, d.llm_summary, d.symptoms, d.systems, d.components
+            FROM comm_documents d
+            WHERE d.llm_summary IS NOT NULL
+              {'' if force else 'AND d.embedding IS NULL'}
+              AND {vehicle_scope('$1', comm_id='d.communication_id')}
+            ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
-            """
+            """,
+            nhtsa_vehicle_id,
         )
 
     if not rows:
