@@ -222,14 +222,34 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
         return result
 
 
-async def tag_vocabulary(limit: int = 100) -> dict[str, list[dict]]:
+async def tag_vocabulary(limit: int = 100, vehicle_id: Optional[int] = None) -> dict[str, list[dict]]:
     """Distinct systems and components with document counts, for filter UIs.
 
     Case variants are merged (the LLM emits both "electrical" and "Electrical"),
     counts summed, and the most frequent surface form kept as the label. This
     matches the case-insensitive tag filter, so a chip's count reflects exactly
     what clicking it returns.
+
+    Pass vehicle_id to scope the vocabulary to one vehicle. Without it a
+    vehicle-scoped view would advertise corpus-wide counts next to its own much
+    smaller result set, and a vehicle with nothing in the corpus would still
+    show a full row of chips promising hundreds of documents.
     """
+    # EXISTS against the join table, mirroring the vehicle filter in
+    # _build_filters, so the chips agree with the list they sit above.
+    scope = (
+        """
+            WHERE EXISTS (
+                SELECT 1 FROM communication_vehicles cv
+                JOIN vehicles v ON v.id = cv.vehicle_id
+                WHERE cv.communication_id = d.communication_id
+                  AND v.nhtsa_vehicle_id = $2
+            )
+        """
+        if vehicle_id is not None
+        else ""
+    )
+
     # `mode()` picks the most common original casing within each lowercased group.
     tag_sql = """
         SELECT label AS tag, total AS count FROM (
@@ -237,15 +257,18 @@ async def tag_vocabulary(limit: int = 100) -> dict[str, list[dict]]:
                    mode() WITHIN GROUP (ORDER BY s) AS label,
                    count(*) AS total
             FROM comm_documents d, unnest(d.{col}) s
+            {scope}
             GROUP BY lower(s)
         ) g
         ORDER BY total DESC, tag
         LIMIT $1
     """
+    params = [limit] if vehicle_id is None else [limit, vehicle_id]
+
     pool = await get_pool()
     async with pool.acquire() as conn:
-        systems = await conn.fetch(tag_sql.format(col="systems"), limit)
-        components = await conn.fetch(tag_sql.format(col="components"), limit)
+        systems = await conn.fetch(tag_sql.format(col="systems", scope=scope), *params)
+        components = await conn.fetch(tag_sql.format(col="components", scope=scope), *params)
     return {
         "systems": [dict(r) for r in systems],
         "components": [dict(r) for r in components],

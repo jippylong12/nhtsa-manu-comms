@@ -22,5 +22,5 @@ export const corpusKeys = {
     list: (filters: Record<string, unknown>) => [...corpusKeys.lists(), filters] as const,
     details: () => [...corpusKeys.all, 'detail'] as const,
     detail: (nhtsaId: string) => [...corpusKeys.details(), nhtsaId] as const,
-    tags: () => [...corpusKeys.all, 'tags'] as const,
+    tags: (vehicleId?: number) => [...corpusKeys.all, 'tags', vehicleId ?? null] as const,
 };

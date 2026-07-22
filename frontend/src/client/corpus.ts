@@ -33,6 +33,9 @@ export const corpusApi = {
     get: (nhtsaId: string) =>
         request<CorpusCommunicationDetail>(`/corpus/communications/${encodeURIComponent(nhtsaId)}`),
 
-    tags: (limit = 100) =>
-        request<TagVocabulary>(`/corpus/tags?limit=${limit}`),
+    tags: (limit = 100, vehicleId?: number) => {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (vehicleId) params.append('vehicle_id', String(vehicleId));
+        return request<TagVocabulary>(`/corpus/tags?${params.toString()}`);
+    },
 };

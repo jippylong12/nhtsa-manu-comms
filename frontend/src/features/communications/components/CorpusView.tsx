@@ -39,7 +39,7 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
   const [selectedSystems, setSelectedSystems] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<CommType | null>(null);
 
-  const { data: tagsData } = useCorpusTagsQuery();
+  const { data: tagsData } = useCorpusTagsQuery(vehicleId);
 
   const filters: CorpusFilters = useMemo(() => {
     const f: CorpusFilters = { vehicleId, perPage: 200 };

@@ -274,3 +274,37 @@ async def test_tag_vocabulary_merges_case_variants(seeded):
     # No two entries differ only by case.
     lowered = [t.lower() for t in system_tags]
     assert len(lowered) == len(set(lowered)), "case-variant systems were not merged"
+
+
+async def test_tag_vocabulary_scoped_to_one_vehicle(seeded):
+    """The chips sit above a vehicle-scoped list, so they must count only that
+    vehicle's documents. v2 is linked to comm A alone."""
+    vocab = await service.tag_vocabulary(limit=5000, vehicle_id=seeded["v2"])
+
+    assert {t["tag"] for t in vocab["systems"]} == {"brakes"}
+    assert {t["tag"] for t in vocab["components"]} == {"rotor"}
+    # The count is this vehicle's own, not the corpus-wide total for "brakes".
+    assert next(t["count"] for t in vocab["systems"] if t["tag"] == "brakes") == 1
+
+
+async def test_tag_vocabulary_scope_spans_every_linked_communication(seeded):
+    """v1 is linked to both comm A (brakes) and comm B (infotainment)."""
+    vocab = await service.tag_vocabulary(limit=5000, vehicle_id=seeded["v1"])
+
+    assert {t["tag"] for t in vocab["systems"]} == {"brakes", "infotainment"}
+
+
+async def test_tag_vocabulary_is_empty_for_a_vehicle_absent_from_the_corpus(seeded):
+    """The reported bug: a freshly added vehicle with nothing in the corpus still
+    rendered a full row of chips advertising corpus-wide counts."""
+    vocab = await service.tag_vocabulary(limit=5000, vehicle_id=987654321)
+
+    assert vocab["systems"] == []
+    assert vocab["components"] == []
+
+
+async def test_tag_vocabulary_without_a_vehicle_still_spans_the_corpus(seeded):
+    scoped = await service.tag_vocabulary(limit=5000, vehicle_id=seeded["v2"])
+    everything = await service.tag_vocabulary(limit=5000)
+
+    assert len(everything["systems"]) > len(scoped["systems"])

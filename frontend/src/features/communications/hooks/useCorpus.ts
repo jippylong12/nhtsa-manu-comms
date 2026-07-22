@@ -21,10 +21,12 @@ export function useCorpusDetailQuery(nhtsaId: string | null) {
     });
 }
 
-export function useCorpusTagsQuery(limit = 100) {
+export function useCorpusTagsQuery(vehicleId?: number, limit = 100) {
     return useQuery({
-        queryKey: corpusKeys.tags(),
-        queryFn: () => corpusApi.tags(limit),
+        // vehicleId is part of the key: the vocabulary is scoped to the vehicle,
+        // so two vehicles must not share one cache entry.
+        queryKey: corpusKeys.tags(vehicleId),
+        queryFn: () => corpusApi.tags(limit, vehicleId),
         // Tag vocabulary changes only when the corpus is reprocessed.
         staleTime: 1000 * 60 * 30,
     });

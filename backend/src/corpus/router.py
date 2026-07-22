@@ -76,8 +76,11 @@ async def list_communications(
     response_model=TagVocabulary,
     summary="Distinct system and component tags with counts",
 )
-async def tag_vocabulary(limit: int = Query(100, ge=1, le=500)) -> TagVocabulary:
-    vocab = await service.tag_vocabulary(limit=limit)
+async def tag_vocabulary(
+    limit: int = Query(100, ge=1, le=500),
+    vehicle_id: Optional[int] = Query(None, description="Scope the vocabulary to one NHTSA vehicleId"),
+) -> TagVocabulary:
+    vocab = await service.tag_vocabulary(limit=limit, vehicle_id=vehicle_id)
     return TagVocabulary(**vocab)
 
 
