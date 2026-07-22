@@ -1,32 +1,13 @@
-/* Communication Query Hooks */
+/* Communication Query Hooks
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+   Only the Mongo-backed fetch survives here. Reading communications now goes
+   through the Postgres corpus (useCorpus), so the list, detail, and stats hooks
+   went with CommunicationsView. */
+
+import { useQueryClient } from '@tanstack/react-query';
 import { useState, useCallback } from 'react';
-import { communicationApi, type CommunicationFilters, type FetchProgress } from '@/client';
+import { communicationApi, type FetchProgress } from '@/client';
 import { communicationKeys, vehicleKeys } from '@/features/queryKeys';
-
-export function useCommunicationsQuery(filters: CommunicationFilters = {}) {
-    return useQuery({
-        queryKey: communicationKeys.list(filters),
-        queryFn: () => communicationApi.list(filters),
-    });
-}
-
-export function useCommunicationQuery(nhtsaId: number) {
-    return useQuery({
-        queryKey: communicationKeys.detail(nhtsaId),
-        queryFn: () => communicationApi.get(nhtsaId),
-        enabled: nhtsaId > 0,
-    });
-}
-
-export function useVehicleStatsQuery(vehicleId: number) {
-    return useQuery({
-        queryKey: ['communications', 'stats', vehicleId],
-        queryFn: () => communicationApi.getStats(vehicleId),
-        enabled: vehicleId > 0,
-    });
-}
 
 export function useFetchCommunications() {
     const queryClient = useQueryClient();
