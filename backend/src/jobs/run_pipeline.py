@@ -31,6 +31,7 @@ from typing import Optional
 
 from src.db import close_pool
 from src.jobs import digest as digest_job
+from src.jobs import extract as extract_stage
 from src.jobs import process as processor
 from src.jobs import sync as sync_job
 
@@ -147,6 +148,18 @@ async def _run(args, now: datetime) -> int:
             log.exception("processor stage failed")
             failures.append(f"process: {type(e).__name__}: {e}")
 
+        if not args.keep_pdfs:
+            # The archive is a download cache with no expiry, so an unattended
+            # run would fill the disk one bulletin at a time. Only documents
+            # that already have a summary are dropped; see prune_archive.
+            log.info("=== STAGE: prune pdf archive ===")
+            try:
+                removed, freed = await extract_stage.prune_archive()
+                log.info("pruned %d pdf(s), freed %.1f MB", removed, freed / 1_048_576)
+            except Exception as e:  # noqa: BLE001
+                # Reclaiming disk is housekeeping; never fail a run over it.
+                log.warning("archive prune skipped: %s: %s", type(e).__name__, e)
+
         log.info("=== STAGE: digest ===")
         try:
             await digest_job.run_digest(send=args.send_digest, generated_at=now)
@@ -170,6 +183,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the full NHTSA Comms pipeline once.")
     parser.add_argument("--sync-only", action="store_true", help="run sync, skip processing")
     parser.add_argument("--skip-sync", action="store_true", help="skip sync, process + digest")
+    parser.add_argument(
+        "--keep-pdfs",
+        action="store_true",
+        help="do not prune archived PDFs for already-summarised documents",
+    )
     parser.add_argument(
         "--send-digest", action="store_true", help="send the digest (default: dry run)"
     )

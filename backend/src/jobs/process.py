@@ -165,6 +165,14 @@ def main() -> int:
         "--sync", action="store_true", help="use the synchronous LLM API (full price)"
     )
     parser.add_argument("--limit", type=int, help="cap documents processed")
+    parser.add_argument(
+        "--prune-archive",
+        action="store_true",
+        help="delete archived PDFs for documents already summarised",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="with --prune-archive, only report what would go"
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -184,6 +192,11 @@ def main() -> int:
                 return 0
             if args.collect:
                 await llm_stage.collect_batch(args.collect)
+                return 0
+            if args.prune_archive:
+                removed, freed = await extract_stage.prune_archive(dry_run=args.dry_run)
+                verb = "would remove" if args.dry_run else "removed"
+                print(f"  {verb} {removed} pdf(s), {freed / 1_048_576:.1f} MB")
                 return 0
             if args.stage == "extract":
                 await run_extract(args.limit)

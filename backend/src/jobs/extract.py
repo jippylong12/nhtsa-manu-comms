@@ -73,6 +73,45 @@ def archive_path(url: str) -> pathlib.Path:
     return base / name
 
 
+async def prune_archive(dry_run: bool = False) -> tuple[int, int]:
+    """Delete archived PDFs whose document is fully processed.
+
+    The archive doubles as a download cache and nothing else expires it, so it
+    grows without bound: one file per communication, a few hundred KB each.
+
+    A PDF stops being needed once its document has an ``llm_summary``. Before
+    that it is still live input, because a low-yield scan is flagged for the
+    vision fallback and ``llm._vision_parts`` reopens the file from here. Rows
+    without a summary are therefore left alone, which also means an interrupted
+    run loses nothing.
+
+    Deleting is safe rather than merely tidy: the extracted text and the summary
+    are already in Postgres, and a later re-extract re-downloads from NHTSA.
+
+    Returns ``(files_removed, bytes_freed)``.
+    """
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT url FROM comm_documents WHERE llm_summary IS NOT NULL")
+
+    removed = 0
+    freed = 0
+    for row in rows:
+        path = archive_path(row["url"])
+        if not path.exists():
+            continue
+        freed += path.stat().st_size
+        if not dry_run:
+            path.unlink(missing_ok=True)
+        removed += 1
+
+    verb = "would free" if dry_run else "freed"
+    log.info("archive prune: %d file(s), %s %.1f MB", removed, verb, freed / 1_048_576)
+    return removed, freed
+
+
 async def download(
     client: httpx.AsyncClient, url: str
 ) -> tuple[pathlib.Path | None, str | None, bool]:
