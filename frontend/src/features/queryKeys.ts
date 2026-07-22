@@ -8,13 +8,8 @@ export const vehicleKeys = {
     detail: (vehicleId: number) => [...vehicleKeys.details(), vehicleId] as const,
 };
 
-export const communicationKeys = {
-    all: ['communications'] as const,
-    lists: () => [...communicationKeys.all, 'list'] as const,
-    list: (filters: Record<string, unknown>) => [...communicationKeys.lists(), filters] as const,
-    details: () => [...communicationKeys.all, 'detail'] as const,
-    detail: (nhtsaId: number) => [...communicationKeys.details(), nhtsaId] as const,
-};
+// communicationKeys went with the Mongo-backed list and detail endpoints
+// (JIP-417). Communications are read through corpusKeys.
 
 export const refreshKeys = {
     all: ['refresh'] as const,

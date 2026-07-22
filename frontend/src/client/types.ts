@@ -136,95 +136,10 @@ export interface VehicleListResponse {
     perPage: number;
 }
 
-// Communications
-export interface AssociatedProduct {
-    productYear: string;
-    productModel: string;
-    productMake?: string;
-}
+// The Mongo-era Communication, VehicleStats, FetchRequest, FetchProgress and
+// FetchResult models lived here. Reading communications is CorpusCommunication
+// below; running a fetch is RefreshRun. See JIP-417.
 
-export interface AssociatedDocument {
-    url: string;
-    summary: string;
-    loadDate?: string;
-}
-
-export interface Communication {
-    _id: string;
-    nhtsaId: number;
-    vehicleId: number;
-    communicationNumber?: string;
-    communicationType: CommType;
-    communicationDate?: string;
-    summary: string;
-    detailsSummary?: string;
-    associatedProducts: AssociatedProduct[];
-    associatedDocuments: AssociatedDocument[];
-    matchedKeywords: string[];
-    fetchedAt: string;
-}
-
-export interface CommunicationListResponse {
-    items: Communication[];
-    total: number;
-    page: number;
-    perPage: number;
-}
-
-// Stats
-export interface CategoryStats {
-    type: CommType;
-    label: string;
-    count: number;
-}
-
-export interface VehicleStats {
-    vehicleId: number;
-    totalCount: number;
-    last30DaysCount: number;
-    categories: CategoryStats[];
-}
-
-export interface FetchRequest {
-    vehicleId: number;
-    forceRefresh?: boolean;
-}
-
-export interface FetchProgress {
-    status: 'pending' | 'fetching' | 'complete' | 'error';
-    progress: number;
-    message: string;
-    totalIds: number;
-    fetchedIds: number;
-    newCount: number;
-}
-
-export interface FetchResult {
-    vehicleId: number;
-    totalFetched: number;
-    newCount: number;
-    matchedCount: number;
-    durationSeconds: number;
-}
-
-// Filters
-export interface CommunicationFilters {
-    [key: string]: unknown;
-    vehicleId?: number;
-    year?: string;
-    model?: string;
-    keywords?: string;
-    search?: string;
-    commTypes?: CommType[];  // Changed to array for multi-select
-    page?: number;
-    perPage?: number;
-}
-
-// Shape returned by GET /communications/discovery/variants. The backend's
-// get_vehicle_variants builds these camelCase keys directly; the previous
-// PascalCase declaration ({VehicleId, VehicleDescription}) never matched the
-// wire format, which forced the unsound casts in AddVehicleModal and broke the
-// production build.
 export interface VehicleVariant {
     vehicleId: number;
     ncapId: number;

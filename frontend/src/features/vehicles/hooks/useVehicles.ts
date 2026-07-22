@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { vehicleApi, type VehicleCreate, type VehicleUpdate } from '@/client';
-import { vehicleKeys, communicationKeys } from '@/features/queryKeys';
+import { vehicleKeys, corpusKeys } from '@/features/queryKeys';
 
 export function useVehiclesQuery(page = 1, perPage = 20) {
     return useQuery({
@@ -64,8 +64,10 @@ export function useDeleteVehicle() {
                 refetchType: 'active',
             });
             queryClient.removeQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+            // The corpus is what the detail page reads, so a removed vehicle
+            // has to drop out of that cache too.
             queryClient.invalidateQueries({
-                queryKey: communicationKeys.lists(),
+                queryKey: corpusKeys.all,
                 refetchType: 'active',
             });
         },

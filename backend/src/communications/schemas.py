@@ -1,11 +1,14 @@
-"""Pydantic schemas for Communications feature."""
+"""Communication type detection.
 
-from datetime import datetime
+Only the classifier is left. The response, stats and fetch models that used to
+live here described the Mongo-backed endpoints, and those are gone (JIP-417):
+reading communications is `/api/corpus`, fetching them is `/api/refresh`.
+
+`get_comm_type` is still the single place that decides what kind of bulletin
+something is, called by sync as it writes each row.
+"""
+
 from typing import Optional
-from pydantic import Field
-
-from src.vehicles.schemas import CamelModel
-
 
 # --- Communication Types ---
 # Extended categorization based on:
@@ -52,18 +55,18 @@ DOC_SUMMARY_TYPE_MAP = {
 
 def get_comm_type_from_doc_summary(documents: list[dict] | None) -> str | None:
     """Extract communication type from associated document summary field.
-    
+
     The API returns document types like 'Owner Letter', 'Bulletin', 'Dealer Letter', etc.
     in the associated_documents[].summary field.
     """
     if not documents:
         return None
-    
+
     for doc in documents:
         summary = (doc.get("summary") or "").lower().strip()
         if summary in DOC_SUMMARY_TYPE_MAP:
             return DOC_SUMMARY_TYPE_MAP[summary]
-    
+
     return None
 
 
@@ -82,9 +85,9 @@ def get_comm_type_from_summary(summary: Optional[str]) -> Optional[str]:
     """Extract communication type by analyzing the summary text."""
     if not summary:
         return None
-    
+
     text = summary.lower()
-    
+
     # Order matters - check more specific patterns first
     if "customer satisfaction" in text:
         return "CSP"
@@ -107,7 +110,7 @@ def get_comm_type_from_summary(summary: Optional[str]) -> Optional[str]:
         return "IB"
     if "preliminary information" in text:
         return "PIT"
-    
+
     return None
 
 
@@ -132,139 +135,21 @@ def get_comm_type(
     prefix_type = get_comm_type_from_prefix(comm_number)
     if prefix_type:
         return prefix_type
-    
+
     # Then try summary text-based detection
     if summary:
         summary_type = get_comm_type_from_summary(summary)
         if summary_type:
             return summary_type
-    
+
     # Try document type detection (Owner Letter, Bulletin, etc.)
     if documents:
         doc_type = get_comm_type_from_doc_summary(documents)
         if doc_type:
             return doc_type
-    
+
     # NA format is the last catchall before OTHER
     if is_na_format(comm_number):
         return "NA"
-    
+
     return "OTHER"
-
-
-
-# --- Embedded Schemas ---
-
-
-class AssociatedProduct(CamelModel):
-    """Product associated with a communication."""
-
-    product_year: str = Field(..., description="Model year")
-    product_model: str = Field(..., description="Model name")
-    product_make: Optional[str] = Field(None, description="Make/manufacturer")
-
-
-class AssociatedDocument(CamelModel):
-    """Document associated with a communication."""
-
-    url: str = Field(..., description="Document URL")
-    summary: str = Field(..., description="Document summary/title")
-    load_date: Optional[str] = Field(None, description="When the document was loaded")
-
-
-# --- Output Schemas ---
-
-
-class CommunicationResponse(CamelModel):
-    """Schema for a manufacturer communication."""
-
-    id: str = Field(..., alias="_id", description="MongoDB document ID")
-    nhtsa_id: int = Field(..., description="NHTSA ID number")
-    vehicle_id: int = Field(..., description="Associated vehicle ID")
-    communication_number: Optional[str] = Field(None, description="Manufacturer comm number")
-    communication_type: str = Field("OTHER", description="Communication type (TSB, PIT, PIC, PIP, OTHER)")
-    communication_date: Optional[datetime] = Field(None, description="Communication date")
-    summary: str = Field("", description="Communication summary")
-    details_summary: Optional[str] = Field(None, description="Summary from vehicle details")
-    associated_products: list[AssociatedProduct] = Field(
-        default_factory=list, description="Associated vehicle products"
-    )
-    associated_documents: list[AssociatedDocument] = Field(
-        default_factory=list, description="Associated document links"
-    )
-    matched_keywords: list[str] = Field(
-        default_factory=list, description="Keywords that matched this communication"
-    )
-    fetched_at: datetime = Field(..., description="When this was fetched from NHTSA")
-
-
-class CommunicationListResponse(CamelModel):
-    """Schema for paginated communication list."""
-
-    items: list[CommunicationResponse]
-    total: int
-    page: int
-    per_page: int
-
-
-class CategoryStats(CamelModel):
-    """Stats for a single category."""
-
-    type: str = Field(..., description="Category type code")
-    label: str = Field(..., description="Human readable label")
-    count: int = Field(..., description="Number of communications")
-
-
-class VehicleStats(CamelModel):
-    """Statistics for a vehicle's communications."""
-
-    vehicle_id: int
-    total_count: int = Field(..., description="Total communications")
-    last_30_days_count: int = Field(..., description="Communications in last 30 days")
-    categories: list[CategoryStats] = Field(default_factory=list, description="Breakdown by type")
-
-
-class SearchFilters(CamelModel):
-    """Schema for search filters."""
-
-    vehicle_id: Optional[int] = None
-    year: Optional[str] = None
-    model: Optional[str] = None
-    keywords: list[str] = Field(default_factory=list)
-
-
-class FetchRequest(CamelModel):
-    """Request to trigger a fresh fetch from NHTSA."""
-
-    vehicle_id: int = Field(..., description="NHTSA Vehicle ID to fetch communications for")
-    force_refresh: bool = Field(False, description="Force refresh even if recently fetched")
-
-
-class FetchProgress(CamelModel):
-    """Progress update during fetch operation."""
-
-    status: str = Field(..., description="Current status (pending, fetching, complete, error)")
-    progress: int = Field(0, description="Progress percentage (0-100)")
-    message: str = Field("", description="Status message")
-    total_ids: int = Field(0, description="Total communication IDs to fetch")
-    fetched_ids: int = Field(0, description="Number of IDs fetched so far")
-    new_count: int = Field(0, description="New communications found")
-
-
-class FetchResult(CamelModel):
-    """Result of a fetch operation."""
-
-    vehicle_id: int
-    total_fetched: int = Field(..., description="Total communications fetched")
-    new_count: int = Field(..., description="New communications stored")
-    matched_count: int = Field(..., description="Communications matching filters")
-    duration_seconds: float = Field(..., description="Fetch duration in seconds")
-
-
-class VehicleVariant(CamelModel):
-    """Schema for vehicle variant from discovery API."""
-
-    vehicle_id: int = Field(..., alias="VehicleId", description="Safety Ratings Vehicle ID")
-    vehicle_description: str = Field(..., alias="VehicleDescription", description="Vehicle description")
-
-

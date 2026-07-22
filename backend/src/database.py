@@ -22,16 +22,13 @@ async def connect_to_mongodb() -> None:
     database.client = AsyncIOMotorClient(settings.mongodb_url)
     database.db = database.client[settings.mongodb_database]
 
-    # Create indexes for efficient queries
-    await database.db.vehicles.create_index("vehicle_id", unique=True)
-    await database.db.communications.create_index(
-        [("nhtsa_id", 1), ("vehicle_id", 1)], unique=True, name="nhtsa_id_vehicle_id_unique"
-    )
-    await database.db.communications.create_index("vehicle_id")
-    await database.db.communications.create_index("communication_date")
-    await database.db.searches.create_index("created_at")
-    # vehicle_catalog is the YMM -> vehicleId cache. Index names match the ones
-    # seed_vehicle_catalog.py creates so warm-started catalogs stay compatible.
+    # vehicle_catalog is the only collection anything still reads. The vehicles,
+    # communications and searches indexes went with the endpoints that used
+    # them (JIP-416, JIP-417); building indexes for collections nothing queries
+    # is startup cost for nothing. This whole module goes in JIP-421.
+    #
+    # Index names match the ones seed_vehicle_catalog.py creates so warm-started
+    # catalogs stay compatible.
     await database.db.vehicle_catalog.create_index("vehicle_id", unique=True)
     await database.db.vehicle_catalog.create_index([("year", 1), ("make", 1), ("model", 1)])
 

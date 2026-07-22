@@ -1,91 +1,87 @@
-"""Database migrations for backfilling data."""
+"""One-off maintenance over the canonical store.
 
+`communication_type` is derived by `get_comm_type` when sync inserts a row, so
+rows written before a change to those rules keep the old answer. This re-derives
+them in place.
+
+The other backfill that lived here is gone. `backfill_comm_counts` recounted a
+`comm_count` column on the Mongo vehicle document, and since JIP-416 the count
+is a correlated subquery over `communication_vehicles` evaluated on every read.
+There is no stored copy left to drift, so there is nothing to backfill: the bug
+it existed to repair cannot recur.
+
+Usage:
+    python -m src.migrations communication_types
+    python -m src.migrations communication_types --dry-run
+"""
+
+import argparse
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
+import json
+import sys
 
-from src.config import get_settings
+import asyncpg
+
 from src.communications.schemas import get_comm_type
-from src.communications.service import CommunicationService
+from src.config import get_settings
 
 
-async def backfill_communication_types():
-    """Backfill communication_type field for existing records using enhanced detection."""
-    settings = get_settings()
-    client = AsyncIOMotorClient(settings.mongodb_url)
-    db = client[settings.mongodb_database]
-    
-    # Find all communications
-    cursor = db.communications.find({})
-    
-    updated = 0
-    async for doc in cursor:
-        comm_number = doc.get("communication_number")
-        summary = doc.get("summary") or doc.get("details_summary") or ""
-        documents = doc.get("associated_documents") or []
-        
-        # Use enhanced type detection with summary and documents
-        new_type = get_comm_type(comm_number, summary, documents)
-        
-        # Only update if different
-        current_type = doc.get("communication_type")
-        if current_type != new_type:
-            await db.communications.update_one(
-                {"_id": doc["_id"]},
-                {"$set": {"communication_type": new_type}}
-            )
-            updated += 1
-        
-        if updated % 100 == 0 and updated > 0:
-            print(f"Updated {updated} records...")
-    
-    print(f"Backfill complete. Updated {updated} records.")
-    client.close()
+async def backfill_communication_types(dry_run: bool = False) -> int:
+    """Re-derive communication_type for every stored communication.
 
-
-async def backfill_comm_counts():
-    """Recount comm_count for every vehicle using the current matching rules.
-
-    Vehicles whose model name carries a cab or body style, such as "F-150 SUPER
-    CREW", were counted with a matcher that required the bulletin's product
-    model to be identical. NHTSA names that product "F-150", so those vehicles
-    stored comm_count 0 even though every communication had been fetched. The
-    count is only refreshed on fetch, so existing records stay wrong until this
-    recounts them.
+    The documents the classifier looks at are the `associatedDocuments` of the
+    raw NHTSA payload, which is kept verbatim in the `raw` column precisely so
+    derived fields can be recomputed without refetching.
     """
     settings = get_settings()
-    client = AsyncIOMotorClient(settings.mongodb_url)
-    db = client[settings.mongodb_database]
+    if not settings.database_url:
+        print("DATABASE_URL is not set. See docs/database.md.", file=sys.stderr)
+        return 2
 
-    updated = 0
-    async for vehicle in db.vehicles.find({}):
-        vehicle_id = vehicle.get("vehicle_id")
-        if vehicle_id is None:
-            continue
-
-        query = CommunicationService._product_match_query(
-            vehicle_id, vehicle.get("year") or "", vehicle.get("model") or ""
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT id, communication_number, communication_type,
+                   coalesce(summary, details_summary, '') AS summary, raw
+            FROM communications
+            """
         )
-        recounted = await db.communications.count_documents(query)
-
-        if recounted != vehicle.get("comm_count"):
-            await db.vehicles.update_one(
-                {"_id": vehicle["_id"]}, {"$set": {"comm_count": recounted}}
-            )
-            updated += 1
+        changed = 0
+        for row in rows:
+            raw = row["raw"]
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            documents = (raw or {}).get("associatedDocuments") or []
+            new_type = get_comm_type(row["communication_number"], row["summary"], documents)
+            if new_type == row["communication_type"]:
+                continue
+            changed += 1
             print(
-                f"  {vehicle.get('year')} {vehicle.get('model')}: "
-                f"{vehicle.get('comm_count')} -> {recounted}"
+                f"  {row['communication_number'] or row['id']}: "
+                f"{row['communication_type']} -> {new_type}"
             )
+            if not dry_run:
+                await conn.execute(
+                    "UPDATE communications SET communication_type = $2 WHERE id = $1",
+                    row["id"],
+                    new_type,
+                )
 
-    print(f"Backfill complete. Updated {updated} vehicles.")
-    client.close()
+        verb = "would change" if dry_run else "changed"
+        print(f"{verb} {changed} of {len(rows)} communication(s).")
+        return 0
+    finally:
+        await conn.close()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("target", choices=["communication_types"])
+    parser.add_argument("--dry-run", action="store_true", help="report without writing")
+    args = parser.parse_args()
+    return asyncio.run(backfill_communication_types(dry_run=args.dry_run))
 
 
 if __name__ == "__main__":
-    import sys
-
-    target = sys.argv[1] if len(sys.argv) > 1 else "communication_types"
-    if target == "comm_counts":
-        asyncio.run(backfill_comm_counts())
-    else:
-        asyncio.run(backfill_communication_types())
+    raise SystemExit(main())
