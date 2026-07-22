@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.communications.router import router as communications_router
 from src.config import get_settings
 from src.corpus.router import router as corpus_router
-from src.database import close_mongodb_connection, connect_to_mongodb
 from src.db import close_pool
 from src.refresh.router import router as refresh_router
 from src.symptom_search.router import router as symptom_search_router
@@ -18,15 +17,13 @@ from src.vehicles.router import router as vehicles_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup/shutdown events."""
-    # Startup
-    await connect_to_mongodb()
-    # The Postgres pool is created lazily on first use. Since JIP-416 that
-    # includes /api/vehicles, so a missing DATABASE_URL now surfaces as a failed
-    # request rather than a failed startup.
+    """Application lifespan manager for startup/shutdown events.
+
+    Nothing to open. The Postgres pool is created lazily on first use, so a
+    missing DATABASE_URL surfaces as a failed request rather than a failed
+    startup, and there is no second store to connect to any more.
+    """
     yield
-    # Shutdown
-    await close_mongodb_connection()
     await close_pool()
 
 

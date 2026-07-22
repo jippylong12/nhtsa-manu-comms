@@ -1,7 +1,8 @@
 """FastAPI router for the Postgres corpus read API.
 
-Mounted at /api/corpus so it lives alongside the Mongo-backed
-/api/communications endpoints without displacing them.
+Mounted at /api/corpus. It sat alongside a second, Mongo-backed
+/api/communications for a while; that one is gone and this is the only way to
+read a communication.
 """
 
 from datetime import datetime
@@ -78,7 +79,9 @@ async def list_communications(
 )
 async def tag_vocabulary(
     limit: int = Query(100, ge=1, le=500),
-    vehicle_id: Optional[int] = Query(None, description="Scope the vocabulary to one NHTSA vehicleId"),
+    vehicle_id: Optional[int] = Query(
+        None, description="Scope the vocabulary to one NHTSA vehicleId"
+    ),
 ) -> TagVocabulary:
     vocab = await service.tag_vocabulary(limit=limit, vehicle_id=vehicle_id)
     return TagVocabulary(**vocab)

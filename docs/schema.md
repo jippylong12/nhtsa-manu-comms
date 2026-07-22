@@ -1,8 +1,8 @@
 # Canonical Schema (Phase A)
 
-The Phase A store fixes the central flaw in the Mongo design: today a
-communication is upserted once per `(nhtsa_id, vehicle_id)` pair, so a bulletin
-that applies to three tracked vehicles is stored three times and would be
+This schema fixed the central flaw in the store that preceded it, where a
+communication was upserted once per `(nhtsa_id, vehicle_id)` pair, so a bulletin
+applying to three tracked vehicles was stored three times and would have been
 extracted, summarised, and embedded three times. Here a communication exists
 exactly once, keyed by `nhtsa_id`, and vehicles attach through a join table.
 

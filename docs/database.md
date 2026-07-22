@@ -1,8 +1,17 @@
-# Canonical Database (Railway Postgres + pgvector)
+# Database (Railway Postgres + pgvector)
 
-Phase A stores the processed communications corpus in a Postgres database with
-`pgvector`, hosted on Railway. Only the database lives on Railway in this phase;
-the sync and processor jobs run locally on Marcus's machine.
+Everything the app stores lives in one Postgres database with `pgvector`, hosted
+on Railway. Only the database is hosted; the sync and processor jobs run locally
+on Marcus's machine.
+
+There was briefly a second store. Phase A introduced this one as the canonical
+home for the processed corpus but left MongoDB backing the vehicles and
+communications endpoints, so the two disagreed in public: a vehicle card could
+read "389 communications" above a detail page reading none. The project "NHTSA
+Comms - One Postgres, One-Click Refresh" removed MongoDB entirely. Nothing in
+the codebase talks to it, `motor` is no longer a dependency, and
+`tests/test_no_mongo.py` makes the driver unimportable so a third store cannot
+appear by accident.
 
 ## Current instance
 

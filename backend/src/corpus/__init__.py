@@ -1,6 +1,6 @@
-"""Read API over the canonical Postgres corpus (Phase A).
+"""Read API over the Postgres corpus.
 
-Additive to the Mongo-backed communications feature: these endpoints serve the
-processed corpus (LLM summaries, tags, full-text search) while the existing
-Mongo endpoints keep working until the frontend has fully switched.
+The way communications are read. LLM summaries, symptom and system tags, and
+full-text search over both the bulletin and its documents. Written by the
+pipeline; filled from the app through /api/refresh.
 """

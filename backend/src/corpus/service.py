@@ -75,7 +75,7 @@ def _build_filters(
         )
     if search:
         # Full-text over both the communication's own vector and its documents',
-        # replacing the Mongo regex scan. plainto_tsquery keeps user input from
+        # plainto_tsquery keeps user input from
         # ever being parsed as tsquery operators.
         f.add(
             "(c.search_tsv @@ plainto_tsquery('english', {0}) "
@@ -222,7 +222,9 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
         return result
 
 
-async def tag_vocabulary(limit: int = 100, vehicle_id: Optional[int] = None) -> dict[str, list[dict]]:
+async def tag_vocabulary(
+    limit: int = 100, vehicle_id: Optional[int] = None
+) -> dict[str, list[dict]]:
     """Distinct systems and components with document counts, for filter UIs.
 
     Case variants are merged (the LLM emits both "electrical" and "Electrical"),

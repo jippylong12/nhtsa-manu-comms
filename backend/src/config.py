@@ -19,11 +19,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # MongoDB (legacy store, still backing the existing endpoints)
-    mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_database: str = "nhtsa_comms"
-
-    # Postgres (canonical Phase A store, Railway + pgvector)
+    # Postgres (the store; Railway + pgvector)
     database_url: str = ""
     postgres_pool_max: int = 10
 

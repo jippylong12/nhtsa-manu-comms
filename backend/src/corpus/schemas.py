@@ -75,7 +75,7 @@ class CommunicationDetail(CamelModel):
 
 
 class CommunicationListResponse(CamelModel):
-    """Paginated list envelope, matching the Mongo endpoint's shape."""
+    """Paginated list envelope."""
 
     items: list[CommunicationSummary]
     total: int

@@ -1,8 +1,9 @@
 """Business logic for Vehicles feature.
 
-Postgres is the only store (JIP-416). The mirror that JIP-414 added, which kept
-a Mongo document and a Postgres row in step, is gone along with the drift it
-allowed: `repo.tracked_vehicles` and `/api/vehicles` now read the same rows.
+Postgres is the only store (JIP-416). There used to be a second one, and a
+mirror keeping a document in it in step with this row; both are gone, along with
+the drift they allowed. `repo.tracked_vehicles` and `/api/vehicles` read the
+same rows.
 
 `comm_count` is derived from `communication_vehicles` on every read rather than
 kept as a column. A stored count is exactly what let a vehicle card claim 389
@@ -223,13 +224,3 @@ class VehicleService:
                 vehicle_id,
                 at,
             )
-
-    @staticmethod
-    async def update_fetch_stats(vehicle_id: int, comm_count: int) -> None:
-        """Legacy hook from the Mongo fetch path.
-
-        `comm_count` is accepted and ignored: it is derived from the corpus now,
-        and writing a caller's idea of it back is the drift this milestone
-        exists to remove. Deleted along with its one caller in JIP-417.
-        """
-        await VehicleService.touch_fetched_at(vehicle_id)

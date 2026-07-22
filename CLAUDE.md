@@ -48,12 +48,10 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Key Dependencies
 | Package | Version | Purpose |
 |---------|---------|---------|
-| motor | >=3.3.0 | Async MongoDB driver (Motor wraps PyMongo for asyncio) |
 | httpx | >=0.26.0 | Async HTTP client for calling NHTSA API |
 | pydantic | >=2.5.0 | Request/response schema validation |
 | pydantic-settings | >=2.1.0 | Environment-based configuration (`backend/src/config.py`) |
 | python-dotenv | >=1.0.0 | `.env` file loading |
-| bson (via pymongo) | transitive | MongoDB ObjectId handling |
 | Package | Version | Purpose |
 |---------|---------|---------|
 | @tanstack/react-query | ^5.90.16 | Server state management, caching, SSE handling |
@@ -67,8 +65,8 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Configuration
 - Backend uses `pydantic-settings` with `.env` file support (`backend/src/config.py`)
 - Settings loaded via `get_settings()` with `@lru_cache` singleton pattern
-- Key settings: `mongodb_url`, `mongodb_database`, `nhtsa_api_base_url`, `cors_origins`, `api_host`, `api_port`
-- Defaults are development-friendly (localhost MongoDB, port 8000, Vite CORS origin)
+- Key settings: `database_url`, `postgres_pool_max`, `nhtsa_api_base_url`, `cors_origins`, `api_host`, `api_port`, `gemini_api_key`
+- Defaults are development-friendly (port 8000, Vite CORS origin). `database_url` has no default and must be set
 - `backend/pyproject.toml` - Python project metadata, build config, tool settings
 - `frontend/vite.config.ts` - Vite config with React plugin, `@` path alias to `./src`, API proxy to `:8000`
 - `frontend/tsconfig.json` - References `tsconfig.app.json` and `tsconfig.node.json`
@@ -77,20 +75,20 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Proxies `/api` requests to `http://localhost:8000` (`frontend/vite.config.ts`)
 - Frontend: `@` maps to `frontend/src/` (`frontend/vite.config.ts`)
 ## Infrastructure
-- MongoDB (default: `mongodb://localhost:27017`, database: `nhtsa_comms`)
+- Postgres with pgvector, at `DATABASE_URL`. Hosted on Railway; see `docs/database.md`
 - Async driver: Motor (`motor.motor_asyncio`)
 - Collections: `vehicles`, `communications`, `searches`
 - Indexes created at startup in `backend/src/database.py`:
-- Backend: MongoDB acts as the communication cache (upsert pattern avoids re-fetching from NHTSA)
+- Backend: Postgres is the communication cache; `existing_nhtsa_ids` is what stops sync refetching
 - Frontend: TanStack Query with 5-minute stale time (`frontend/src/App.tsx`)
 - Legacy CLI: Pickle files in `.cache/` directory with daily rotation (`cache_utils.py`)
 - Local filesystem only (no cloud storage)
 ## Platform Requirements
 - Python 3.10+
 - Node.js (recent LTS)
-- MongoDB instance (local or remote)
+- Postgres with pgvector (local or remote)
 - No Docker configuration detected
-- MongoDB instance
+- Postgres with pgvector
 - uvicorn ASGI server
 - Static frontend build served separately or via reverse proxy
 <!-- GSD:stack-end -->
@@ -150,7 +148,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - React Query handles retry (configured to 1 retry) and stale time (5 minutes)
 ## Common Patterns
 - Services always call `get_database()` to get the Motor async DB instance
-- MongoDB `_id` (ObjectId) is converted to `str` before returning: `doc["_id"] = str(doc["_id"])`
+- Row ids are converted to `str` before returning, so the wire type does not change if the column type does
 - Upsert pattern used for idempotent creates: `update_one(..., upsert=True)`
 - Accepts `snake_case` Python fields, outputs `camelCase` JSON
 - Shared across features via import: `from src.vehicles.schemas import CamelModel`
@@ -205,7 +203,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Pattern Overview
 - Feature-based module organization on both backend and frontend
 - Service layer pattern on the backend (static methods on service classes)
-- MongoDB as the sole data store (async via Motor driver)
+- Postgres as the sole data store (async via asyncpg), with pgvector for embeddings
 - Server-Sent Events (SSE) for real-time fetch progress
 - Vite dev server proxies `/api` to FastAPI backend at `:8000`
 - camelCase JSON serialization via Pydantic alias generators (snake_case internally, camelCase over the wire)
@@ -233,7 +231,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Contains: FastAPI route handlers, query parameter definitions
 - Depends on: Service layer, Pydantic schemas
 - Used by: FastAPI app (`backend/src/main.py`)
-- Purpose: Business logic, NHTSA data processing, MongoDB operations
+- Purpose: Business logic, NHTSA data processing, Postgres operations
 - Location: `backend/src/vehicles/service.py`, `backend/src/communications/service.py`
 - Contains: `VehicleService`, `CommunicationService` (static method classes)
 - Depends on: Database module, NHTSAClient, schemas
@@ -243,7 +241,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Contains: `NHTSAClient` class, response extraction helpers
 - Depends on: httpx, config settings
 - Used by: CommunicationService
-- Purpose: MongoDB connection management via Motor (async driver)
+- Purpose: Postgres connection pooling via asyncpg
 - Location: `backend/src/database.py`
 - Contains: Singleton `Database` class, connection lifecycle, index creation
 - Depends on: Motor, config settings
@@ -269,52 +267,39 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Entry Points
 - Location: `backend/src/main.py`
 - Triggers: `uvicorn src.main:app` from the `backend/` directory
-- Responsibilities: Creates FastAPI app, configures CORS, mounts vehicle + communication routers, manages MongoDB lifecycle
+- Responsibilities: Creates FastAPI app, configures CORS, mounts the routers, disposes the Postgres pool on shutdown
 - Location: `frontend/src/main.tsx`
 - Triggers: `npm run dev` (Vite dev server)
 - Responsibilities: Renders `<App />` into DOM root
 - Location: `backend/src/scripts/seed_vehicle_catalog.py`
 - Triggers: Manual execution for pre-populating vehicle catalog data
-- Responsibilities: Fetches model data from NHTSA via curl, seeds MongoDB
+- Responsibilities: Fetches model data from NHTSA via curl, warm-starts `vehicle_catalog`
 - Location: `backend/src/migrations.py`
 - Triggers: Manual `python -m src.migrations`
 - Responsibilities: Backfills `communication_type` field using enhanced detection logic
 ## Error Handling
 - Router layer raises `HTTPException` for 404/400/500 cases
 - `NHTSAClient` uses retry with exponential backoff for 403 (rate limiting) and request errors
-- `fetch_and_store()` yields error status dicts instead of raising (SSE-compatible)
 - Semaphore + 200ms delay between requests to avoid NHTSA rate limiting
 - `ApiError` class in `frontend/src/client/api.ts` wraps non-OK HTTP responses
 - React Query `retry: 1` for automatic single retry on failed queries
-- SSE fetch has `AbortController` support for cancellation
-- `useFetchCommunications` hook tracks error state separately
+- A failed refresh run records its reason on the `refresh_runs` row, which the UI renders
 ## Cross-Cutting Concerns
-## MongoDB Collections
-| Collection | Purpose | Key Indexes |
-|------------|---------|-------------|
-| `vehicles` | Tracked vehicles with config | `vehicle_id` (unique) |
-| `communications` | Cached NHTSA communications | `nhtsa_id` (unique), `vehicle_id`, `communication_date` |
-| `searches` | Search history | `created_at` |
+## Postgres Tables
+See `docs/schema.md` for the full schema and `backend/migrations/` for the history.
+
+| Table | Purpose |
+|-------|---------|
+| `vehicles` | Tracked vehicles. Soft-deleted via `active` |
+| `communications` | One row per `nhtsa_id`. `status` is the contract between sync and the processor |
+| `comm_documents` | One row per PDF: extracted text, LLM output, embedding |
+| `communication_vehicles` | The join that removes the per-vehicle duplication |
+| `vehicle_catalog` | YMM to vehicleId cache in front of NHTSA byYmmt |
+| `refresh_runs` | State of an in-app refresh; one active at a time |
+| `pipeline_runs` | Operational record of a CLI job execution |
+| `usage_events` | Billing record: one row per billable model call |
 <!-- GSD:architecture-end -->
 
-<!-- GSD:workflow-start source:GSD defaults -->
-## GSD Workflow Enforcement
+## Project Management
 
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
-
-Use these entry points:
-- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd:debug` for investigation and bug fixing
-- `/gsd:execute-phase` for planned phase work
-
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-
-
-<!-- GSD:profile-start -->
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
+Use Linear as the source of truth for planning and tracking work. Start substantive work through `/linear-project-workflow` (projects, milestones, issues) rather than ad-hoc planning artifacts.

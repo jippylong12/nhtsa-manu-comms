@@ -6,7 +6,7 @@ A full-stack web application for fetching, filtering, and viewing NHTSA manufact
 
 ### Backend
 - **FastAPI** - Modern async Python web framework
-- **MongoDB** + **Motor** - NoSQL database with async driver
+- **Postgres** + **asyncpg** + **pgvector** - the single store, including embeddings
 - **Pydantic V2** - Data validation and settings management
 - **httpx** - Async HTTP client for NHTSA API
 
@@ -20,21 +20,20 @@ A full-stack web application for fetching, filtering, and viewing NHTSA manufact
 
 - **Python 3.11+**
 - **Node.js 18+**
-- **MongoDB** running locally on `localhost:27017`
-  - macOS: `brew services start mongodb-community`
-  - Or install from: https://www.mongodb.com/try/download/community
+- **Postgres** with the **pgvector** extension, reachable at `DATABASE_URL`.
+  Hosted (Railway and similar) or local both work; see `docs/database.md`.
 
 ## Quick Start
 
-### 1. Ensure MongoDB is running
+### 1. Apply migrations
 
 ```bash
-# macOS with Homebrew
-brew services start mongodb-community
-
-# Check status
-brew services list | grep mongo
+cd backend && python -m src.db.migrate
 ```
+
+Plain ordered SQL files under `backend/migrations/`, each applied once and
+recorded. Re-running is a no-op. `--status` shows what is pending without
+applying anything.
 
 ### 2. Start Backend
 
@@ -88,21 +87,22 @@ Communications are categorized and color-coded by type:
 - **PIP** (Purple) - Preliminary Information Parts
 - **OTHER** (Gray) - Unknown/Other types
 
-### Stats Summary
-View at-a-glance statistics for each vehicle:
-- Total communication count
-- Communications in last 30 days
-- Breakdown by category type
-
 ### Search & Filter
-- Full-text search across summaries and communication numbers
-- Filter by communication type
-- Real-time filtering as you type
+- Full-text search across LLM summaries, symptoms, remedies and full document text
+- Filter by communication type, by affected system, and by whether a document exists
+- Semantic symptom search over embeddings
 
-### Communication Fetching
-- Real-time SSE progress updates during fetch
-- Caches communications in MongoDB (no duplicate requests)
-- Force refresh option to update cached data
+### Refresh
+Press refresh on a vehicle and the whole pipeline runs for it: fetch from NHTSA,
+download and read the documents, analyse them, index them for search.
+
+- A free preview first, showing how many bulletins are new, roughly what it will
+  cost and roughly how long it will take. Nothing is billed until you confirm.
+- Per-stage progress, because the analysis stage is queued with the model
+  provider and can be quiet for minutes.
+- Progress lives server-side, so leaving the page and coming back picks the run
+  up where it is.
+- One run at a time, and the actual metered cost is reported at the end.
 
 ## API Endpoints
 
@@ -113,23 +113,35 @@ View at-a-glance statistics for each vehicle:
 - `PATCH /api/vehicles/{id}` - Update vehicle config
 - `DELETE /api/vehicles/{id}` - Remove vehicle
 
-### Communications
-- `GET /api/communications` - List with filters (search, comm_type)
-- `GET /api/communications/{id}` - Get by NHTSA ID
-- `GET /api/communications/stats/{vehicle_id}` - Get stats for vehicle
-- `POST /api/communications/fetch` - SSE streaming fetch
-- `POST /api/communications/fetch-sync` - Synchronous fetch
+### Communications (corpus)
+- `GET /api/corpus/communications` - List with filters (vehicle, type, status, systems, components, search)
+- `GET /api/corpus/communications/{nhtsaId}` - One communication with its documents
+- `GET /api/corpus/tags` - System and component vocabulary, optionally scoped to a vehicle
+
+### Refresh
+- `GET /api/refresh/{vehicleId}/preview` - What a run would do and cost. Free.
+- `POST /api/refresh/{vehicleId}` - Start the run. Billed. Returns 202.
+- `GET /api/refresh/{vehicleId}` - Progress of the current or most recent run
+
+### Discovery (fills the add-vehicle form)
+- `GET /api/communications/discovery/years|makes|models|variants|trims`
+
+### Other
+- `GET /api/symptom-search` - Semantic search with a composed answer
+- `GET /api/admin/usage` - Cost ledger
 
 ## Environment Variables
 
 Create `.env` in the `backend/` directory:
 
 ```env
-MONGODB_URL=mongodb://localhost:27017
-MONGODB_DATABASE=nhtsa_comms
+DATABASE_URL=postgresql://user:password@host:port/database
 API_HOST=0.0.0.0
 API_PORT=8000
 NHTSA_API_BASE_URL=https://api.nhtsa.gov
+
+# Required by the analysis stage of a refresh
+GEMINI_API_KEY=...
 ```
 
 ## Architecture
@@ -141,7 +153,7 @@ project_root/
 ├── backend/                 # FastAPI (Service Layer Pattern)
 │   ├── src/
 │   │   ├── main.py          # Entry point
-│   │   ├── database.py      # MongoDB connection
+│   │   ├── db/              # Postgres pool and migration runner
 │   │   ├── vehicles/        # Vehicles feature module
 │   │   └── communications/  # Communications feature module
 │   └── pyproject.toml

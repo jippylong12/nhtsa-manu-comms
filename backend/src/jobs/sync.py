@@ -9,7 +9,6 @@ them.
 Usage:
     python -m src.jobs.sync --all
     python -m src.jobs.sync --vehicle 218944
-    python -m src.jobs.sync --import-vehicles     # bootstrap the vehicles table
     python -m src.jobs.sync --all --limit 25      # cap comms per vehicle (smoke runs)
 """
 
@@ -199,60 +198,6 @@ async def _store_comm(
             stats.new_links += 1
 
 
-async def import_vehicles_from_mongo() -> int:
-    """One-time bootstrap: copy tracked vehicles from the legacy Mongo store.
-
-    Mongo records only year and model, so `make` is inferred from the model
-    name where it is unambiguous and left as UNKNOWN otherwise; it is display
-    metadata, not a sync key.
-    """
-    from motor.motor_asyncio import AsyncIOMotorClient
-
-    from src.config import get_settings
-
-    settings = get_settings()
-    mongo = AsyncIOMotorClient(settings.mongodb_url)[settings.mongodb_database]
-    vehicles = await mongo.vehicles.find({}).to_list(length=None)
-
-    known_makes = {
-        "SILVERADO": "CHEVROLET",
-        "EQUINOX": "CHEVROLET",
-        "BLAZER": "CHEVROLET",
-        "COLORADO": "CHEVROLET",
-        "SIERRA": "GMC",
-        "CANYON": "GMC",
-        "HUMMER": "GMC",
-        "LYRIQ": "CADILLAC",
-        "ESCALADE": "CADILLAC",
-        "CELESTIQ": "CADILLAC",
-    }
-
-    pool = await get_pool()
-    n = 0
-    async with pool.acquire() as conn:
-        for v in vehicles:
-            model = str(v.get("model", "")).upper()
-            make = next((mk for key, mk in known_makes.items() if key in model), "UNKNOWN")
-            _, inserted = await repo.upsert_vehicle(
-                conn,
-                nhtsa_vehicle_id=int(v["vehicle_id"]),
-                year=int(v["year"]),
-                make=make,
-                model=model,
-                keywords=list(v.get("keywords") or []),
-            )
-            n += 1
-            log.info(
-                "vehicle %s %s %s (%s): %s",
-                v["year"],
-                make,
-                model,
-                v["vehicle_id"],
-                "inserted" if inserted else "updated",
-            )
-    return n
-
-
 async def run(vehicle_ids: list[int] | None, limit: int | None) -> SyncStats:
     pool = await get_pool()
     client = NHTSAClient()
@@ -265,8 +210,8 @@ async def run(vehicle_ids: list[int] | None, limit: int | None) -> SyncStats:
             vehicles = [v for v in vehicles if v["nhtsa_vehicle_id"] in vehicle_ids]
         if not vehicles:
             log.warning(
-                "No tracked vehicles matched. Run with --import-vehicles first, "
-                "or check the ids passed to --vehicle."
+                "No tracked vehicles matched. Add one in the app, or check the "
+                "ids passed to --vehicle."
             )
             return total
 
@@ -286,9 +231,6 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true", help="sync every active tracked vehicle")
     group.add_argument("--vehicle", type=int, action="append", help="NHTSA vehicleId (repeatable)")
-    group.add_argument(
-        "--import-vehicles", action="store_true", help="bootstrap the vehicles table from Mongo"
-    )
     parser.add_argument("--limit", type=int, help="cap communications per vehicle (smoke runs)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -301,10 +243,6 @@ def main() -> int:
 
     async def _main() -> int:
         try:
-            if args.import_vehicles:
-                n = await import_vehicles_from_mongo()
-                log.info("imported %d vehicle(s)", n)
-                return 0
             stats = await run(args.vehicle, args.limit)
             return 1 if stats.errors else 0
         finally:
