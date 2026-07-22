@@ -53,6 +53,22 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
         setSelectedVariant(variants.length > 0 ? variants[0] : null);
     }, [variants]);
 
+    useEffect(() => {
+        // Clear the form whenever the modal closes. A successful add closes it by
+        // flipping isOpen rather than going through handleClose, and the component
+        // stays mounted while hidden, so without this the next open would show the
+        // vehicle that was just added with the Add button still enabled, one stray
+        // click from submitting it again.
+        if (isOpen) return;
+        /* eslint-disable react-hooks/set-state-in-effect */
+        setSelectedYear(null);
+        setSelectedMake('');
+        setSelectedModel('');
+        setSelectedVariant(null);
+        setKeywords('');
+        /* eslint-enable react-hooks/set-state-in-effect */
+    }, [isOpen]);
+
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -72,18 +88,9 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
         });
     };
 
-    const resetSelections = () => {
-        setSelectedYear(null);
-        setSelectedMake('');
-        setSelectedModel('');
-        setSelectedVariant(null);
-        setKeywords('');
-    };
-
-    const handleClose = () => {
-        resetSelections();
-        onClose();
-    };
+    // Closing is enough to clear the form; the effect above owns the reset so
+    // that every exit path, including a successful add, goes through it.
+    const handleClose = () => onClose();
 
     return (
         <div className={styles.modalOverlay} onClick={handleClose}>
