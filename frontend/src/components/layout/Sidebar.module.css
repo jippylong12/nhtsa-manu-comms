@@ -1,7 +1,10 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* Fills the flex line rather than the parent's full height, so the drawer can
+     put a close button above it without pushing the vehicle list off the end. */
+  flex: 1;
+  min-height: 0;
   padding: var(--space-sm) 0;
 }
 
@@ -26,6 +29,16 @@
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
+  /* A wrapped "Symptom Search" clipped against the row's own height. Truncating
+     is the honest failure here, and the drawer is wide enough not to reach it. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.navItem svg {
+  flex-shrink: 0;
 }
 
 .navItem:hover {
@@ -42,6 +55,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
   margin-bottom: var(--space-xs);
 }
@@ -59,6 +73,10 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .overviewButton:hover {
@@ -75,6 +93,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 28px;
   height: 28px;
   background: none;

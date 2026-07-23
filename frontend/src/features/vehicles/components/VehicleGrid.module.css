@@ -53,8 +53,22 @@
     padding: 0 var(--space-md);
   }
 
+  .heroSection {
+    padding: var(--space-xl) 0;
+    margin-bottom: var(--space-lg);
+  }
+
   .heroTitle {
-    font-size: var(--font-size-2xl);
+    /* "Communications" is one unbreakable word, so a fixed size overflowed the
+       column on a phone however much padding was taken away. Tying it to the
+       viewport keeps it inside the text box; the clamp stops it growing past
+       what it was, or shrinking below legible. */
+    font-size: clamp(1.5rem, 8vw, var(--font-size-2xl));
+    overflow-wrap: break-word;
+  }
+
+  .heroDescription {
+    font-size: var(--font-size-base);
   }
 
   .vehiclesGrid {

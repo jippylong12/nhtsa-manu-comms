@@ -1,5 +1,6 @@
 .shell {
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   background: var(--bg-base);
@@ -41,4 +42,131 @@
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-base);
+}
+
+/* --- Compact layout -------------------------------------------------------
+ *
+ * Below 900px the sidebar leaves the flow and becomes an off-canvas drawer, so
+ * the content gets the whole width. The breakpoint is enforced in JavaScript
+ * (COMPACT_QUERY in AppShell.tsx) because the two layouts are different trees,
+ * not one tree styled two ways; the classes below only ever apply to the tree
+ * that branch already chose, so they need no media query of their own.
+ */
+
+.compactShell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+  height: var(--header-height);
+  padding: 0 var(--space-sm);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.navToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* 40px keeps the hit target at the size a thumb expects, which the 20px icon
+     on its own would not. */
+  width: 40px;
+  height: 40px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.navToggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.navToggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.topBarTitle {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: hsla(225, 25%, 4%, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-default);
+}
+
+.scrim[data-open='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Pairs with .sidebar, which supplies the surface, border and scrolling. */
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: calc(var(--z-overlay) + 1);
+  width: min(280px, 82vw);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-100%);
+  /* Hiding it outright, rather than only sliding it away, keeps the closed
+     drawer out of the tab order and off the screen reader. */
+  visibility: hidden;
+  transition: transform var(--transition-default), visibility var(--transition-default);
+}
+
+.drawer[data-open='true'] {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.drawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  height: var(--header-height);
+  padding: 0 var(--space-sm);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.compactMain {
+  flex: 1;
+  min-height: 0;
+  /* .main pins itself to its parent's height; here the flex line does that. */
+  height: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .drawer {
+    transition: none;
+  }
 }

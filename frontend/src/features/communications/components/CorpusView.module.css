@@ -66,7 +66,9 @@
 
 .bannerMeta {
   display: flex;
-  align-items: center;
+  /* The count wraps to two lines on a phone; anchoring to the top keeps the
+     icon beside the first line instead of floating between them. */
+  align-items: flex-start;
   gap: var(--space-xs);
   font-size: var(--font-size-sm);
   color: var(--text-muted);
@@ -74,6 +76,8 @@
 }
 
 .sparkle {
+  flex-shrink: 0;
+  margin-top: 4px;
   color: var(--color-primary);
 }
 
@@ -85,8 +89,13 @@
 
 .searchInput {
   flex: 1;
+  min-width: 0;
   position: relative;
   display: flex;
+  /* The element also carries the global `input-group` class, which lays its
+     children out in a column. This is a row: the icon and the clear button are
+     positioned over the field, not stacked above it. */
+  flex-direction: row;
   align-items: center;
 }
 
@@ -97,10 +106,16 @@
   pointer-events: none;
 }
 
-.searchInput .input {
+/* `input` is a global utility class from index.css, so it has to be escaped
+   from this module's local-name hashing. Without :global() the compiled
+   selector looks for a hashed class the element never carries, and the rule
+   silently does nothing — which is why the field sat at its content width with
+   the search icon overlapping the placeholder. */
+.searchInput :global(.input) {
   padding-left: calc(var(--space-md) * 2 + 18px);
   padding-right: calc(var(--space-md) * 2 + 16px);
   width: 100%;
+  min-width: 0;
 }
 
 .clearSearch {
