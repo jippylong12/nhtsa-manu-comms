@@ -1,4 +1,3 @@
-<!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
 **NHTSA Comms Tracker — UI/UX Beautification**
@@ -13,9 +12,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - **Backend**: No backend changes in this milestone. Frontend-only.
 - **Theme**: Keep existing dark theme. Refine, don't replace.
 - **Compatibility**: Must work well across desktop, tablet, and mobile.
-<!-- GSD:project-end -->
 
-<!-- GSD:stack-start source:codebase/STACK.md -->
 ## Technology Stack
 
 ## Languages
@@ -86,9 +83,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Postgres with pgvector
 - uvicorn ASGI server
 - Static frontend build served separately or via reverse proxy
-<!-- GSD:stack-end -->
 
-<!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
 ## Naming Patterns
@@ -190,9 +185,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Block comments at top of files: `/* API Client - HTTP utilities for backend communication */`
 - Section headers in components: `{/* Stats Summary */}`, `{/* Filters */}`
 - Inline comments sparingly for clarification
-<!-- GSD:conventions-end -->
 
-<!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
 ## Pattern Overview
@@ -293,7 +286,6 @@ See `docs/schema.md` for the full schema and `backend/migrations/` for the histo
 | `refresh_runs` | State of an in-app refresh; one active at a time |
 | `pipeline_runs` | Operational record of a CLI job execution |
 | `usage_events` | Billing record: one row per billable model call |
-<!-- GSD:architecture-end -->
 
 ## Project Management
 
