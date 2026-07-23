@@ -81,6 +81,51 @@ FROM _vt ORDER BY e <=> '[1,2,3]';
 
 Expected: row 1 at distance `0.000000`, row 2 at `0.025368`.
 
+## The test database (local)
+
+The suite does **not** run against Railway. It runs against a local replica,
+selected by `TEST_DATABASE_URL` in `backend/.env`; unset, it falls back to
+`DATABASE_URL` and the problem below comes back.
+
+```bash
+cd backend
+bash tools/setup_test_db.sh          # build it
+bash tools/setup_test_db.sh --reseed # refresh the corpus from Railway
+python3 -m pytest -q                 # ~10s, 199 passed
+```
+
+### Why
+
+pytest-asyncio gives every test its own event loop, and an asyncpg pool cannot
+be shared across loops, so every test opens its own connection (see the
+`_reset_pool` fixture in `tests/conftest.py`). That was tolerable at ~100 tests.
+At ~200 it is not: Railway's public TCP proxy (`*.proxy.rlwy.net`) throttles
+the churn, and past roughly half the suite tests start failing at fixture setup
+with `TimeoutError` out of `asyncpg.connect()` — never on an assertion. Smaller
+groups always passed, which is what made it look intermittent.
+
+Postgres itself was never the constraint: `max_connections` is 100, and
+`pg_stat_activity` showed 9 connections in use during a failing run. The limit
+is the proxy, and it is not tunable from this side.
+
+Locally there is no proxy and no round trip, so the same 199 tests run in about
+ten seconds instead of eight to seventeen minutes, and they stop mutating the
+production database as a side effect of running.
+
+### Why it is a replica, not an empty schema
+
+Three tests — two in `test_symptom_retrieval.py`, one in `test_usage_ledger.py`
+— assert against the real corpus by `nhtsa_id` (for example `11006511`/PI0754G,
+linked solely to vehicle 218944). They are only meaningful against real data, so
+setup restores a `pg_dump` of Railway rather than starting empty. The dump is a
+single connection, so it costs nothing in churn.
+
+The local instance matches Railway exactly — Postgres 18.4, pgvector 0.8.5 —
+because the suite depends on generated `tsvector` columns, `hnsw` indexes, and
+real constraint behaviour. It listens on **5433** so an existing local Postgres
+keeps 5432. `conftest.py` applies any pending migrations at import, so a new
+migration cannot silently leave the test database behind.
+
 ## Billing
 
 The database runs on the Railway Hobby plan and draws from the monthly credit

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Postgres (the store; Railway + pgvector)
     database_url: str = ""
     postgres_pool_max: int = 10
+    # Where the test suite points instead of `database_url`. Set, the whole
+    # suite runs against a local Postgres; unset, it falls back to
+    # `database_url`. Read only by tests/conftest.py — see docs/database.md.
+    test_database_url: str = ""
 
     # API Server
     api_host: str = "0.0.0.0"
