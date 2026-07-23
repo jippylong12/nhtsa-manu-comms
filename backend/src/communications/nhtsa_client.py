@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any, AsyncGenerator
+
 import httpx
 
 from src.config import get_settings
@@ -75,7 +76,7 @@ class NHTSAClient:
                     if response.status_code == 403:
                         # Rate limited - wait and retry with exponential backoff
                         if attempt < max_retries - 1:
-                            wait_time = 2 ** attempt  # 1s, 2s, 4s
+                            wait_time = 2**attempt  # 1s, 2s, 4s
                             await asyncio.sleep(wait_time)
                             continue
                         return None
@@ -194,9 +195,11 @@ class NHTSAClient:
             except httpx.RequestError:
                 return []
 
-    async def get_vehicle_variants(self, year: int, make: str, model: str, trim: str | None = None) -> list[dict[str, Any]]:
+    async def get_vehicle_variants(
+        self, year: int, make: str, model: str, trim: str | None = None
+    ) -> list[dict[str, Any]]:
         """Fetch specific vehicle variants with vehicleId using /vehicles/byYmmt endpoint.
-        
+
         This is the KEY endpoint that returns the correct vehicleId for use with
         /vehicles/{vehicleId}/details for manufacturer communications.
         """
@@ -213,18 +216,20 @@ class NHTSAClient:
                 # Return structured variant info with the correct vehicleId
                 variants = []
                 for r in results:
-                    variants.append({
-                        "vehicleId": r.get("vehicleId"),  # This is the CORRECT ID!
-                        "ncapId": r.get("ncapId"),  # SafetyRatings ID (for reference)
-                        "modelYear": r.get("modelYear"),
-                        "make": r.get("make"),
-                        "model": r.get("vehicleModel"),
-                        "trim": r.get("trim"),
-                        "series": r.get("series"),
-                        "vehicleDescription": build_vehicle_description(
-                            r.get("vehicleModel"), r.get("trim"), r.get("series")
-                        ),
-                    })
+                    variants.append(
+                        {
+                            "vehicleId": r.get("vehicleId"),  # This is the CORRECT ID!
+                            "ncapId": r.get("ncapId"),  # SafetyRatings ID (for reference)
+                            "modelYear": r.get("modelYear"),
+                            "make": r.get("make"),
+                            "model": r.get("vehicleModel"),
+                            "trim": r.get("trim"),
+                            "series": r.get("series"),
+                            "vehicleDescription": build_vehicle_description(
+                                r.get("vehicleModel"), r.get("trim"), r.get("series")
+                            ),
+                        }
+                    )
                 return variants
             except httpx.RequestError:
                 return []
@@ -268,7 +273,7 @@ def extract_id_to_summary(details: dict[str, Any]) -> dict[int, str]:
     except (KeyError, IndexError, TypeError):
         return mapping
 
-    for c in (comms or []):
+    for c in comms or []:
         n = c.get("nhtsaIdNumber")
         summary = str(c.get("summary", "") or "")
         try:
@@ -286,7 +291,7 @@ def extract_id_to_comm_number(details: dict[str, Any]) -> dict[int, str]:
     except (KeyError, IndexError, TypeError):
         return mapping
 
-    for c in (comms or []):
+    for c in comms or []:
         n = c.get("nhtsaIdNumber")
         comm_number = str(c.get("manufacturerCommunicationNumber", "") or "")
         try:

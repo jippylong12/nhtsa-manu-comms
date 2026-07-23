@@ -82,4 +82,3 @@ async def get_trims(
 ) -> list[str]:
     """Get available trims/body styles for a specific year/make/model."""
     return await CommunicationService.get_discovery_trims(year, make, model)
-
