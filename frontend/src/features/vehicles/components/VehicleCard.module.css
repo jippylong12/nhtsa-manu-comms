@@ -37,11 +37,19 @@
   gap: var(--space-xs);
 }
 
-.vehicleActions .btn:hover {
+/* Both rules override the global `.btn-ghost:hover:not(:disabled)` in index.css,
+   which requires matching that selector's shape:
+   - `:global()` escapes `btn` from this module's local-name hashing. Without it
+     the compiled selector looks for a hashed class the buttons never carry, and
+     both rules silently do nothing — the icons had no hover colour at all.
+   - `:not(:disabled)` breaks what would otherwise be a specificity tie decided
+     only by sheet order, and stops a mid-refresh (disabled) button colouring on
+     hover when its hover background is already suppressed. */
+.vehicleActions :global(.btn):hover:not(:disabled) {
   color: var(--color-danger);
 }
 
-.vehicleActions .btn:first-child:hover {
+.vehicleActions :global(.btn):first-child:hover:not(:disabled) {
   color: var(--color-primary);
 }
 
