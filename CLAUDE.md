@@ -58,10 +58,6 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 | date-fns | ^4.1.0 | Date formatting utilities |
 | lucide-react | ^0.562.0 | Icon library |
 | @vitejs/plugin-react | ^5.1.1 | React JSX transform for Vite |
-| Package | Purpose |
-|---------|---------|
-| requests | Synchronous HTTP client for NHTSA API |
-| pickle (stdlib) | Local file-based caching in `.cache/` directory |
 ## Configuration
 - Backend uses `pydantic-settings` with `.env` file support (`backend/src/config.py`)
 - Settings loaded via `get_settings()` with `@lru_cache` singleton pattern
@@ -81,7 +77,6 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Indexes created at startup in `backend/src/database.py`:
 - Backend: Postgres is the communication cache; `existing_nhtsa_ids` is what stops sync refetching
 - Frontend: TanStack Query with 5-minute stale time (`frontend/src/App.tsx`)
-- Legacy CLI: Pickle files in `.cache/` directory with daily rotation (`cache_utils.py`)
 - Local filesystem only (no cloud storage)
 ## Platform Requirements
 - Python 3.10+
@@ -97,19 +92,19 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Conventions
 
 ## Naming Patterns
-- Use `snake_case.py` for all modules: `cache_utils.py`, `http_utils.py`, `nhtsa_client.py`
+- Use `snake_case.py` for all modules: `nhtsa_client.py`, `run_pipeline.py`, `seed_vehicle_catalog.py`
 - Feature modules organized as packages with `__init__.py`: `backend/src/vehicles/`, `backend/src/communications/`
 - Each feature package follows: `router.py`, `service.py`, `schemas.py`
 - Use `camelCase.ts` for non-component modules: `queryKeys.ts`, `api.ts`, `types.ts`
-- Use `PascalCase.tsx` for React components: `VehicleCard.tsx`, `CommunicationList.tsx`, `Header.tsx`
+- Use `PascalCase.tsx` for React components: `VehicleCard.tsx`, `CorpusCommunicationList.tsx`, `RefreshDialog.tsx`
 - Hook files prefixed with `use`: `useVehicles.ts`, `useCommunications.ts`, `useDiscovery.ts`
-- Use `snake_case` for all functions and methods: `create_vehicle()`, `fetch_details_with_cache()`
-- Private/internal methods prefixed with underscore: `_product_matches()`, `_matches_keywords()`, `_extract_communication()`
+- Use `snake_case` for all functions and methods: `create_vehicle()`, `get_discovery_trims()`
+- Private/internal methods prefixed with underscore: `_build_filters()`, `_cache_variants()`, `_extract_communication()`
 - Use `camelCase` for all functions: `handleAddVehicle`, `handleSearch`
 - React hooks prefixed with `use`: `useVehiclesQuery`, `useCommunicationsQuery`
 - API object methods use `camelCase`: `vehicleApi.list()`, `communicationApi.fetchWithProgress()`
 - Use `snake_case` for all variables: `nhtsa_ids`, `id_to_summary`, `comm_count`
-- Constants use `UPPER_SNAKE_CASE`: `MAX_WORKERS`, `CACHE_DIR`, `TARGET_YEAR`, `TOP_MAKES`
+- Constants use `UPPER_SNAKE_CASE`: `TOP_MAKES`, `BATCH_SIZE`, `MAX_LLM_ATTEMPTS`, `CONFIDENCE_THRESHOLD`
 - Use `camelCase` for local variables and state: `searchTerm`, `selectedTypes`, `vehiclesLoading`
 - Constants use `UPPER_SNAKE_CASE`: `COMM_TYPE_COLORS`, `COMM_PRIORITY_TYPES`, `API_BASE`
 - Use `PascalCase` for interfaces and type aliases: `Vehicle`, `Communication`, `CommType`, `FetchProgress`

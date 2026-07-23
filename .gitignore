@@ -1,6 +1,3 @@
-# Legacy cache
-/.cache/
-
 # IDE
 .idea
 .vscode
