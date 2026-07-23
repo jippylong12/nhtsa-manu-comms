@@ -25,10 +25,10 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from google import genai
 from google.genai import types
 
 from src.config import get_settings
+from src.gemini import client as gemini_client
 from src.symptom_search.cost import QueryCost
 from src.symptom_search.retrieval import Match
 
@@ -162,10 +162,9 @@ def guard_citations(answer: str, retrieved_ids: set[str]) -> tuple[str, list[str
 
 def _generate(model: str, prompt: str) -> tuple[str, int, int]:
     """Run the composition call. Isolated so tests can monkeypatch it."""
-    settings = get_settings()
-    if not settings.gemini_api_key:
+    if not get_settings().gemini_api_key:
         raise ComposeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = gemini_client()
     resp = client.models.generate_content(
         model=model,
         contents=prompt,

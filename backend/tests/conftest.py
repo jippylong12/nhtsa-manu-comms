@@ -19,7 +19,10 @@ versions: docs/database.md.
 """
 
 import asyncio
+import json
 import os
+import pathlib
+from functools import lru_cache
 
 import asyncpg
 import pytest
@@ -27,6 +30,14 @@ import pytest_asyncio
 
 from src.config import Settings, get_settings
 from src.db import close_pool
+
+_QUERY_EMBEDDINGS = pathlib.Path(__file__).parent / "fixtures" / "query_embeddings.json"
+
+
+@lru_cache
+def _recorded_embeddings() -> dict[str, list[float]]:
+    """The replayed query vectors, parsed once rather than per test."""
+    return json.loads(_QUERY_EMBEDDINGS.read_text()) if _QUERY_EMBEDDINGS.exists() else {}
 
 
 def _redirect_to_test_database() -> None:
@@ -57,6 +68,58 @@ def _redirect_to_test_database() -> None:
 
 
 _redirect_to_test_database()
+
+
+@pytest.fixture(autouse=True)
+def _replay_query_embeddings(monkeypatch):
+    """Serve query embeddings from a recording instead of calling Gemini.
+
+    `embed_query` is a real, billed HTTPS request. Two tests in
+    `test_usage_ledger.py` reach it through `service.search()`, so every full
+    run cost money and, worse, put an unbounded network call inside the suite:
+    one run hung 40+ minutes blocked in a TLS read that could not time out.
+    (`src/gemini.py` now bounds that too, but not making the call is better
+    than failing it after two minutes.)
+
+    Replayed rather than faked. The recording is the vector Gemini actually
+    returned for that query, so retrieval, the cosine numbers, and the
+    confidence gate in `compose()` behave exactly as they do in production —
+    the tailgate query still scores 0.72 and still reaches the composer. A
+    synthetic vector (like `DUMMY_EMBEDDING` in test_symptom_retrieval.py)
+    would score near zero against real documents and silently turn the ledger
+    tests into refusal tests that never bill a composition at all.
+
+    Nothing about the ledger assertions is weakened: `search_embed` tokens come
+    from `QueryCost.record_embed()`, which counts characters in the query
+    string and never read the API response in the first place.
+
+    Autouse so a new `embed_query` caller cannot quietly reintroduce billed
+    spend; an unrecorded query fails loudly rather than reaching the network.
+    To add one, see tools/record_query_embeddings.py.
+
+    Scope is `embed_query` only, not a blanket network block. `embed_pending`
+    (`embed_content`) and `compose._generate` (`generate_content`) still reach
+    Gemini if a test calls them — no test calls the former, and the latter is
+    deliberate in `test_a_symptom_search_records_its_spend`, the JIP-409
+    acceptance test that real model spend lands in the ledger. Every such call
+    is bounded by `GEMINI_TIMEOUT_SECONDS` (src/gemini.py).
+    """
+
+    async def _replay(text: str) -> list[float]:
+        vector = _recorded_embeddings().get((text or "").strip())
+        if vector is None:
+            raise RuntimeError(
+                f"No recorded query embedding for {text!r}. The suite does not call "
+                f"the embeddings API. Add the query to tools/record_query_embeddings.py "
+                f"and run: cd backend && python3 -m tools.record_query_embeddings"
+            )
+        return list(vector)
+
+    # Patched at each import site, not just the definition: `service` and
+    # `retrieval` bound the name at import, so patching `src.jobs.embed` alone
+    # would leave both of them calling the real one.
+    for module in ("src.jobs.embed", "src.symptom_search.service", "src.symptom_search.retrieval"):
+        monkeypatch.setattr(f"{module}.embed_query", _replay)
 
 
 @pytest_asyncio.fixture(autouse=True)

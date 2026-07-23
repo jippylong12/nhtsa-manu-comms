@@ -12,10 +12,10 @@ import logging
 import math
 from dataclasses import dataclass, field
 
-from google import genai
 from google.genai import types
 
 from src.config import get_settings
+from src.gemini import client as gemini_client
 from src.usage.ledger import record_usage
 from src.usage.pricing import rate_for
 
@@ -84,10 +84,7 @@ async def embed_pending(
     from src.jobs.repository import vehicle_scope
 
     settings = get_settings()
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
-
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = gemini_client()
     stats = EmbedStats()
     pool = await get_pool()
 
@@ -193,7 +190,7 @@ async def embed_query(text: str) -> list[float]:
     """Embed a search query. Uses RETRIEVAL_QUERY, the asymmetric counterpart
     to the RETRIEVAL_DOCUMENT task type used for the corpus."""
     settings = get_settings()
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = gemini_client()
     resp = await asyncio.to_thread(
         client.models.embed_content,
         model=settings.gemini_embedding_model,

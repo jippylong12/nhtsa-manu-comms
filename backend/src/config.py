@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,6 +51,17 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
+    # Per-request ceiling for every Gemini call (see src/gemini.py). Without
+    # one, a stalled TLS read blocks forever rather than failing: a single
+    # hung embedding call once held a test run open for 40+ minutes. Generous
+    # enough for a 50-document embedding batch or a vision extraction, which
+    # are the slowest calls made here.
+    #
+    # `gt=0` is load-bearing, not decoration. The SDK treats a falsy timeout as
+    # "no timeout" (`if timeout:` in google.genai._api_client), so setting this
+    # to 0 — the obvious way to write "no limit" — would silently restore the
+    # unbounded hang. Rejecting it at startup makes that a loud error instead.
+    gemini_timeout_seconds: int = Field(default=120, gt=0)
     # 1536, not the model's native 3072: pgvector cannot build an hnsw or
     # ivfflat index above 2000 dimensions. See migrations/0001.
     embedding_dimensions: int = 1536

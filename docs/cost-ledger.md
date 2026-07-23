@@ -114,3 +114,40 @@ It is unauthenticated because the deployment is single-tenant, but it lives unde
 `/admin` so Phase C can lock the whole prefix down in one place. `usage_events`
 also has a nullable `user_id` column reserved for that work, so per-account
 attribution needs no migration.
+
+## What the test suite spends
+
+Running `pytest` used to bill a Gemini embedding on every run, because the two
+end-to-end ledger tests call `service.search()`, which embeds the query for
+real. Those embeddings are now **replayed from a recording** —
+`tests/fixtures/query_embeddings.json`, served by the autouse
+`_replay_query_embeddings` fixture in `tests/conftest.py`.
+
+The recording is the vector Gemini actually returned, so retrieval, the cosine
+scores, and the confidence gate in `compose()` behave exactly as in production:
+the tailgate query still scores 0.72 and still reaches the composer. Nothing is
+stubbed out of the ledger path — `search_embed` tokens come from
+`QueryCost.record_embed()`, which counts characters in the query string and
+never read the API response to begin with.
+
+The fixture is autouse so a new call site cannot quietly reintroduce live
+spend. An unrecorded query raises rather than reaching the network:
+
+```bash
+cd backend && python3 -m tools.record_query_embeddings
+```
+
+One real billed call remains, deliberately:
+`test_a_symptom_search_records_its_spend` still makes a live Flash-Lite
+composition, because it is the JIP-409 acceptance test that spend from a real
+model call reaches the ledger. It costs roughly $0.00005 a run.
+
+### Timeouts
+
+`genai.Client()` defaults to **no timeout**, and a stalled TLS connection then
+blocks forever rather than failing — one suite run hung 40+ minutes parked in
+`_ssl__SSLSocket_read`, with no way to fail and nothing in the database to
+explain it. Every client is now built by `src/gemini.py`, which applies
+`GEMINI_TIMEOUT_SECONDS` (default 120, generous enough for a 50-document
+embedding batch or a vision extraction). Construct clients through that helper
+so a new call site cannot reintroduce the unbounded case by omission.

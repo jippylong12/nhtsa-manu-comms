@@ -20,6 +20,7 @@ from google import genai
 from google.genai import types
 
 from src.config import get_settings
+from src.gemini import client as gemini_client
 from src.jobs.extract import archive_path
 from src.usage import pricing
 from src.usage.ledger import record_usage
@@ -187,10 +188,7 @@ def cost_of(tokens_in: int, tokens_out: int, batch: bool) -> float:
 
 
 def _client() -> genai.Client:
-    settings = get_settings()
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
-    return genai.Client(api_key=settings.gemini_api_key)
+    return gemini_client()
 
 
 def _generation_config(temperature: float = 0.0) -> types.GenerateContentConfig:

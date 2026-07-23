@@ -126,6 +126,13 @@ real constraint behaviour. It listens on **5433** so an existing local Postgres
 keeps 5432. `conftest.py` applies any pending migrations at import, so a new
 migration cannot silently leave the test database behind.
 
+The corpus dump carries the document embeddings, which is what lets the symptom
+searches in `test_usage_ledger.py` run offline: the *query* vector is replayed
+from `tests/fixtures/query_embeddings.json` and the *document* vectors it is
+compared against come from the dump. See "What the test suite spends" in
+docs/cost-ledger.md — a separate, pre-existing problem from the connection
+churn above.
+
 ## Billing
 
 The database runs on the Railway Hobby plan and draws from the monthly credit
