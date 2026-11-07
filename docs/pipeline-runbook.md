@@ -65,11 +65,45 @@ checking the `usage_events` spend since the reset against `--cap-usd` between sl
 and re-embeds. `--limit` is refused: the reset always covers the whole scope, so
 narrow a trial run with `--vehicle`.
 
-Exit codes: `0` done, `1` declined at the prompt or a slice made no progress, `3` the
-cap was reached. After a no-progress `1` or a `3` the remaining documents are still `pending` and
-nothing re-read is lost, but embeddings have not been rebuilt. Do not run
-`--reextract` again to finish (it would reset the documents already re-read); drain
-the rest with `python -m src.jobs.process --all`, which also re-embeds.
+Batch (the default) is one submission, not slices: the run estimates the cost (per-document
+cost x pending documents, halved for Batch pricing) and stops with exit `3` before
+submitting anything if that estimate reaches `--cap-usd`. Otherwise it submits every pending
+document in a single call and logs the batch ids at INFO (`SUBMITTED ... --collect <id>`),
+then polls every 60 s and waits up to 25 hours, because Anthropic's batch window is 24 hours
+and a batch can sit in its queue a long time; a progress line is logged every 10 minutes. The
+ledger is checked against the cap once, after collection. `--sync` keeps the 50-document
+slices with a cap check between them.
+
+If the session dies while waiting, the batch keeps running. Collect it with
+`python -m src.jobs.process --collect <batch id>` (ids are in the log and the `llm` row of
+`pipeline_runs`), then finish the run with `--reextract --resume` (below).
+
+Exit codes:
+
+- `0` clean: no stage reported failures and, afterwards, no in-scope communication is
+  `failed`, no document lacks a summary and none lacks an embedding.
+- `1` declined at the prompt, a slice made no progress, any stage reported `failed > 0`,
+  or rows were left stranded (a network drop that fails PDF downloads, LLM calls or
+  embeddings looks like this). The `reextract` row in `pipeline_runs` has `ok = false`
+  and an `error` such as `extract failed=152; embed failed=1208; 152 communications
+  failed; 152 documents without a summary`, and the same line is logged at ERROR. Its
+  counts carry `failed`, `without_summary` and `unembedded`.
+- `3` the cap was reached (`error = 'cap reached'`).
+
+After a `1` or a `3` nothing already re-read is lost. Do not run `--reextract` again
+without `--resume`: it would reset the documents already re-read. Finish the run with:
+
+```bash
+python -m src.jobs.process --reextract --resume --cap-usd 5
+```
+
+`--resume` skips the reset, still prints a plan and asks `Proceed? [y/N]` (`--yes`
+skips it), then re-queues to `pending` the communications that `failed` with a reason
+starting `pdf unavailable:`, `LLM call failed:` or `LLM stage error:` (it prints how many),
+and runs extract, the LLM slices (the cap watermark starts fresh) and embed over whatever
+is `pending`. `LLM schema violation` and `batch ` failures are left `failed`, so a resume
+that cannot fix them still exits `1`. It takes `--vehicle`, `--sync` and `--cap-usd`; like
+`--reextract`, it refuses `--limit`, and it is an error without `--reextract`.
 
 ## Flat-file index
 

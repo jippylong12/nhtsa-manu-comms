@@ -148,6 +148,8 @@ async def world(monkeypatch):
     # scope as summarised and can write ledger rows through `w.llm_cost`.
     w.llm_cost = 0.0
     w.llm_idle = False  # True: the llm fake does nothing, so the reset state stays visible
+    w.llm_fail = False  # True: the llm fake fails each document it picks up (a network error)
+    w.embed_failed = 0  # N > 0: the embed fake embeds nothing and reports N failures
 
     async def fake_extract(limit=None, vehicle_id=None):
         w.calls.append(("extract", limit, vehicle_id))
@@ -174,6 +176,13 @@ async def world(monkeypatch):
             )
         )
         for r in rows:
+            if w.llm_fail:
+                await conn.execute(
+                    "UPDATE communications SET status='failed', status_reason=$2 WHERE id=$1",
+                    r["communication_id"],
+                    "LLM call failed: connection reset",
+                )
+                continue
             await conn.execute("UPDATE comm_documents SET llm_summary='new' WHERE id=$1", r["id"])
             await conn.execute(
                 "UPDATE communications SET status='processed' WHERE id=$1", r["communication_id"]
@@ -181,8 +190,8 @@ async def world(monkeypatch):
         if w.llm_cost:
             await w.ledger(w.llm_cost)
         return SimpleNamespace(
-            processed=len(rows),
-            failed=0,
+            processed=0 if w.llm_fail else len(rows),
+            failed=len(rows) if w.llm_fail else 0,
             retried=0,
             tokens_in=0,
             tokens_out=0,
@@ -192,7 +201,30 @@ async def world(monkeypatch):
 
     async def fake_embed(limit=None, vehicle_id=None):
         w.calls.append(("embed", limit, vehicle_id))
-        return SimpleNamespace(embedded=0, failed=0, tokens_in=0, cost_usd=0.0, errors=[])
+        if w.embed_failed:
+            return SimpleNamespace(
+                embedded=0,
+                failed=w.embed_failed,
+                tokens_in=0,
+                cost_usd=0.0,
+                errors=["embedding service unreachable"],
+            )
+        rows = await conn.fetch(
+            """
+            UPDATE comm_documents d
+            SET embedding = $2::vector, embedding_model = 'emb', embedded_at = now()
+            FROM communications c
+            JOIN communication_vehicles cv ON cv.communication_id = c.id
+            WHERE c.id = d.communication_id AND cv.vehicle_id = $1
+              AND d.llm_summary IS NOT NULL AND d.embedding IS NULL
+            RETURNING d.id
+            """,
+            vehicle_id,
+            VECTOR,
+        )
+        return SimpleNamespace(
+            embedded=len(rows), failed=0, tokens_in=0, cost_usd=0.0, errors=[]
+        )
 
     async def fake_prune(dry_run=False):
         w.calls.append(("prune",))
@@ -344,3 +376,210 @@ def test_limit_is_refused_with_reextract_before_anything_is_reset(monkeypatch):
 
     assert exc.value.code == 2
     assert called == []
+
+
+@pytest.mark.asyncio
+async def test_a_clean_run_exits_zero_and_records_ok_with_zero_failure_counts(world):
+    vehicle = await world.vehicle()
+    await world.comm(vehicle)
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None)
+
+    assert code == 0
+    final = await world.last_run("reextract")
+    assert final["ok"] is True
+    assert final["error"] is None
+    counts = json.loads(final["counts"])
+    assert (counts["failed"], counts["without_summary"], counts["unembedded"]) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_stage_that_reports_embed_failures_makes_the_run_exit_one_and_not_ok(world):
+    vehicle = await world.vehicle()
+    await world.comm(vehicle)
+    world.embed_failed = 3
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None)
+
+    assert code == 1
+    final = await world.last_run("reextract")
+    assert final["ok"] is False
+    assert "embed failed=3" in final["error"]
+    assert "without an embedding" in final["error"]
+    assert json.loads(final["counts"])["unembedded"] == 1
+
+
+@pytest.mark.asyncio
+async def test_communications_left_failed_by_the_llm_stage_make_the_run_exit_one(world):
+    vehicle = await world.vehicle()
+    comm = await world.comm(vehicle)
+    world.llm_fail = True
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None)
+
+    assert code == 1
+    assert (await world.comm_row(comm))["status"] == "failed"
+    final = await world.last_run("reextract")
+    assert final["ok"] is False
+    assert "llm failed=1" in final["error"]
+    assert "1 communications failed" in final["error"]
+    assert "1 documents without a summary" in final["error"]
+    counts = json.loads(final["counts"])
+    assert (counts["failed"], counts["without_summary"]) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_the_reset_requeues_a_network_failure_and_runs_the_stages(world):
+    vehicle = await world.vehicle()
+    kept = await world.comm(vehicle)
+    stranded = await world.comm(
+        vehicle, status="failed", summarised=False, reason="pdf unavailable: timed out"
+    )
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None, resume=True)
+
+    assert code == 0
+    assert await world.last_run("reextract-reset") is None, "a resume resets nothing"
+    kept_doc = (await world.doc_rows(kept))[0]
+    assert kept_doc["llm_summary"] == "summary"
+    assert kept_doc["embedding"] is not None
+    assert (await world.comm_row(kept))["status"] == "processed"
+    requeued = await world.comm_row(stranded)
+    assert (requeued["status"], requeued["status_reason"], requeued["attempts"]) == (
+        "processed",  # re-queued to pending, then read by the fake llm stage
+        None,
+        0,
+    )
+    assert (await world.doc_rows(stranded))[0]["llm_summary"] == "new"
+    assert [c[0] for c in world.calls] == ["extract", "llm", "embed", "prune"]
+    final = await world.last_run("reextract")
+    assert final["ok"] is True
+    assert json.loads(final["counts"])["requeued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_leaves_a_schema_violation_failed_and_exits_one(world):
+    vehicle = await world.vehicle()
+    violation = await world.comm(
+        vehicle, status="failed", summarised=False, reason="LLM schema violation: no remedy"
+    )
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None, resume=True)
+
+    assert code == 1
+    row = await world.comm_row(violation)
+    assert (row["status"], row["status_reason"], row["attempts"]) == (
+        "failed",
+        "LLM schema violation: no remedy",
+        2,
+    )
+    assert "llm" not in [c[0] for c in world.calls]
+    final = await world.last_run("reextract")
+    assert final["ok"] is False
+    assert "1 communications failed" in final["error"]
+    assert json.loads(final["counts"])["requeued"] == 0
+
+
+def test_resume_is_refused_without_reextract(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["process", "--resume", "--yes"])
+
+    with pytest.raises(SystemExit) as exc:
+        process.main()
+
+    assert exc.value.code == 2
+
+
+def _patch_batch_path(monkeypatch, world, *, per_doc_cost=0.001, collect_spend=0.0):
+    """Fake the Batch API calls and the price estimate; records how they were called."""
+    rec = SimpleNamespace(submits=[], collects=[])
+
+    async def cost_per_document():
+        return per_doc_cost
+
+    async def fake_submit(limit=None, vehicle_id=None):
+        rec.submits.append((limit, vehicle_id))
+        rows = await world.conn.fetch(
+            """
+            SELECT d.id, d.communication_id FROM comm_documents d
+            JOIN communications c ON c.id = d.communication_id
+            JOIN communication_vehicles cv ON cv.communication_id = c.id
+            WHERE cv.vehicle_id = $1 AND d.llm_summary IS NULL AND c.status = 'pending'
+            """,
+            vehicle_id,
+        )
+        for r in rows:  # the batch "ends" with every document read, as collect would store them
+            await world.conn.execute(
+                "UPDATE comm_documents SET llm_summary='new' WHERE id=$1", r["id"]
+            )
+            await world.conn.execute(
+                "UPDATE communications SET status='processed' WHERE id=$1", r["communication_id"]
+            )
+        return ["msgbatch_test"]
+
+    async def fake_collect(batch_ids, poll_seconds=30, max_wait=3600):
+        rec.collects.append((list(batch_ids), poll_seconds, max_wait))
+        if collect_spend:
+            await world.ledger(collect_spend)
+        return SimpleNamespace(
+            processed=0, failed=0, tokens_in=0, tokens_out=0, cost_usd=0.0, errors=[]
+        )
+
+    monkeypatch.setattr("src.refresh.estimate.cost_per_document", cost_per_document)
+    monkeypatch.setattr(llm_stage, "submit_batch", fake_submit)
+    monkeypatch.setattr(llm_stage, "collect_batch", fake_collect)
+    return rec
+
+
+@pytest.mark.asyncio
+async def test_the_batch_path_submits_everything_once_and_collects_with_a_24_hour_wait(
+    world, monkeypatch
+):
+    vehicle = await world.vehicle()
+    for _ in range(75):
+        await world.comm(vehicle, status="pending", summarised=False)
+    batch = _patch_batch_path(monkeypatch, world)
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=False, limit=None)
+
+    assert code == 0
+    assert batch.submits == [(None, vehicle)]
+    assert len(batch.collects) == 1
+    ids, poll_seconds, max_wait = batch.collects[0]
+    assert (ids, poll_seconds) == (["msgbatch_test"], 60)
+    assert max_wait >= 86400
+    assert "llm" not in [c[0] for c in world.calls], "no 50-document slices on the batch path"
+    assert [c[0] for c in world.calls] == ["extract", "embed", "prune"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_estimate_at_or_over_the_cap_stops_before_submitting(world, monkeypatch):
+    vehicle = await world.vehicle()
+    for _ in range(2):
+        await world.comm(vehicle, status="pending", summarised=False)
+    # 2 documents x $1.00 / 2 (batch pricing) = $1.00 estimate against a $1.00 cap
+    batch = _patch_batch_path(monkeypatch, world, per_doc_cost=1.0)
+
+    code = await process.reextract(vehicle, cap_usd=1.0, sync=False, limit=None)
+
+    assert code == 3
+    assert batch.submits == [] and batch.collects == []
+    assert await world.pending_docs(vehicle) == 2
+    final = await world.last_run("reextract")
+    assert final["ok"] is False
+    assert final["error"] == "cap reached"
+
+
+@pytest.mark.asyncio
+async def test_a_ledger_over_the_cap_after_the_batch_is_collected_exits_three(world, monkeypatch):
+    vehicle = await world.vehicle()
+    await world.comm(vehicle, status="pending", summarised=False)
+    batch = _patch_batch_path(monkeypatch, world, collect_spend=6.0)
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=False, limit=None)
+
+    assert code == 3
+    assert len(batch.collects) == 1
+    assert "embed" not in [c[0] for c in world.calls]
+    final = await world.last_run("reextract")
+    assert final["ok"] is False
+    assert final["error"] == "cap reached"

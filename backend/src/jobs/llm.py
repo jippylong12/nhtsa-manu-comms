@@ -801,6 +801,9 @@ def _batch_failure_detail(result: Any) -> str:
     return f": {detail}" if detail else ""
 
 
+BATCH_PROGRESS_LOG_SECONDS = 600  # at most one "still waiting" line per this many seconds
+
+
 async def collect_batch(
     batch_ids: list[str], poll_seconds: int = 30, max_wait: int = 3600
 ) -> LLMStats:
@@ -811,7 +814,9 @@ async def collect_batch(
 
     for batch_id in batch_ids:
         waited = 0
-        status = (await asyncio.to_thread(client.messages.batches.retrieve, batch_id)).processing_status
+        last_logged = 0
+        batch = await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
+        status = batch.processing_status
         while status != "ended":
             if waited >= max_wait:
                 log.warning(
@@ -820,9 +825,17 @@ async def collect_batch(
                 break
             await asyncio.sleep(poll_seconds)
             waited += poll_seconds
-            status = (
-                await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
-            ).processing_status
+            batch = await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
+            status = batch.processing_status
+            if status != "ended" and waited - last_logged >= BATCH_PROGRESS_LOG_SECONDS:
+                last_logged = waited
+                log.info(
+                    "waiting for batch %s: %s, %d min, counts %s",
+                    batch_id,
+                    status,
+                    waited // 60,
+                    getattr(batch, "request_counts", None),
+                )
         if status != "ended":
             continue
 

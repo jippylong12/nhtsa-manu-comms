@@ -482,3 +482,32 @@ async def test_promoting_a_catch_all_recall_is_classified_serious_and_a_tsb_keep
     tsb_state = await state(tsb)
     assert tsb_state["status"] == "processed"
     assert tsb_state["severity_source"] == "type"
+
+
+async def test_collect_batch_logs_progress_at_most_every_ten_minutes_while_waiting(
+    stage, monkeypatch, caplog
+):
+    import logging
+
+    async def no_sleep(seconds):
+        return None
+
+    monkeypatch.setattr(llm.asyncio, "sleep", no_sleep)
+    stage.client = FakeAnthropic(results=[])
+    polls = {"n": 0}
+
+    def retrieve(batch_id):
+        polls["n"] += 1  # the first call is the look before the loop; one poll = 60 s after it
+        status = "ended" if polls["n"] >= 26 else "in_progress"
+        return SimpleNamespace(
+            processing_status=status, request_counts=SimpleNamespace(processing=5, succeeded=0)
+        )
+
+    stage.client.messages.batches.retrieve = retrieve
+    caplog.set_level(logging.INFO, logger="llm")
+
+    await llm.collect_batch(["msgbatch_1"], poll_seconds=60, max_wait=3600)
+
+    lines = [r.getMessage() for r in caplog.records if "waiting for batch" in r.getMessage()]
+    assert len(lines) == 2, lines  # 25 minutes of polling: lines at 10 and 20 minutes
+    assert "msgbatch_1" in lines[0] and "in_progress" in lines[0] and "10 min" in lines[0]

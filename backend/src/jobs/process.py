@@ -13,6 +13,7 @@ Usage:
     python -m src.jobs.process --stage llm --sync --limit 20
     python -m src.jobs.process --collect <job-name> # collect a submitted batch
     python -m src.jobs.process --reextract [--vehicle N] [--cap-usd 5] [--sync] [--yes]
+    python -m src.jobs.process --reextract --resume [--vehicle N] [--cap-usd 5] [--yes]
 """
 
 import argparse
@@ -103,7 +104,10 @@ async def run_extract(
     return stats
 
 
-async def run_llm(limit: int | None, sync: bool, vehicle_id: int | None = None) -> None:
+async def run_llm(
+    limit: int | None, sync: bool, vehicle_id: int | None = None
+) -> Any:
+    """LLM stage. Returns the stage stats, or None when the batch path had nothing to submit."""
     if sync:
         stats = await llm_stage.run_sync(limit=limit, vehicle_id=vehicle_id)
         await record_run(
@@ -120,7 +124,7 @@ async def run_llm(limit: int | None, sync: bool, vehicle_id: int | None = None) 
             ok=stats.failed == 0,
             error="; ".join(stats.errors[:5]) or None,
         )
-        return
+        return stats
 
     names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
     if names:
@@ -135,9 +139,11 @@ async def run_llm(limit: int | None, sync: bool, vehicle_id: int | None = None) 
             ok=stats.failed == 0,
             error="; ".join(stats.errors[:5]) or None,
         )
+        return stats
+    return None
 
 
-async def run_embed(limit: int | None, vehicle_id: int | None = None) -> None:
+async def run_embed(limit: int | None, vehicle_id: int | None = None) -> Any:
     stats = await embed_stage.embed_pending(limit=limit, vehicle_id=vehicle_id)
     await record_run(
         "embed",
@@ -148,13 +154,22 @@ async def run_embed(limit: int | None, vehicle_id: int | None = None) -> None:
         ok=stats.failed == 0,
         error="; ".join(stats.errors[:5]) or None,
     )
+    return stats
 
 
 # Documents per LLM slice. The cap is checked between slices, so this bounds how far a run can
 # overshoot it (about $0.08 on the Batch path).
 REEXTRACT_SLICE = 50
 CAP_EXIT_CODE = 3
+# Anthropic's batch window is 24 hours; wait slightly longer so a batch that ends at the very
+# end of the window is still collected.
+BATCH_WAIT_SECONDS = 25 * 3600
+BATCH_POLL_SECONDS = 60
 _LEDGER_KINDS = "('llm_extract', 'embed')"
+
+# A stranded run leaves communications `failed` for transient reasons; --resume re-queues these
+# classes. `LLM schema violation` and `batch ` failures are deliberately not listed.
+_TRANSIENT_REASON_PATTERNS = ["pdf unavailable:%", "LLM call failed:%", "LLM stage error:%"]
 
 # The reset writes these back to NULL (or empty); `symptoms`, `systems` and `components` are
 # NOT NULL arrays, so they go to '{}'.
@@ -192,8 +207,10 @@ async def _awaiting_llm(conn: Any, vehicle_id: int | None) -> int:
     )
 
 
-async def _reextract_plan(vehicle_id: int | None, cap_usd: float) -> dict[str, Any]:
-    """What a reset would touch and what re-reading it should cost."""
+async def _reextract_plan(
+    vehicle_id: int | None, cap_usd: float, resume: bool = False
+) -> dict[str, Any]:
+    """What a reset would touch and what re-reading it should cost (a resume resets nothing)."""
     from src.refresh.estimate import cost_per_document
 
     pool = await get_pool()
@@ -212,24 +229,46 @@ async def _reextract_plan(vehicle_id: int | None, cap_usd: float) -> dict[str, A
               (SELECT count(*) FROM comm_documents d JOIN communications c
                     ON c.id = d.communication_id
                 WHERE d.llm_summary IS NULL AND c.status = 'pending'
-                  AND {vehicle_scope('$1')}) AS pending_documents
+                  AND {vehicle_scope('$1')}) AS pending_documents,
+              (SELECT count(*) FROM communications c
+                WHERE c.status = 'failed' AND c.status_reason LIKE ANY($3::text[])
+                  AND {vehicle_scope('$1')}) AS requeue_communications,
+              (SELECT count(*) FROM comm_documents d JOIN communications c
+                    ON c.id = d.communication_id
+                WHERE d.llm_summary IS NULL AND c.status = 'failed'
+                  AND c.status_reason LIKE ANY($3::text[])
+                  AND {vehicle_scope('$1')}) AS requeue_documents
             """,
             vehicle_id,
             SUMMARY_ONLY_REASON,
+            _TRANSIENT_REASON_PATTERNS,
         )
     plan = dict(row)
+    plan["resume"] = resume
+    if resume:
+        plan["communications"] = 0
+        plan["documents"] = 0
     per_doc = await cost_per_document()
-    plan["estimated_cost_usd"] = per_doc * (plan["documents"] + plan["pending_documents"])
+    plan["estimated_cost_usd"] = per_doc * (
+        plan["documents"]
+        + plan["pending_documents"]
+        + (plan["requeue_documents"] if resume else 0)
+    )
     plan["cap_usd"] = cap_usd
     return plan
 
 
 def _print_plan(plan: dict[str, Any], vehicle_id: int | None) -> None:
     scope = f"vehicle {vehicle_id}" if vehicle_id is not None else "all vehicles"
-    print(f"Re-extract plan ({scope}):")
-    print(f"  processed communications  {plan['communications']}")
-    print(f"  documents to reset        {plan['documents']}")
-    print(f"  pending documents         {plan['pending_documents']} (ride along)")
+    if plan.get("resume"):
+        print(f"Re-extract resume plan ({scope}; no reset):")
+        print(f"  network-failed to re-queue {plan['requeue_communications']}")
+        print(f"  pending documents         {plan['pending_documents']}")
+    else:
+        print(f"Re-extract plan ({scope}):")
+        print(f"  processed communications  {plan['communications']}")
+        print(f"  documents to reset        {plan['documents']}")
+        print(f"  pending documents         {plan['pending_documents']} (ride along)")
     print(f"  estimated cost            ${plan['estimated_cost_usd']:.2f}")
     print(f"  spend cap                 ${plan['cap_usd']:.2f}")
 
@@ -273,57 +312,179 @@ async def _reset_for_reextract(vehicle_id: int | None) -> dict[str, int]:
     return {"communications": len(comms), "documents": len(docs)}
 
 
+async def _requeue_transient_failures(vehicle_id: int | None) -> int:
+    """Return communications that failed on a network-class error to `pending`."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            UPDATE communications c SET status = 'pending', status_reason = NULL, attempts = 0
+            WHERE c.status = 'failed' AND c.status_reason LIKE ANY($2::text[])
+              AND {vehicle_scope('$1')}
+            RETURNING c.id
+            """,
+            vehicle_id,
+            _TRANSIENT_REASON_PATTERNS,
+        )
+    return len(rows)
+
+
+async def _unfinished_counts(conn: Any, vehicle_id: int | None) -> dict[str, int]:
+    """Post-run state of the in-scope communications (summary-only rows excluded)."""
+    scope = (
+        "c.status IN ('processed', 'pending', 'failed') "
+        f"AND c.status_reason IS DISTINCT FROM $2 AND {vehicle_scope('$1')}"
+    )
+    row = await conn.fetchrow(
+        f"""
+        SELECT
+          (SELECT count(*) FROM communications c
+            WHERE c.status = 'failed' AND {scope}) AS failed_communications,
+          (SELECT count(*) FROM comm_documents d JOIN communications c
+                ON c.id = d.communication_id
+            WHERE d.llm_summary IS NULL AND {scope}) AS without_summary,
+          (SELECT count(*) FROM comm_documents d JOIN communications c
+                ON c.id = d.communication_id
+            WHERE d.llm_summary IS NOT NULL AND d.embedding IS NULL AND {scope}) AS unembedded
+        """,
+        vehicle_id,
+        SUMMARY_ONLY_REASON,
+    )
+    return {k: int(v) for k, v in dict(row).items()}
+
+
+async def _batch_llm_once(
+    vehicle_id: int | None, cap_usd: float, started_at: Any
+) -> tuple[str | None, int]:
+    """Batch path: one estimate check, ONE submission of everything pending, one collection.
+
+    Slicing would queue each slice behind Anthropic's batch queue in turn and collect_batch
+    abandons a batch after its wait, so the whole backlog goes up at once. Returns the error
+    (None when done, "cap reached" or "no progress") and the number of failed documents.
+    """
+    from src.refresh.estimate import cost_per_document
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        remaining = await _awaiting_llm(conn, vehicle_id)
+        if remaining == 0:
+            return None, 0
+        estimate = await cost_per_document() * remaining / 2  # Batch API is half price
+        if estimate >= cap_usd:
+            log.warning(
+                "cap reached: estimate $%.2f for %d documents is not under the $%.2f cap; "
+                "nothing submitted",
+                estimate,
+                remaining,
+                cap_usd,
+            )
+            return "cap reached", 0
+
+    ids = await llm_stage.submit_batch(limit=None, vehicle_id=vehicle_id)
+    failed = 0
+    if ids:
+        log.info(
+            "SUBMITTED %d batch job(s): %s -- if this session is lost, finish with: "
+            "python -m src.jobs.process --collect %s",
+            len(ids),
+            ", ".join(ids),
+            " --collect ".join(ids),
+        )
+        stats = await llm_stage.collect_batch(
+            ids, poll_seconds=BATCH_POLL_SECONDS, max_wait=BATCH_WAIT_SECONDS
+        )
+        failed = stats.failed
+        await record_run(
+            "llm",
+            {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": ids},
+            stats.tokens_in,
+            stats.tokens_out,
+            stats.cost_usd,
+            ok=stats.failed == 0,
+            error="; ".join(stats.errors[:5]) or None,
+        )
+    async with pool.acquire() as conn:
+        spent = await _spent_since(conn, started_at)
+        left = await _awaiting_llm(conn, vehicle_id)
+    if spent >= cap_usd:
+        log.warning("cap reached: $%.2f of $%.2f after the batch", spent, cap_usd)
+        return "cap reached", failed
+    if left >= remaining:
+        log.warning("batch made no progress; %d documents left pending", remaining)
+        return "no progress", failed
+    return None, failed
+
+
 async def reextract(
     vehicle_id: int | None,
     cap_usd: float,
     sync: bool,
     limit: int | None,
     confirm: Callable[[], bool] | None = None,
+    resume: bool = False,
 ) -> int:
     """Re-read a corpus under the current model and schema, refusing to overspend.
 
-    Returns the process exit code: 0 done, 1 declined at the prompt, 3 cap reached. `confirm`
-    is asked after the plan prints; None proceeds (the CLI passes a stdin prompt unless --yes).
+    Returns the process exit code: 0 clean, 1 declined at the prompt or any failure or
+    stranded rows (a stage reported failures, or in-scope communications are left `failed`,
+    without a summary or without an embedding), 3 cap reached. `confirm` is asked after the plan
+    prints; None proceeds (the CLI passes a stdin prompt unless --yes).
+
+    `resume` skips the reset and finishes a stranded run over whatever is `pending`, first
+    re-queueing communications that failed on a network-class error.
     """
     assert SEVERITY_BY_TYPE  # the reset leans on the type mapping; fail loudly if it is empty
-    plan = await _reextract_plan(vehicle_id, cap_usd)
+    plan = await _reextract_plan(vehicle_id, cap_usd, resume)
     _print_plan(plan, vehicle_id)
     if confirm is not None and not confirm():
         print("Aborted; nothing was changed.")
         return 1
 
-    reset = await _reset_for_reextract(vehicle_id)
-    await record_run("reextract-reset", {**reset, "vehicle": vehicle_id})
+    if resume:
+        requeued = await _requeue_transient_failures(vehicle_id)
+        print(f"Re-queued {requeued} communication(s) that failed on a network error.")
+        reset = {"communications": 0, "documents": 0, "requeued": requeued}
+    else:
+        reset = await _reset_for_reextract(vehicle_id)
+        await record_run("reextract-reset", {**reset, "vehicle": vehicle_id})
     pool = await get_pool()
     async with pool.acquire() as conn:
         started_at = await conn.fetchval("SELECT now()")
 
-    await run_extract(limit, vehicle_id)
+    stage_failed = {"extract": 0, "llm": 0, "embed": 0}
+    extract_stats = await run_extract(limit, vehicle_id)
+    stage_failed["extract"] += int(getattr(extract_stats, "failed", 0) or 0)
 
     error: Optional[str] = None
-    async with pool.acquire() as conn:
-        while True:
-            remaining = await _awaiting_llm(conn, vehicle_id)
-            if remaining == 0:
-                break
-            spent = await _spent_since(conn, started_at)
-            if spent >= cap_usd:
-                error = "cap reached"
-                log.warning(
-                    "cap reached: $%.2f of $%.2f; %d documents left pending",
-                    spent,
-                    cap_usd,
-                    remaining,
-                )
-                break
-            await run_llm(REEXTRACT_SLICE, sync, vehicle_id)
-            if await _awaiting_llm(conn, vehicle_id) >= remaining:
-                error = "no progress"  # failures or an empty batch; looping would never end
-                log.warning("llm slice made no progress; %d documents left pending", remaining)
-                break
+    if not sync:
+        error, llm_failed = await _batch_llm_once(vehicle_id, cap_usd, started_at)
+        stage_failed["llm"] += llm_failed
+    else:
+        async with pool.acquire() as conn:
+            while True:
+                remaining = await _awaiting_llm(conn, vehicle_id)
+                if remaining == 0:
+                    break
+                spent = await _spent_since(conn, started_at)
+                if spent >= cap_usd:
+                    error = "cap reached"
+                    log.warning(
+                        "cap reached: $%.2f of $%.2f; %d documents left pending",
+                        spent,
+                        cap_usd,
+                        remaining,
+                    )
+                    break
+                llm_stats = await run_llm(REEXTRACT_SLICE, sync, vehicle_id)
+                stage_failed["llm"] += int(getattr(llm_stats, "failed", 0) or 0)
+                if await _awaiting_llm(conn, vehicle_id) >= remaining:
+                    error = "no progress"  # failures or an empty batch; looping would never end
+                    log.warning("llm slice made no progress; %d documents left pending", remaining)
+                    break
 
     if error is None:
-        await run_embed(None, vehicle_id)
+        embed_stats = await run_embed(None, vehicle_id)
+        stage_failed["embed"] += int(getattr(embed_stats, "failed", 0) or 0)
         await extract_stage.prune_archive()
 
     async with pool.acquire() as conn:
@@ -337,9 +498,38 @@ async def reextract(
             started_at,
         )
         left = await _awaiting_llm(conn, vehicle_id)
+        unfinished = await _unfinished_counts(conn, vehicle_id)
+
+    # A network drop strands rows instead of raising, so success is judged on the end state,
+    # not on the stages having returned.
+    problems: list[str] = []
+    if error not in (None, "cap reached"):
+        problems.append(error)
+    for stage, count in stage_failed.items():
+        if count:
+            problems.append(f"{stage} failed={count}")
+    if unfinished["failed_communications"]:
+        problems.append(f"{unfinished['failed_communications']} communications failed")
+    if unfinished["without_summary"]:
+        problems.append(f"{unfinished['without_summary']} documents without a summary")
+    if unfinished["unembedded"]:
+        problems.append(f"{unfinished['unembedded']} documents without an embedding")
+    if error != "cap reached" and problems:
+        error = "; ".join(problems)
+        log.error("re-extract finished with failures: %s", error)
+
     await record_run(
         "reextract",
-        {**reset, "left_pending": left, "vehicle": vehicle_id, "cap_usd": cap_usd},
+        {
+            **reset,
+            "left_pending": left,
+            "vehicle": vehicle_id,
+            "cap_usd": cap_usd,
+            "failed": unfinished["failed_communications"],
+            "without_summary": unfinished["without_summary"],
+            "unembedded": unfinished["unembedded"],
+            "stage_failures": stage_failed,
+        },
         int(totals["tokens_in"]),
         int(totals["tokens_out"]),
         float(totals["cost_usd"]),
@@ -372,6 +562,14 @@ def main() -> int:
     )
     parser.add_argument("--yes", action="store_true", help="with --reextract, skip the prompt")
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "with --reextract, skip the reset and finish a stranded run over whatever is "
+            "pending (also re-queues communications that failed on a network error)"
+        ),
+    )
+    parser.add_argument(
         "--prune-archive",
         action="store_true",
         help="delete archived PDFs for documents already summarised",
@@ -381,6 +579,8 @@ def main() -> int:
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+    if args.resume and not args.reextract:
+        parser.error("--resume only applies with --reextract")
     if args.reextract and args.limit:
         # The reset always covers the whole scope; --limit would only reach the extract
         # stage, so `--reextract --limit 5` would still clear and re-read every document.
@@ -406,7 +606,9 @@ def main() -> int:
                     if args.yes
                     else (lambda: input("Proceed? [y/N] ").strip().lower() in ("y", "yes"))
                 )
-                return await reextract(args.vehicle, args.cap_usd, args.sync, args.limit, confirm)
+                return await reextract(
+                    args.vehicle, args.cap_usd, args.sync, args.limit, confirm, args.resume
+                )
             if args.collect:
                 await llm_stage.collect_batch(args.collect)
                 return 0
