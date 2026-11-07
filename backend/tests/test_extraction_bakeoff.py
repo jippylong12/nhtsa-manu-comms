@@ -496,6 +496,35 @@ async def test_collect_turns_a_gemini_job_into_results_and_usage(harness):
     assert all(u["batch"] is True and u["meta"]["bakeoff"] == "G" for u in harness.usage)
 
 
+async def test_collect_survives_line_separator_characters_inside_a_document_and_a_truncated_response(
+    harness,
+):
+    async def texts(doc_ids):
+        return {i: f"Step one\x85step two\u2028step three {i}." for i in doc_ids}
+
+    harness.monkeypatch.setattr(eb, "_fetch_texts", texts)
+    odd = dict(GOOD, summary="Latch\x85fails\u2028often.")
+    gemini = FakeGemini(
+        responses=[
+            _gemini_item(1, json.dumps(odd, ensure_ascii=False)),
+            _gemini_item(2, '{"summary": "Rear hatch may not cl', tin=1300, tout=8192),
+            _gemini_item(3, json.dumps(GOOD)),
+        ]
+    )
+    harness.use(gemini_client=gemini)
+    await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
+
+    report = await eb.collect(harness.run_dir)
+
+    assert report["G"] == "collected 3 (2 valid)"
+    lines = {r["doc_id"]: r for r in eb._read_jsonl(harness.run_dir / "G" / "results.jsonl")}
+    assert lines[1]["valid"] is True and lines[1]["output"]["summary"] == odd["summary"]
+    assert lines[2]["valid"] is False and "invalid JSON" in lines[2]["error"]
+    assert lines[2]["tokens_out"] == 8192
+    assert len(harness.usage) == 3
+    assert "collected 3 (2 valid)" in eb.status(harness.run_dir, harness.sample_path)
+
+
 async def test_a_pdf_that_nhtsa_no_longer_serves_is_recorded_not_requested(harness):
     async def pdfs(sample):
         ok = base64.standard_b64encode(b"%PDF-1.4 x").decode()

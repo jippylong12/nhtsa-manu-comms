@@ -619,7 +619,9 @@ def _read_json(path: pathlib.Path) -> Any:
 
 
 def _read_jsonl(path: pathlib.Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    # Split on "\n" only: str.splitlines() also breaks on U+0085, U+2028 and other
+    # separators that json.dumps(ensure_ascii=False) leaves raw inside a string.
+    return [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
 
 
 def _write_jsonl(path: pathlib.Path, rows: Iterable[dict]) -> None:
