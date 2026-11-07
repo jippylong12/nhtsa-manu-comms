@@ -1,0 +1,25 @@
+.page {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-md);
+}
+
+.heading {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.lead {
+  margin: 0 0 var(--space-lg);
+  color: var(--text-secondary);
+}
+
+.placeholder {
+  padding: var(--space-xl) var(--space-md);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--text-muted);
+}

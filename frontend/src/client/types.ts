@@ -334,3 +334,21 @@ export interface SymptomSearchResponse {
     cost: QueryCost;
 }
 
+
+// --- Me ---
+
+export interface Entitlement {
+    kind: 'unlock' | 'subscription';
+    vehicleId: number | null;
+    status: 'active' | 'canceled' | 'past_due';
+    currentPeriodEnd: string | null;
+}
+
+export interface Me {
+    id: number;
+    email: string;
+    displayName: string | null;
+    isAdmin: boolean;
+    entitlements: Entitlement[];
+    vehicles: Vehicle[];
+}

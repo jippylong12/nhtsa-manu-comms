@@ -1,19 +1,19 @@
 """Read API over the cost ledger.
 
-`GET /api/admin/usage` is unauthenticated for now because the deployment is
-single-tenant, but it is namespaced under /admin so Phase C can put the whole
-prefix behind auth in one place rather than hunting for endpoints.
+`GET /api/admin/usage` is admin only (JIP-1582).
 """
 
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from src.auth.deps import admin_user
 
 from src.usage import ledger
 from src.usage.schemas import UsageSummary
 
-router = APIRouter(prefix="/admin", tags=["Usage"])
+router = APIRouter(prefix="/admin", tags=["Usage"], dependencies=[Depends(admin_user)])
 
 
 @router.get(

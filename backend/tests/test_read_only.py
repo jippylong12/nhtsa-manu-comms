@@ -1,9 +1,11 @@
 """Read-only mode: the early deploy cannot spend money or change data (JIP-1595)."""
 
+import asyncpg
 import httpx
 import pytest_asyncio
 
-from src.config import Settings
+from src.auth import firebase
+from src.config import Settings, get_settings
 from src.main import create_app
 
 
@@ -41,7 +43,25 @@ async def test_read_only_keeps_reads_and_reports_the_flag(read_only_client):
     assert health["status"] == "healthy"
 
 
-async def test_writable_mode_behaves_as_before(writable_client):
+async def test_writable_mode_behaves_as_before(writable_client, monkeypatch):
+    # The write routes need an admin now; fake only the Firebase boundary.
+    uid = "TESTGATE-readonly-admin"
+    monkeypatch.setenv("ADMIN_FIREBASE_UIDS", uid)
+    get_settings.cache_clear()
+    monkeypatch.setattr(firebase, "verify", lambda token: {"uid": uid, "email": "a@b.c"})
+    writable_client.headers["Authorization"] = "Bearer admin"
+    try:
+        await _writable_mode_behaves_as_before(writable_client)
+    finally:
+        conn = await asyncpg.connect(get_settings().database_url)
+        try:
+            await conn.execute("DELETE FROM users WHERE firebase_uid = $1", uid)
+        finally:
+            await conn.close()
+        get_settings.cache_clear()
+
+
+async def _writable_mode_behaves_as_before(writable_client):
     assert (await writable_client.get("/api/vehicles")).status_code == 200
     assert (await writable_client.get("/api/admin/usage")).status_code == 200
     assert (await writable_client.get("/api/health")).json()["readOnly"] is False

@@ -12,12 +12,14 @@ stale or empty page.
 """
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+
+from src.auth.deps import admin_user
 
 from src.refresh import service
 from src.refresh.schemas import RefreshPreview, RefreshRun
 
-router = APIRouter(prefix="/refresh", tags=["Refresh"])
+router = APIRouter(prefix="/refresh", tags=["Refresh"], dependencies=[Depends(admin_user)])
 
 
 @router.get(

@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
+from src.auth import firebase
 from src.communications import flatfile
 from src.config import get_settings
 from src.jobs import repository as repo
@@ -28,8 +29,30 @@ _app = FastAPI()
 _app.include_router(vehicles_router.router, prefix="/api")
 
 
+ADMIN_UID = "TESTGATE-registration-admin"
+
+
 def _http() -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://test")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app),
+        base_url="http://test",
+        headers={"Authorization": "Bearer admin"},
+    )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def signed_in_admin(monkeypatch):
+    """The write routes need an admin; fake only the Firebase boundary."""
+    monkeypatch.setenv("ADMIN_FIREBASE_UIDS", ADMIN_UID)
+    get_settings.cache_clear()
+    monkeypatch.setattr(firebase, "verify", lambda token: {"uid": ADMIN_UID, "email": "a@b.c"})
+    yield
+    conn = await asyncpg.connect(get_settings().database_url)
+    try:
+        await conn.execute("DELETE FROM users WHERE firebase_uid = $1", ADMIN_UID)
+    finally:
+        await conn.close()
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
