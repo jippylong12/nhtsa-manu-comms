@@ -154,7 +154,7 @@ so a new call site cannot reintroduce the unbounded case by omission.
 
 ## Experiment spend
 
-Spend on a one-off experiment is marked with `usage_events.meta->>'bakeoff'`, so it can be totalled apart from production. The extraction bake-off (`src/eval/extraction_bakeoff.py`, scored by `src/eval/bakeoff_score.py`) writes `meta.bakeoff` as the arm name (`G`, `H-text`, `H-pdf`, `H-text-live`, `H-pdf-live`, `S-text`, `S-pdf`, and the three PDF arms `GL-pdf-high`, `GF-pdf-low`, `H-pdf-high`) for each arm's responses and as `judge` (five-way) or `judge-pdf6` (six-way, reads the PDF) for the Opus judge's calls, with `meta.run` naming the run directory. Rows keep an ordinary `kind` (`llm_extract`), so the kind breakdown above still adds up; to total only the experiment, filter on the marker:
+Spend on a one-off experiment is marked with `usage_events.meta->>'bakeoff'`, so it can be totalled apart from production. The extraction bake-off (`src/eval/extraction_bakeoff.py`, scored by `src/eval/bakeoff_score.py`) writes `meta.bakeoff` as the arm name (`G`, `H-text`, `H-pdf`, `H-text-live`, `H-pdf-live`, `S-text`, `S-pdf`, the three PDF arms `GL-pdf-high`, `GF-pdf-low`, `H-pdf-high`, and the Haiku effort arms `H-pdf-xhigh`, `H-pdf-max`) for each arm's responses and as `judge` (five-way) or `judge-pdf6` (six-way, reads the PDF) for the Opus judge's calls, with `meta.run` naming the run directory. Rows keep an ordinary `kind` (`llm_extract`), so the kind breakdown above still adds up; to total only the experiment, filter on the marker:
 
 ```sql
 SELECT meta->>'bakeoff'        AS arm,

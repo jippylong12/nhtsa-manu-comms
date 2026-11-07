@@ -1146,3 +1146,89 @@ async def test_the_summary_is_plain_text_tables_with_both_gemini_prices_and_no_h
     assert "(the judge's letters: A=" in text.split("EXAMPLES")[1], "judge text maps back to arms"
     assert not (run / "report.html").exists() and not (run / "report.md").exists()
     assert report.main(["--run-dir", str(run), "--pdf6"]) == 0
+
+
+# --------------------------------------------------------------------------- effort arms
+
+
+def test_a_reference_arm_replaces_the_stored_output_as_what_agreement_is_measured_against(
+    tmp_path,
+):
+    ref = _out(symptoms=["engine stalls"], remedy="Replace the pump")
+    same = _out(symptoms=["engine stalls"], remedy="Replace the pump")
+    other = _out(symptoms=["no crank"], remedy="Reflash the module")
+    _write_arm(tmp_path, "S-pdf", [_line("S-pdf", 1, ref), _line("S-pdf", 2, ref)])
+    _write_arm(
+        tmp_path, "H-pdf-high", [_line("H-pdf-high", 1, same), _line("H-pdf-high", 2, other)]
+    )
+    _write_arm(tmp_path, "H-pdf-max", [_line("H-pdf-max", 1, same), _line("H-pdf-max", 3, other)])
+    _write_reference(tmp_path, [1, 2, 3])
+
+    score = bs.score_run(tmp_path, ["S-pdf", "H-pdf-high", "H-pdf-max"], reference_arm="S-pdf")
+
+    arms = score["arms"]
+    assert score["reference_arm"] == "S-pdf" and "vs_reference" not in arms["S-pdf"]
+    high = arms["H-pdf-high"]["vs_reference"]
+    assert high["n"] == 2 and high["symptoms"] == pytest.approx(0.5)
+    assert high["remedy"] == pytest.approx((1 + bs.token_f1(ref["remedy"], other["remedy"])) / 2)
+    # doc 3 has no reference output, so only doc 1 counts for H-pdf-max
+    assert arms["H-pdf-max"]["vs_reference"]["n"] == 1
+    assert arms["H-pdf-max"]["vs_reference"]["symptoms"] == 1.0
+    # without the option nothing changes
+    assert "vs_reference" not in bs.score_run(tmp_path, ["S-pdf", "H-pdf-high"])["arms"]["S-pdf"]
+
+
+def test_mean_latency_is_reported_when_the_result_lines_record_it_and_none_otherwise(tmp_path):
+    timed = [{**_line("H-pdf-xhigh", i, _out()), "latency_s": s} for i, s in ((1, 10.0), (2, 20.0))]
+    _write_arm(tmp_path, "H-pdf-xhigh", timed)
+    _write_arm(tmp_path, "H-pdf-high", [_line("H-pdf-high", 1, _out())])
+    _write_reference(tmp_path, [1, 2])
+
+    arms = bs.score_run(tmp_path, ["H-pdf-xhigh", "H-pdf-high"])["arms"]
+
+    assert arms["H-pdf-xhigh"]["latency_mean_s"] == pytest.approx(15.0)
+    assert arms["H-pdf-high"]["latency_mean_s"] is None
+
+
+def test_hard_documents_can_be_picked_by_every_compared_field_not_just_symptoms_and_remedy():
+    base = _out()
+    by_doc = {
+        1: {"a": base, "b": _out(summary="Completely different words here"), "c": base},
+        2: {"a": base, "b": base, "c": base},
+        3: {"a": base, "b": _out(symptoms=["no crank"]), "c": base},
+    }
+
+    default_hard, _ = bs.select_judge_docs(by_doc, n_hard=1, n_random=0, min_valid=3)
+    all_hard, _ = bs.select_judge_docs(
+        by_doc, n_hard=1, n_random=0, min_valid=3, gap_fields=bs.ALL_GAP_FIELDS
+    )
+
+    assert default_hard == [3], "summary is invisible to the default gap"
+    assert all_hard == [1], "summary now counts, and ties break on the lower id"
+    assert bs.disagreement(by_doc[1]) == 0.0
+    assert bs.disagreement(by_doc[1], bs.ALL_GAP_FIELDS) > 0.0
+
+
+def test_score_cli_writes_to_score_out_and_restricts_to_the_subset(tmp_path, monkeypatch, capsys):
+    run = tmp_path / "run"
+    run.mkdir()
+    _write_arm(run, "S-pdf", [_line("S-pdf", i, _out()) for i in (1, 2, 3)])
+    _write_arm(run, "H-pdf-max", [_line("H-pdf-max", i, _out()) for i in (1, 2, 3)])
+    _write_reference(run, [1, 2, 3])
+    (run / "score.json").write_text("untouched")
+    subset = tmp_path / "subset.json"
+    subset.write_text(json.dumps([{"doc_id": 1}, {"doc_id": 2}]))
+    monkeypatch.setattr(bs.eb, "SONNET_SAMPLE_PATH", subset)
+    out = tmp_path / "effort-score.json"
+
+    code = bs.main(
+        ["--run-dir", str(run), "--arms", "S-pdf,H-pdf-max", "--subset"]
+        + ["--reference-arm", "S-pdf", "--score-out", str(out)]
+    )
+
+    assert code == 0
+    assert (run / "score.json").read_text() == "untouched"
+    score = json.loads(out.read_text())
+    assert score["arms"]["H-pdf-max"]["n"] == 2
+    assert score["arms"]["H-pdf-max"]["vs_reference"]["symptoms"] == 1.0
+    assert bs.main(["--run-dir", str(run), "--arms", "S-pdf", "--reference-arm", "nope"]) == 2

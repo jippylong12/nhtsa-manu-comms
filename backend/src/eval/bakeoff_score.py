@@ -281,11 +281,16 @@ def _wall_seconds(run_dir: pathlib.Path, arm: str, rows: list[dict]) -> Optional
     return _seconds_between(submitted, finished)
 
 
-def disagreement(outputs: dict[str, dict]) -> Optional[float]:
-    """How much the arms' outputs for one document differ on symptoms and remedy.
+GAP_FIELDS = ("symptoms", "remedy")
+ALL_GAP_FIELDS = (*SET_FIELDS, "doc_kind", *TEXT_FIELDS)  # every field compare_outputs scores
 
-    Mean over arm pairs of ``1 - (jaccard(symptoms) + f1(remedy)) / 2``; ``None``
-    when fewer than two arms have an output.
+
+def disagreement(outputs: dict[str, dict], fields: tuple[str, ...] = GAP_FIELDS) -> Optional[float]:
+    """How much the arms' outputs for one document differ on ``fields`` (default symptoms
+    and remedy).
+
+    Mean over arm pairs of ``1 - mean(agreement over fields)``; ``None`` when fewer than two
+    arms have an output.
     """
     arms = sorted(outputs)
     pairs = [(a, b) for i, a in enumerate(arms) for b in arms[i + 1 :]]
@@ -294,7 +299,7 @@ def disagreement(outputs: dict[str, dict]) -> Optional[float]:
     gaps = []
     for a, b in pairs:
         c = compare_outputs(outputs[a], outputs[b])
-        gaps.append(1.0 - (c["symptoms"] + c["remedy"]) / 2)
+        gaps.append(1.0 - sum(c[f] for f in fields) / len(fields))
     return sum(gaps) / len(gaps)
 
 
@@ -312,8 +317,13 @@ def score_run(
     run_dir: pathlib.Path,
     arms: Optional[Iterable[str]] = None,
     doc_ids: Optional[Iterable[int]] = None,
+    reference_arm: Optional[str] = None,
 ) -> dict[str, Any]:
     """Every objective metric for the arms that have results. Pure: writes nothing.
+
+    With ``reference_arm`` each other arm also gets ``vs_reference``: agreement with that
+    arm's valid output on the documents both have (the same metric as ``vs_stored``, with
+    the reference arm's output standing in for the stored one).
 
     Per-arm figures are over that arm's own documents (or only ``doc_ids``, when given, so
     arms that ran different numbers of documents compare on the same ones); ``pairwise``
@@ -346,6 +356,21 @@ def score_run(
             for r in valid
             if reference.get(r["doc_id"])
         ]
+        ref_by_doc = {
+            r["doc_id"]: r["output"]
+            for r in (results.get(reference_arm) or [])
+            if r.get("valid") and r.get("output")
+        }
+        vs_reference = (
+            [
+                compare_outputs(r["output"], ref_by_doc[r["doc_id"]])
+                for r in valid
+                if r["doc_id"] in ref_by_doc
+            ]
+            if reference_arm and arm != reference_arm
+            else None
+        )
+        latencies = [r["latency_s"] for r in rows if r.get("latency_s") is not None]
         usd = sum(r.get("cost_usd") or 0.0 for r in rows)
         billed = sum(1 for r in rows if (r.get("cost_usd") or 0.0) > 0)
         per_1000 = usd / billed * 1000 if billed else None
@@ -359,6 +384,8 @@ def score_run(
             "validity": len(valid) / n if n else None,
             "empty_rates": _empty_rates([r["output"] for r in valid]),
             "vs_stored": _mean_metrics(vs_stored),
+            **({"vs_reference": _mean_metrics(vs_reference)} if vs_reference is not None else {}),
+            "latency_mean_s": _mean(latencies),  # None: the arm did not record per-call time
             "applicability": {
                 k: _mean([x[k] for x in recalls if x[k] is not None])
                 for k in ("recall", "year_recall", "model_recall")
@@ -398,6 +425,7 @@ def score_run(
     gaps = {d: disagreement(o) for d, o in by_doc.items()}
     return {
         "run": str(run_dir),
+        "reference_arm": reference_arm,
         "arms_present": names,
         "arms_missing": [a for a in wanted if a not in results],
         # The canceled batch arms, named so a reader knows where they went.
@@ -521,6 +549,7 @@ def select_judge_docs(
     seed: int = eb.SEED,
     restrict_to: Optional[set[int]] = None,
     min_valid: int = 2,
+    gap_fields: tuple[str, ...] = GAP_FIELDS,
 ) -> tuple[list[int], list[int]]:
     """``(hard, random)`` document ids. Eligible documents have ``min_valid`` (default two)
     or more valid outputs and, when ``restrict_to`` is given, are in it (the Sonnet subset,
@@ -530,7 +559,7 @@ def select_judge_docs(
     is a seeded draw of ``n_random`` from the rest.
     """
     gaps = {
-        d: disagreement(o)
+        d: disagreement(o, gap_fields)
         for d, o in by_doc.items()
         if len(o) >= max(min_valid, 2) and (restrict_to is None or d in restrict_to)
     }
@@ -1029,6 +1058,7 @@ def plan_pdf6(
     arms: Optional[Iterable[str]] = None,
     min_valid: int = PDF6_MIN_VALID,
     sample_path: Optional[pathlib.Path] = None,
+    gap_fields: tuple[str, ...] = GAP_FIELDS,
 ) -> PdfJudgePlan:
     """Which documents the six-way judge will read, with the label shuffle for each and a
     cost estimate that assumes the PDF is sent for every one. Calls nothing.
@@ -1045,7 +1075,13 @@ def plan_pdf6(
     reference = load_reference(run_dir)
     by_doc = {d: o for d, o in valid_outputs_by_doc(results).items() if d in reference}
     hard, rand = select_judge_docs(
-        by_doc, n_hard, n_random, seed, restrict_to=sonnet_doc_ids(), min_valid=min_valid
+        by_doc,
+        n_hard,
+        n_random,
+        seed,
+        restrict_to=sonnet_doc_ids(),
+        min_valid=min_valid,
+        gap_fields=gap_fields,
     )
     stratum = {**{d: "random" for d in rand}, **{d: "hard" for d in hard}}
     meta = {int(e["doc_id"]): e for e in eb.load_sample(sample_path or eb.SAMPLE_PATH)}
@@ -1118,6 +1154,7 @@ async def run_judge_pdf6(
     arms: Optional[Iterable[str]] = None,
     min_valid: int = PDF6_MIN_VALID,
     sample_path: Optional[pathlib.Path] = None,
+    gap_fields: tuple[str, ...] = GAP_FIELDS,
 ) -> dict[str, Any]:
     """Judge the selected documents blind, reading the PDF, into ``out_dir`` (default
     ``run_dir/judge-pdf6``): ``judge.jsonl``, ``judge_labels.json``. Nothing in ``run_dir``
@@ -1130,7 +1167,9 @@ async def run_judge_pdf6(
     excerpt, and each line records which source it used.
     """
     run_dir = pathlib.Path(run_dir)
-    plan = plan_pdf6(run_dir, out_dir, n_hard, n_random, seed, arms, min_valid, sample_path)
+    plan = plan_pdf6(
+        run_dir, out_dir, n_hard, n_random, seed, arms, min_valid, sample_path, gap_fields
+    )
     out_dir = plan.out_dir
     spent = plan.spent
     if spent + plan.estimate > eb.CAP_USD:
@@ -1384,6 +1423,28 @@ def _parser() -> argparse.ArgumentParser:
         help="with --judge-pdf: valid outputs a document needs among the arms",
     )
     p.add_argument("--seed", type=int, default=eb.SEED, help="judge: seed for the draw and labels")
+    p.add_argument(
+        "--gap-fields",
+        choices=("default", "all"),
+        default="default",
+        help="with --judge-pdf: pick the hard documents by symptoms+remedy (default) or by "
+        "every compared field",
+    )
+    p.add_argument(
+        "--reference-arm",
+        metavar="ARM",
+        help="scoring: also report each arm's agreement with this arm's valid output",
+    )
+    p.add_argument(
+        "--subset",
+        action="store_true",
+        help="scoring: only the documents of the 100-document Sonnet subset",
+    )
+    p.add_argument(
+        "--score-out",
+        type=pathlib.Path,
+        help="scoring: write the score here instead of RUN/score.json (which is left alone)",
+    )
     return p
 
 
@@ -1404,15 +1465,30 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return 2
             asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference, arms=arms))
             out_dir = run_dir / (args.judge_dir or PDF6_DIR)
+            gap = ALL_GAP_FIELDS if args.gap_fields == "all" else GAP_FIELDS
             plan = plan_pdf6(
-                run_dir, out_dir, args.n_hard, args.n_random, args.seed, arms, args.min_valid
+                run_dir,
+                out_dir,
+                args.n_hard,
+                args.n_random,
+                args.seed,
+                arms,
+                args.min_valid,
+                gap_fields=gap,
             )
             print(format_pdf6_plan(plan))
             if args.estimate:
                 return 0
             out = asyncio.run(
                 run_judge_pdf6(
-                    run_dir, out_dir, args.n_hard, args.n_random, args.seed, arms, args.min_valid
+                    run_dir,
+                    out_dir,
+                    args.n_hard,
+                    args.n_random,
+                    args.seed,
+                    arms,
+                    args.min_valid,
+                    gap_fields=gap,
                 )
             )
             print(f"judged {out['judged']} document(s) (estimate ${out['estimate_usd']:.4f})")
@@ -1442,8 +1518,17 @@ def main(argv: Optional[list[str]] = None) -> int:
                 )
             print(json.dumps(summarize_judge(run_dir, arms), indent=1))
             return 0
-        score = score_run(run_dir, arms)
-        (run_dir / "score.json").write_text(json.dumps(score, indent=1, default=str) + "\n")
+        if args.reference_arm and args.reference_arm not in eb.ALL_ARMS:
+            raise ValueError(f"unknown reference arm {args.reference_arm!r}")
+        score = score_run(
+            run_dir,
+            arms,
+            doc_ids=sonnet_doc_ids() if args.subset else None,
+            reference_arm=args.reference_arm,
+        )
+        (args.score_out or run_dir / "score.json").write_text(
+            json.dumps(score, indent=1, default=str) + "\n"
+        )
         _print_summary(score)
         return 0
     except (RuntimeError, ValueError) as e:  # SpendCapExceeded is a RuntimeError

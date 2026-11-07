@@ -1645,6 +1645,116 @@ async def test_all_live_still_runs_only_the_original_four_arms(live):
     assert list(out) == list(eb.LIVE_ARMS)
 
 
+# ---- the effort arms above high (H-pdf-xhigh, H-pdf-max)
+
+
+class FakeStreamLive(FakeLive):
+    """``FakeLive`` that also has ``messages.stream``; the call must go through it."""
+
+    def __init__(self, reply=None, on_call=None):
+        super().__init__(reply, on_call)
+        self.streamed = 0
+
+        def _no_create(**_):
+            raise AssertionError("a streaming arm must not call messages.create")
+
+        self.messages = SimpleNamespace(create=_no_create, stream=self._stream)
+
+    def _stream(self, **params):
+        self.calls.append(params)
+        self.streamed += 1
+        if self._on_call:
+            self._on_call(len(self.calls), params)
+        message = self._reply(params)
+
+        class _Ctx:
+            def __enter__(_self):
+                return SimpleNamespace(get_final_message=lambda: message)
+
+            def __exit__(_self, *exc):
+                return False
+
+        return _Ctx()
+
+
+@pytest.mark.parametrize("arm,effort", [("H-pdf-xhigh", "xhigh"), ("H-pdf-max", "max")])
+def test_an_effort_arm_matches_the_high_arm_except_for_the_effort_level(arm, effort):
+    doc = _pdf_doc(7, payload=PDF_BYTES)
+
+    [high] = eb.build_requests("H-pdf-high", [doc])
+    [req] = eb.build_requests(arm, [doc])
+
+    assert req.params["output_config"]["effort"] == effort
+    assert req.params["thinking"] == {"type": "adaptive"}
+    assert req.params["max_tokens"] == 64_000 == eb.HAIKU_EFFORT_MAX_TOKENS
+    assert "temperature" not in req.params
+    same = lambda p: {  # noqa: E731
+        k: (v if k != "output_config" else {**v, "effort": "-"})
+        for k, v in p.items()
+        if k != "max_tokens"
+    }
+    assert same(req.params) == same(high.params)
+    assert eb.arm_mode(arm) == "live" and eb.arm_input(arm) == "pdf"
+    assert arm in eb.SUBSET_ARMS and arm in eb.ALL_ARMS and arm not in eb.DEFAULT_ARMS
+
+
+async def test_an_effort_arm_streams_counts_thinking_in_tokens_out_and_records_latency(live):
+    client = FakeStreamLive(reply=lambda p: _message(json.dumps(GOOD), tin=3000, tout=9000))
+
+    await _run_pdf_arm(live, "H-pdf-xhigh", anthropic_client=client)
+
+    assert client.streamed == 2
+    [line, _] = _results(live.run_dir, "H-pdf-xhigh")
+    assert line["valid"] is True and line["tokens_out"] == 9000
+    assert line["cost_usd"] == pytest.approx(eb.pricing.cost_of(eb.HAIKU_MODEL, 3000, 9000))
+    assert line["latency_s"] >= 0
+    call = client.calls[0]
+    assert call["output_config"]["effort"] == "xhigh" and call["max_tokens"] == 64_000
+    assert call["messages"][0]["content"][0]["type"] == "document"
+
+
+async def test_a_streamed_response_cut_off_at_max_tokens_is_recorded_as_a_truncation_error(live):
+    client = FakeStreamLive(
+        reply=lambda p: _message(json.dumps(GOOD), tin=3000, tout=64000, stop="max_tokens")
+    )
+
+    await _run_pdf_arm(live, "H-pdf-max", anthropic_client=client)
+
+    [line, _] = _results(live.run_dir, "H-pdf-max")
+    assert line["valid"] is False and line["output"] is None
+    assert line["error"].startswith("truncated (stop_reason=max_tokens)")
+    assert line["tokens_out"] == 64000 and line["cost_usd"] > 0
+
+
+async def test_haiku_effort_runs_both_arms_in_order(live):
+    client = FakeStreamLive()
+
+    out = await _run_pdf_arm(live, "haiku-effort", anthropic_client=client)
+
+    assert list(out) == ["H-pdf-xhigh", "H-pdf-max"]
+    assert [c["output_config"]["effort"] for c in client.calls] == ["xhigh"] * 2 + ["max"] * 2
+
+
+def test_the_run_live_command_accepts_an_effort_arm(live, capsys):
+    live.use(anthropic_client=FakeStreamLive())
+    live.run_dir.mkdir(parents=True)
+    argv = ["run-live", "--run-dir", str(live.run_dir), "--concurrency", "1"]
+    argv += ["--sample", str(live.sample_path), "--sonnet-sample", str(live.sonnet_path)]
+
+    assert eb.main([*argv, "--arm", "H-pdf-max"]) == 0
+
+    assert "H-pdf-max: lines 2 valid 2" in capsys.readouterr().out
+
+
+def test_the_worst_case_of_a_64k_effort_call_counts_every_output_token():
+    [req] = eb.build_requests("H-pdf-max", [_pdf_doc(7, payload=PDF_BYTES)])
+
+    worst = eb.live_worst_case_usd("H-pdf-max", req, {"page_count": 10})
+
+    tin = 10 * eb.PDF_TOKENS_PER_PAGE + len(eb.PDF_PROMPT) // 2
+    assert worst == pytest.approx(eb.pricing.cost_of(eb.HAIKU_MODEL, tin, 64_000))
+
+
 # ---- the cap counts every dollar of the bake-off
 
 

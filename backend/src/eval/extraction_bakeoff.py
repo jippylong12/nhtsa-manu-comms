@@ -80,6 +80,8 @@ SONNET_SUBSET_SIZE = 100
 # The three PDF arms added on 2026-11-06. Haiku at high effort thinks, so its ceiling is
 # higher than the 8192 every other Anthropic arm uses; a truncation is still an error.
 HAIKU_HIGH_MAX_TOKENS = 16_000
+# xhigh and max think longer, so the ceiling is raised to 64k; a request that large is streamed.
+HAIKU_EFFORT_MAX_TOKENS = 64_000
 GEMINI_FLASH_LITE_MODEL = GEMINI_MODEL
 GEMINI_FLASH_MODEL = "gemini-3.8-flash"
 # Gemini's output ceiling counts thinking tokens. Set so the cap check has a worst case.
@@ -122,14 +124,18 @@ LIVE_ARMS = ("H-text-live", "H-pdf-live", "S-text", "S-pdf")
 # The three PDF arms added on 2026-11-06, live, on the 100-document subset. Kept apart from
 # LIVE_ARMS so "all-live" and the default scoring set stay what they were.
 PDF3_ARMS = ("GL-pdf-high", "GF-pdf-low", "H-pdf-high")
-ALL_ARMS = (*ARMS, *LIVE_ARMS, *PDF3_ARMS)
+# The two Haiku effort levels above "high", added 2026-11-07: H-pdf-high's request, only the
+# effort differs. ``haiku-effort`` on the CLI runs both.
+EFFORT_ARMS = ("H-pdf-xhigh", "H-pdf-max")
+EFFORT_GROUP = "haiku-effort"
+ALL_ARMS = (*ARMS, *LIVE_ARMS, *PDF3_ARMS, *EFFORT_ARMS)
 # Canceled before they ran; the live arms replace them in scoring.
 SUPERSEDED_ARMS = ("H-text", "H-pdf")
 # What scoring, the judge and the report use unless told otherwise.
 DEFAULT_ARMS = ("G", *LIVE_ARMS)
 SONNET_ARMS = ("S-text", "S-pdf")
 # Arms that run the 100-document subset rather than all of the sample.
-SUBSET_ARMS = (*SONNET_ARMS, *PDF3_ARMS)
+SUBSET_ARMS = (*SONNET_ARMS, *PDF3_ARMS, *EFFORT_ARMS)
 # stop_reason values that mean the output was cut off.
 TRUNCATED_REASONS = ("max_tokens", "model_context_window_exceeded")
 
@@ -374,6 +380,7 @@ class _Raw:
     error: Optional[str] = None
     billed: bool = False  # the provider returned a response, so it metered tokens
     stop_reason: Optional[str] = None
+    latency_s: Optional[float] = None  # seconds the call took, when the arm measures it
 
 
 def _anthropic_schema() -> dict[str, Any]:
@@ -538,8 +545,10 @@ class _AnthropicArm:
         max_tokens: int = HAIKU_MAX_TOKENS,
         thinking: Optional[dict[str, str]] = None,
         est_out_tokens: int = PDF_OUTPUT_TOKENS,
+        stream: bool = False,
     ):
         self.name = name
+        self.stream = stream
         self.pdf = pdf
         self.model = model
         self.live = live
@@ -566,15 +575,22 @@ class _AnthropicArm:
     # The provider-specific half of a live call (see _call_live).
 
     def call(self, client, params: dict, doc_id: int) -> "_Raw":
-        message = client.messages.create(**params)
+        started = time.monotonic()
+        if self.stream:
+            # A request with a large max_tokens must stream or the HTTP call can time out.
+            with client.messages.stream(**params) as stream:
+                message = stream.get_final_message()
+        else:
+            message = client.messages.create(**params)
         text = next((b.text for b in message.content if b.type == "text"), None)
         return _Raw(
             doc_id,
             text=text,
             tokens_in=message.usage.input_tokens,
-            tokens_out=message.usage.output_tokens,
+            tokens_out=message.usage.output_tokens,  # thinking is counted in output_tokens
             billed=True,
             stop_reason=message.stop_reason,
+            latency_s=time.monotonic() - started,
         )
 
     def is_retryable(self, error: Exception) -> bool:
@@ -822,6 +838,19 @@ _ARM_IMPLS = {
         thinking={"type": "adaptive"},
         est_out_tokens=3000,
     ),
+    **{
+        f"H-pdf-{effort}": _AnthropicArm(
+            f"H-pdf-{effort}",
+            pdf=True,
+            live=True,
+            effort=effort,
+            max_tokens=HAIKU_EFFORT_MAX_TOKENS,
+            thinking={"type": "adaptive"},
+            est_out_tokens=out,
+            stream=True,
+        )
+        for effort, out in (("xhigh", 4000), ("max", 6000))
+    },
 }
 
 
@@ -1205,6 +1234,7 @@ def _result_line(arm: str, request: dict, raw: Optional[_Raw], run_dir: pathlib.
         ),
         "collected_at": datetime.now(timezone.utc).isoformat(),
         **({"mode": "live"} if impl.live else {}),
+        **({"latency_s": round(raw.latency_s, 3)} if raw and raw.latency_s is not None else {}),
     }
 
 
@@ -1578,12 +1608,14 @@ async def run_live(
         arms = list(LIVE_ARMS)
     elif arm == "pdf3":
         arms = list(PDF3_ARMS)
-    elif arm in (*LIVE_ARMS, *PDF3_ARMS):
+    elif arm == EFFORT_GROUP:
+        arms = list(EFFORT_ARMS)
+    elif arm in (*LIVE_ARMS, *PDF3_ARMS, *EFFORT_ARMS):
         arms = [arm]
     else:
         raise ValueError(
-            f"{arm!r} is not a live arm; expected one of {(*LIVE_ARMS, *PDF3_ARMS)}, "
-            "'all-live' or 'pdf3'"
+            f"{arm!r} is not a live arm; expected one of "
+            f"{(*LIVE_ARMS, *PDF3_ARMS, *EFFORT_ARMS)}, 'all-live', 'pdf3' or '{EFFORT_GROUP}'"
         )
     sonnet_sample_path = pathlib.Path(sonnet_sample_path or SONNET_SAMPLE_PATH)
 
@@ -1709,7 +1741,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     common(sp, "the newest run under backend/.bakeoff/, or a new one if there is none")
     sp = sub.add_parser("run-live", help="run a live arm through the Messages API (spends money)")
-    sp.add_argument("--arm", required=True, choices=[*LIVE_ARMS, *PDF3_ARMS, "all-live", "pdf3"])
+    sp.add_argument(
+        "--arm",
+        required=True,
+        choices=[*LIVE_ARMS, *PDF3_ARMS, *EFFORT_ARMS, "all-live", "pdf3", EFFORT_GROUP],
+    )
     sp.add_argument(
         "--concurrency",
         type=int,
