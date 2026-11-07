@@ -266,5 +266,5 @@ async def test_a_billed_composition_that_fails_to_parse_is_still_metered(monkeyp
     assert after == before + 1, "a billed composition escaped the ledger"
     assert row["tokens_in"] == 700 and row["tokens_out"] == 200
     assert float(row["cost_usd"]) == pytest.approx(
-        pricing.cost_of("gemini-3.1-flash-lite", 700, 200), rel=1e-6
+        pricing.cost_of("gemini-3.5-flash-lite", 700, 200), rel=1e-6
     )

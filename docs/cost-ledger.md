@@ -151,3 +151,19 @@ explain it. Every client is now built by `src/gemini.py`, which applies
 `GEMINI_TIMEOUT_SECONDS` (default 120, generous enough for a 50-document
 embedding batch or a vision extraction). Construct clients through that helper
 so a new call site cannot reintroduce the unbounded case by omission.
+
+## Experiment spend
+
+Spend on a one-off experiment is marked with `usage_events.meta->>'bakeoff'`, so it can be totalled apart from production. The extraction bake-off (`src/eval/extraction_bakeoff.py`, scored by `src/eval/bakeoff_score.py`) writes `meta.bakeoff` as the arm name (`G`, `H-text`, `H-pdf`) for each arm's responses and as `judge` for the Opus judge's calls, with `meta.run` naming the run directory. Rows keep an ordinary `kind` (`llm_extract`), so the kind breakdown above still adds up; to total only the experiment, filter on the marker:
+
+```sql
+SELECT meta->>'bakeoff'        AS arm,
+       count(*)                AS events,
+       round(sum(cost_usd), 4) AS cost_usd
+FROM usage_events
+WHERE meta ? 'bakeoff'
+GROUP BY ROLLUP (meta->>'bakeoff')
+ORDER BY arm NULLS LAST;
+```
+
+The bake-off holds itself to a $10 cap shared by the arms and the judge; the judge refuses to start when the arms' spend plus its own estimate would pass it.

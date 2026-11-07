@@ -38,8 +38,8 @@ RETRY_TEMPERATURE = 0.3
 
 # Pricing lives in src/usage/pricing.py so the ledger and the jobs can never
 # disagree about what a call cost.
-PRICE_IN = pricing.rate_for("gemini-3.1-flash-lite").input_per_token
-PRICE_OUT = pricing.rate_for("gemini-3.1-flash-lite").output_per_token
+PRICE_IN = pricing.rate_for("gemini-3.5-flash-lite").input_per_token
+PRICE_OUT = pricing.rate_for("gemini-3.5-flash-lite").output_per_token
 BATCH_DISCOUNT = pricing.BATCH_DISCOUNT
 
 # Inlined batch payloads are chunked so a single request stays a reasonable

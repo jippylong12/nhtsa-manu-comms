@@ -13,8 +13,8 @@ from src.usage import pricing
 # Re-exported from the canonical rate table in src/usage/pricing.py so the
 # per-query figures shown to the user and the ledger totals cannot drift apart.
 PRICE_EMBED_IN = pricing.rate_for("gemini-embedding-001").input_per_token
-PRICE_LLM_IN = pricing.rate_for("gemini-3.1-flash-lite").input_per_token
-PRICE_LLM_OUT = pricing.rate_for("gemini-3.1-flash-lite").output_per_token
+PRICE_LLM_IN = pricing.rate_for("gemini-3.5-flash-lite").input_per_token
+PRICE_LLM_OUT = pricing.rate_for("gemini-3.5-flash-lite").output_per_token
 
 
 def approx_tokens(text: str) -> int:

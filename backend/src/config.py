@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Gemini (structured extraction + embeddings)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
     # Per-request ceiling for every Gemini call (see src/gemini.py). Without
     # one, a stalled TLS read blocks forever rather than failing: a single
@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # to 0 — the obvious way to write "no limit" — would silently restore the
     # unbounded hang. Rejecting it at startup makes that a loud error instead.
     gemini_timeout_seconds: int = Field(default=120, gt=0)
+    # Anthropic (extraction bake-off; later the extraction model itself). Marcus saved
+    # the key in backend/.env as CLAUDE_API_KEY; accept that name and the SDK's usual one.
+    anthropic_api_key: str = Field(
+        "", validation_alias=AliasChoices("CLAUDE_API_KEY", "ANTHROPIC_API_KEY")
+    )
+    # Per-request ceiling for every Anthropic call (see src/anthropic_client.py).
+    anthropic_timeout_seconds: int = Field(default=300, gt=0)
     # 1536, not the model's native 3072: pgvector cannot build an hnsw or
     # ivfflat index above 2000 dimensions. See migrations/0001.
     embedding_dimensions: int = 1536
