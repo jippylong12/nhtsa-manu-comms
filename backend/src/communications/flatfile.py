@@ -681,6 +681,35 @@ async def vehicle_is_scanned(conn: asyncpg.Connection, vehicle_id: int) -> bool:
     )
 
 
+async def vehicle_fully_scanned(conn: asyncpg.Connection, vehicle_id: int) -> bool:
+    """True when the vehicle has a current-etag scan row for every ingested window.
+
+    "Scanned at all" is not enough: a scan on add writes one window at a time, so a
+    vehicle whose first scan stopped partway has a bulletin list missing whole windows.
+    Treating it as scanned would let a refresh whose missing window fails again report
+    "up to date". With nothing ingested yet (no bootstrap) there is no window to be
+    missing, so any scan row counts.
+    """
+    ingested = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
+    if not ingested:
+        return await vehicle_is_scanned(conn, vehicle_id)
+    missing = await conn.fetchval(
+        """
+        SELECT EXISTS (
+          SELECT 1 FROM flatfile_ingests i
+          WHERE NOT EXISTS (
+            SELECT 1 FROM vehicle_scans s
+            WHERE s.vehicle_id = $1
+              AND s.source_window = i.source_window
+              AND s.etag = i.etag
+          )
+        )
+        """,
+        vehicle_id,
+    )
+    return not missing
+
+
 async def index_is_empty(conn: asyncpg.Connection) -> bool:
     """True when nothing has been ingested yet -- the bootstrap has not run."""
     return not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM comm_vocab)")

@@ -94,26 +94,7 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
         else:
             # No bulletins yet: either the vehicle has none, or the windows that hold
             # them are still unscanned (a scan on add writes one window at a time).
-            ingested = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
-            if ingested:
-                scan_incomplete = bool(
-                    await conn.fetchval(
-                        """
-                        SELECT EXISTS (
-                          SELECT 1 FROM flatfile_ingests i
-                          WHERE NOT EXISTS (
-                            SELECT 1 FROM vehicle_scans s
-                            WHERE s.vehicle_id = $1
-                              AND s.source_window = i.source_window
-                              AND s.etag = i.etag
-                          )
-                        )
-                        """,
-                        vehicle_id,
-                    )
-                )
-            else:
-                scan_incomplete = not await flatfile.vehicle_is_scanned(conn, vehicle_id)
+            scan_incomplete = not await flatfile.vehicle_fully_scanned(conn, vehicle_id)
         known = await repo.existing_nhtsa_ids(conn, listed)
         unfinished = await conn.fetchval(
             f"""
@@ -395,14 +376,15 @@ async def _vehicle_state(vehicle_id: int) -> dict[str, Any]:
 async def _scan(vehicle_id: int) -> bool:
     """Scan NHTSA's bulletin files for this vehicle. False means the run cannot go on.
 
-    A vehicle that has never been scanned has no bulletin list, so a failed scan
-    would make sync find nothing and report "up to date": that must fail the run.
-    A vehicle with earlier scans keeps its previous list (bounded staleness), so a
-    failed window is a warning and the run continues.
+    A vehicle that has never been fully scanned (no scan at all, or a first scan that
+    stopped before every ingested window was read) has an incomplete bulletin list, so
+    a failed window would make sync find nothing new and report "up to date": that
+    must fail the run. A vehicle with a complete earlier scan keeps its previous list
+    (bounded staleness), so a failed window is a warning and the run continues.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        scanned_before = await flatfile.vehicle_is_scanned(conn, vehicle_id)
+        scanned_before = await flatfile.vehicle_fully_scanned(conn, vehicle_id)
         report = await flatfile.refresh_index(conn, vehicles=[vehicle_id])
     failed = sorted(w for w, r in report.items() if r.get("status") == "error")
     if not failed:

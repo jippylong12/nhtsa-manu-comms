@@ -87,10 +87,9 @@ async def test_a_previously_scanned_vehicle_continues_to_sync_and_the_warning_na
 ):
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        await conn.execute(
-            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, 'W-OLD', 'e')",
-            untracked_in_index,
-        )
+        # Bounded staleness applies to a vehicle whose earlier scan was complete: a scan
+        # row for every ingested window, not merely one row.
+        await _scan_every_ingested_window(conn, untracked_in_index)
     finally:
         await conn.close()
     progress, finished, synced = [], [], []
@@ -106,6 +105,46 @@ async def test_a_previously_scanned_vehicle_continues_to_sync_and_the_warning_na
     assert any(
         r.levelno == logging.WARNING and "W-2024" in r.getMessage() for r in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_a_partially_scanned_vehicle_whose_missing_window_fails_again_fails_the_run(
+    untracked_in_index, monkeypatch
+):
+    """`_scan` used to gate on "any scan at all", so a car whose first scan stopped partway
+    passed as scanned and the run went on to report "up to date" with windows missing."""
+    conn = await asyncpg.connect(get_settings().database_url)
+    try:
+        await conn.execute(
+            "INSERT INTO flatfile_ingests (source_window, etag, row_count) VALUES "
+            "('TESTDEG-A', 'ea', 1), ('TESTDEG-B', 'eb', 1) ON CONFLICT (source_window) DO NOTHING"
+        )
+        await conn.execute(
+            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
+            "VALUES ($1, 'TESTDEG-A', 'ea')",
+            untracked_in_index,
+        )
+        assert await flatfile.vehicle_is_scanned(conn, untracked_in_index) is True
+        assert await flatfile.vehicle_fully_scanned(conn, untracked_in_index) is False
+
+        progress, finished, synced = [], [], []
+        monkeypatch.setattr(flatfile, "refresh_index", _all_windows_fail())
+        _stub_run(monkeypatch, progress, finished, synced, untracked_in_index)
+
+        await service._execute(1, untracked_in_index)
+
+        assert finished == [
+            ("failed", "Could not read NHTSA's bulletin files. Try again in a few minutes.")
+        ]
+        assert synced == []
+    finally:
+        await conn.execute(
+            "DELETE FROM vehicle_scans WHERE source_window IN ('TESTDEG-A', 'TESTDEG-B')"
+        )
+        await conn.execute(
+            "DELETE FROM flatfile_ingests WHERE source_window IN ('TESTDEG-A', 'TESTDEG-B')"
+        )
+        await conn.close()
 
 
 async def _scan_every_ingested_window(conn, vehicle_id):
