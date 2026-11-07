@@ -112,6 +112,15 @@ payloads). `nhtsa_vehicle_id` is nullable legacy data that nothing reads.
   row (same `id`, links intact) instead of inserting a twin. Existing keywords are
   kept when the add supplies none. The partial index cannot be an `ON CONFLICT`
   target, so `upsert_vehicle` selects first and then updates or inserts.
+* **Alias spellings.** NHTSA files some bulletins under junk or respelled model
+  names (`F53` vs `F 53`, `REDUNDANT F 250`, `DUPLICATE ...`). Per `(model_year,
+  make)`, `flatfile.resolve_models` folds those into one listed nameplate: spacing
+  variants into the spelling with more bulletins, and a junk-prefixed name into its
+  same-key sibling or, failing that, the one real name whose compact key starts or
+  ends with it (`REDUNDANT F 250` into `F 250 SD`). Names it cannot resolve safely
+  stay visible. Discovery lists the folded names only, and sync, refresh preview and
+  `identity_check` match every alias spelling (`flatfile.model_aliases`), so no
+  bulletin becomes unreachable.
 
 ## The job contract
 
