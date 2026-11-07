@@ -189,13 +189,18 @@ _DASH_REVISION = re.compile(r"^([A-Z]?\d{6,})-\d{1,2}$")
 # The same two patterns as one Postgres expression over c.communication_number and
 # c.nhtsa_id, for the corpus list. Both must agree: change them together (a test
 # compares the two). A row with no number is its own family, keyed by nhtsa_id.
-REVISION_STEM_SQL = """(CASE
-    WHEN nullif(upper(btrim(c.communication_number)), '') IS NULL THEN c.nhtsa_id
-    WHEN upper(btrim(c.communication_number)) ~ '^[A-Z]?[0-9]{6,}-[0-9]{1,2}$'
-        THEN regexp_replace(upper(btrim(c.communication_number)), '-[0-9]{1,2}$', '')
-    WHEN upper(btrim(c.communication_number)) ~ '^.*[0-9][A-Z]$'
-        THEN regexp_replace(upper(btrim(c.communication_number)), '[A-Z]$', '')
-    ELSE upper(btrim(c.communication_number))
+# The number is trimmed of all surrounding whitespace (tabs and newlines too), as
+# str.strip() does; btrim() alone strips only spaces.
+_NUMBER_SQL = (
+    "upper(regexp_replace(c.communication_number, '^[[:space:]]+|[[:space:]]+$', '', 'g'))"
+)
+REVISION_STEM_SQL = f"""(CASE
+    WHEN nullif({_NUMBER_SQL}, '') IS NULL THEN c.nhtsa_id
+    WHEN {_NUMBER_SQL} ~ '^[A-Z]?[0-9]{{6,}}-[0-9]{{1,2}}$'
+        THEN regexp_replace({_NUMBER_SQL}, '-[0-9]{{1,2}}$', '')
+    WHEN {_NUMBER_SQL} ~ '^.*[0-9][A-Z]$'
+        THEN regexp_replace({_NUMBER_SQL}, '[A-Z]$', '')
+    ELSE {_NUMBER_SQL}
 END)"""
 
 

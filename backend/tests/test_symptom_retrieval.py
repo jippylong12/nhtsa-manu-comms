@@ -343,7 +343,20 @@ async def test_revision_count_matches_the_full_family_in_the_database():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "number", ["PIT6202C", "N242484500-02", "24-NA-125", "653.30", "pit6202a", None]
+    "number",
+    [
+        "PIT6202C",
+        "N242484500-02",
+        "24-NA-125",
+        "653.30",
+        "pit6202a",
+        None,
+        # Surrounding tabs and newlines: str.strip() removes them, btrim() alone does not.
+        "PIT6202C\t",
+        "\n pit6202c\r\n",
+        "\tN242484500-02 ",
+        " \t ",
+    ],
 )
 async def test_sql_revision_stem_agrees_with_python(number):
     """The corpus list folds in SQL; the symptom search folds in Python. They
