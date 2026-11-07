@@ -85,7 +85,7 @@ CREATE TABLE flatfile_ingests (
   `HONDA|HONDA` junk); split comma-packed `Model Year` values (`"2017,2018"`) into one row
   per year; normalize model per §5.
 
-*Amended 2026-11 (project "Lean Flat-File Index"): the full-catalogue* `comm_products` *table is gone. The picker reads* `comm_vocab` *(distinct year/make/model per window); sync reads* `vehicle_bulletins`*, filled by scanning the flat files for tracked identities only, with* `vehicle_scans` *as the ETag staleness ledger. Measured 1,508 MB → ≈ 12 MB.*
+*Amended 2026-11 (project "Lean Flat-File Index"): the full-catalogue* `comm_products` *table is gone. The picker reads* `comm_vocab` *(distinct year/make/model per window); sync reads* `vehicle_bulletins`*, filled by scanning the flat files for tracked identities only, with* `vehicle_scans` *as the ETag staleness ledger. Measured 1,508 MB → ≈ 12 MB after the migration, ≈ 30 MB with all eight windows bootstrapped.*
 
 ### 3. Discovery path (the picker)
 

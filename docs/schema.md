@@ -121,8 +121,9 @@ The flat-file index is lean: three small tables instead of a copy of NHTSA's cat
   idempotent: a window is re-ingested only when its ETag changed.
 
 The database now grows with tracked vehicles, not with NHTSA: on the replica the index went
-from 1,508 MB (`comm_products`) to about 12 MB (`comm_vocab` about 11 MB, `vehicle_bulletins`
-under 1 MB for six vehicles). The downloaded zips live in a disk cache, not in Postgres (see
+from 1,508 MB (`comm_products`) to about 12 MB right after the migration (three windows
+ingested), and to about 30 MB once all eight windows are bootstrapped (`comm_vocab` 28 MB,
+`vehicle_bulletins` 1.6 MB for six vehicles). The downloaded zips live in a disk cache, not in Postgres (see
 the [runbook](pipeline-runbook.md#flat-file-index)).
 
 ## Vehicle identity
