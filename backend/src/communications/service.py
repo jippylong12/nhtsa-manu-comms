@@ -1,7 +1,7 @@
 """Business logic for Communications feature: the add-vehicle discovery cascade.
 
 Since the plain-nameplate re-key (ADR 0001, M3), all three picker dropdowns are
-served from Postgres -- the ``comm_products`` flat-file index -- with **zero NHTSA
+served from Postgres -- the ``comm_vocab`` flat-file vocabulary -- with **zero NHTSA
 calls in the interactive path**. The years, makes and models the picker offers are
 exactly the ones NHTSA keys communications to, so a model that shows in the picker
 always has bulletins behind it, and a model with none never appears.
@@ -64,7 +64,7 @@ class CommunicationService:
             rows = await conn.fetch(
                 """
                 SELECT DISTINCT model_year
-                FROM comm_products
+                FROM comm_vocab
                 WHERE model_year <> 9999
                 ORDER BY model_year DESC
                 LIMIT $1
@@ -84,7 +84,7 @@ class CommunicationService:
         pool = await get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT DISTINCT make FROM comm_products WHERE model_year = $1",
+                "SELECT DISTINCT make FROM comm_vocab WHERE model_year = $1",
                 int(year),
             )
         present = {r["make"] for r in rows}

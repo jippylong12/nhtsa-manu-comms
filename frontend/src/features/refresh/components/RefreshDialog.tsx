@@ -23,8 +23,9 @@ export function RefreshDialog({ preview, isStarting, onConfirm, onCancel }: Prop
   // Two kinds of work reach here. Usually it is new bulletins; after an
   // interrupted run it can be documents already fetched but never analysed,
   // and saying "0 new bulletins" while charging for work would be a lie.
-  const headline =
-    newBulletins > 0
+  const headline = preview.scanPending
+    ? 'First refresh for this vehicle'
+    : newBulletins > 0
       ? `${newBulletins} new bulletin${newBulletins === 1 ? '' : 's'}`
       : `${unfinishedDocuments} document${unfinishedDocuments === 1 ? '' : 's'} left to analyse`;
 
@@ -45,6 +46,14 @@ export function RefreshDialog({ preview, isStarting, onConfirm, onCancel }: Prop
           {headline}
         </h3>
 
+        {preview.scanPending ? (
+          <p className={styles.note}>
+            This is the first refresh for this vehicle. It starts by scanning NHTSA's bulletin
+            files, which takes a minute or two; the bulletins found are then read and analysed.
+            The cost shows on the progress view once the scan knows how many there are.
+          </p>
+        ) : (
+          <>
         <dl className={styles.facts}>
           <div className={styles.fact}>
             <dt>
@@ -77,6 +86,8 @@ export function RefreshDialog({ preview, isStarting, onConfirm, onCancel }: Prop
         )}
 
         <p className={styles.estimateNote}>Cost and time are estimates.</p>
+          </>
+        )}
 
         <div className={styles.actions}>
           <button className="btn btn-ghost" onClick={onCancel} disabled={isStarting}>

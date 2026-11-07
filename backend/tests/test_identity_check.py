@@ -83,9 +83,9 @@ async def _tracked(conn):
         "INSERT INTO vehicles (year, make, model) VALUES (2099, 'TESTIC', 'F 150') RETURNING id"
     )
     await conn.execute(
-        "INSERT INTO comm_products (nhtsa_id, make, model, model_year, source_window) "
-        "VALUES ('IC1', 'TESTIC', 'F 150', 2099, 'TESTIC'), "
-        "('IC2', 'TESTIC', 'F 150', 2099, 'TESTIC')"
+        "INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, source_window) "
+        "VALUES ($1, 'IC1', 'TESTIC'), ($1, 'IC2', 'TESTIC')",
+        vid,
     )
     cid = await conn.fetchval("INSERT INTO communications (nhtsa_id) VALUES ('IC1') RETURNING id")
     await conn.execute(

@@ -3,7 +3,7 @@
 Reduced to a single job since the plain-nameplate re-key (ADR 0001, M3): given a
 NHTSA ID, fetch that one manufacturer communication (its summary, documents, and
 metadata) from `/safetyIssues/byNhtsaId`. Which ids belong to a vehicle now comes
-from the local `comm_products` flat-file index (see `src/communications/flatfile.py`),
+from each vehicle's scanned `vehicle_bulletins` (see `src/communications/flatfile.py`),
 not from this client.
 
 Everything that walked NHTSA's crash-test taxonomy is gone: `get_vehicle_details`,

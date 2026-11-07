@@ -19,6 +19,13 @@ class RefreshPreview(CamelModel):
     )
     documents_to_process: int = Field(..., description="Total billable documents expected")
     up_to_date: bool = Field(..., description="True when there is nothing to do")
+    scan_pending: bool = Field(
+        False,
+        description=(
+            "The vehicle has never been scanned; the first refresh scans NHTSA's files "
+            "before it can count bulletins"
+        ),
+    )
 
     estimated_cost_low_usd: float
     estimated_cost_high_usd: float

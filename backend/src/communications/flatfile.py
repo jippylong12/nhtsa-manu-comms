@@ -1,12 +1,18 @@
-"""The flat-file communications index: download, parse, ingest (ADR 0001, M3).
+"""The flat-file communications index: download, parse, scan (ADR 0001, lean index).
 
 NHTSA publishes the whole manufacturer-communications corpus as daily-refreshed
 flat files on static.nhtsa.gov (S3/CloudFront -- no API gateway in the path),
 keyed exactly on ``(NHTSA ID, Make, Model, Model Year)`` in plain-nameplate
-vocabulary. This module is the ingest that turns those files into the
-``comm_products`` table, which the add-vehicle picker reads and which sync uses
-to learn a vehicle's communications -- replacing the byYmmt/``get_vehicle_details``
-chain and its 30s-timeout failure mode entirely.
+vocabulary. This module turns those files into the two small tables the app reads,
+instead of mirroring the whole catalogue:
+
+* ``comm_vocab`` -- every (model year, make, model) a window lists, with its
+  distinct-bulletin count. The add-vehicle picker reads it, and the counts drive
+  ``resolve_models``' alias folding.
+* ``vehicle_bulletins`` -- the bulletins of each *tracked* vehicle, found by
+  scanning the window for the vehicle's identity and its folded aliases. Sync and
+  the refresh preview read it.
+* ``vehicle_scans`` -- which (vehicle, window) pairs were scanned at which etag.
 
 Layout of the source (see ``.../tsbs/TSBS.txt``): eight ``MFR_COMMS_RECEIVED_*.zip``
 files, one per 5-year window of *date received by NHTSA*. Each zip holds one CSV,
@@ -16,16 +22,21 @@ covering five products is five rows. The CSV's first column is labelled
 ``communications.nhtsa_id`` (verified against production); the manufacturer's own
 document id lives only inside the summary text.
 
-Idempotency is ETag-driven. NHTSA re-stamps every window's ``Last-Modified`` daily
-even when nothing changed, so the S3 ETag -- recorded per window in
-``flatfile_ingests`` -- is the change signal. A window is re-ingested only when its
-ETag differs from the last ingest; re-ingest is delete-by-window then insert,
-inside one transaction, so a partial failure never leaves a half-replaced window.
+One pass per window, in one transaction: stream the CSV into a temp stage, rebuild
+that window's ``comm_vocab`` rows, rescan every vehicle that needs it, record the
+etag. NHTSA re-stamps every window's ``Last-Modified`` daily even when nothing
+changed, so the S3 ETag is the change signal. A window is touched when its etag
+differs from the last ingest *or* a vehicle has no scan at the current etag (a newly
+tracked vehicle, or one whose scan never ran), so adding a vehicle needs no download
+of anything but the windows it has not seen. Downloaded zips are cached in
+``backend/.flatfile_cache/<window>.<etag>.zip`` (override with FLATFILE_CACHE_DIR),
+so a rescan of an unchanged window reads the file instead of downloading it.
 
 Usage:
-    python -m src.communications.flatfile --bootstrap   # ingest all 8 windows
-    python -m src.communications.flatfile --refresh      # re-ingest changed windows
-    python -m src.communications.flatfile --status       # show per-window ingest state
+    python -m src.communications.flatfile --bootstrap          # rebuild every window, scan all vehicles
+    python -m src.communications.flatfile --refresh            # repair stale windows and scans
+    python -m src.communications.flatfile --scan --vehicle 7   # scan one vehicle against every window
+    python -m src.communications.flatfile --status             # windows, vehicles, sizes
 """
 
 import argparse
@@ -33,18 +44,20 @@ import asyncio
 import csv
 import io
 import logging
+import os
 import re
 import sys
-import tempfile
 import zipfile
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, Iterable, Iterator, Optional
+from pathlib import Path
+from typing import Any, Iterable, Iterator, Literal, Optional
 
 import asyncpg
 import httpx
 
 from src.db import close_pool, get_pool
+from src.jobs import repository as repo
 
 log = logging.getLogger("flatfile")
 
@@ -90,7 +103,7 @@ _WS = re.compile(r"\s+")
 def normalize_model(raw: Optional[str]) -> str:
     """Canonical nameplate: uppercase, hyphen->space, collapse whitespace.
 
-    This is the form stored in ``comm_products.model`` and the form every match
+    This is the form stored in ``comm_vocab.model`` and the form every match
     is made against, so ``F-150`` and ``F 150`` collapse to one nameplate
     (``F 150``) and ``MUSTANG MACH-E`` meets ``MUSTANG MACH E``. Applied
     identically on both sides of every comparison -- ingest and lookup -- so the
@@ -126,7 +139,7 @@ _MIN_ALIAS_KEY = 3
 def resolve_models(counts: dict[str, int]) -> dict[str, str]:
     """Map every indexed name for one (model_year, make) to the name it is listed as.
 
-    ``counts`` is each distinct ``comm_products.model`` with its distinct bulletin
+    ``counts`` is each distinct ``comm_vocab.model`` with its distinct bulletin
     count. The picker lists the distinct values of the result, and matching takes
     every name that resolves to a vehicle's model, so the two cannot disagree: a
     bulletin filed under a name that is folded away stays reachable through the name
@@ -171,9 +184,13 @@ def resolve_models(counts: dict[str, int]) -> dict[str, str]:
 
 
 async def model_name_counts(conn: Any, year: int, make: str) -> dict[str, int]:
-    """Each distinct indexed model for (year, make), with its distinct bulletin count."""
+    """Each distinct indexed model for (year, make), with its bulletin count.
+
+    The vocabulary keeps one count per window; a bulletin listed in two windows is
+    counted in each, which only matters to the tie-break between spellings.
+    """
     rows = await conn.fetch(
-        "SELECT model, count(DISTINCT nhtsa_id) AS n FROM comm_products "
+        "SELECT model, sum(bulletins) AS n FROM comm_vocab "
         "WHERE model_year = $1 AND make = $2 GROUP BY model",
         int(year),
         str(make).upper(),
@@ -186,8 +203,9 @@ async def model_aliases(conn: Any, year: int, make: str, model: str) -> list[str
 
     The names ``resolve_models`` folds into the vehicle's listed name, including
     the model itself. A vehicle whose model resolves to nothing else is matched
-    exactly as before: ``[model]``. Sync, preview and the identity check all match
-    ``model = ANY(aliases)`` so they agree with the picker.
+    exactly as before: ``[model]``. The scan matches ``model = ANY(aliases)`` when it
+    fills ``vehicle_bulletins``, so sync, preview and the identity check agree with
+    the picker.
     """
     model = normalize_model(model)
     resolved = resolve_models(await model_name_counts(conn, year, make))
@@ -209,7 +227,7 @@ def parse_rows(lines: Iterable[str]) -> Iterator[tuple[str, str, str, int, str]]
     * Rows where ``Model == Make`` are dropped -- these are the ``BMW|BMW``,
       ``EQUIPMENT|EQUIPMENT`` junk NHTSA files under aftermarket/equipment makers.
     * A comma-packed ``Model Year`` (``"2017,2018"``) is split into one row per
-      year, matching the ``comm_products`` grain. ``9999`` (unknown) is kept.
+      year, matching the one-row-per-product grain of the file. ``9999`` (unknown) is kept.
     * ``make`` is uppercased; ``model`` is normalized to the canonical nameplate.
     * Rows missing an id, make, model, or any parseable year are dropped.
     """
@@ -318,7 +336,52 @@ async def _download_window(
 
 
 # --------------------------------------------------------------------------
-# Ingest
+# Zip cache: backend/.flatfile_cache/<window>.<etag>.zip
+# --------------------------------------------------------------------------
+
+# backend/.flatfile_cache (this file is backend/src/communications/flatfile.py).
+CACHE_DIR = Path(__file__).resolve().parents[2] / ".flatfile_cache"
+
+
+def _cache_dir() -> Path:
+    """The cache directory; FLATFILE_CACHE_DIR is read per call so tests can redirect it."""
+    override = os.environ.get("FLATFILE_CACHE_DIR")
+    return Path(override) if override else CACHE_DIR
+
+
+def _safe_etag(etag: Optional[str]) -> str:
+    """The etag as a file-name part: S3's quotes and any ``/`` are dropped."""
+    return re.sub(r"[^A-Za-z0-9._-]", "", etag or "")
+
+
+def _cached_zip(window: str, etag: Optional[str]) -> Optional[Path]:
+    """The cached zip for exactly this window and etag, or None."""
+    safe = _safe_etag(etag)
+    if not safe:
+        return None
+    path = _cache_dir() / f"{window}.{safe}.zip"
+    return path if path.is_file() else None
+
+
+def _store_zip(window: str, etag: Optional[str], part: Path) -> Path:
+    """Move a freshly downloaded zip into the cache and drop the window's older ones.
+
+    Returns the path to read from: the cache file, or ``part`` itself when the etag
+    is unknown (nothing to key a cache entry on).
+    """
+    safe = _safe_etag(etag)
+    if not safe:
+        return part
+    final = part.with_name(f"{window}.{safe}.zip")
+    part.replace(final)
+    for other in final.parent.glob(f"{window}.*.zip"):
+        if other != final:
+            other.unlink(missing_ok=True)
+    return final
+
+
+# --------------------------------------------------------------------------
+# Ingest and scan
 # --------------------------------------------------------------------------
 
 # Dropped-then-created rather than ON COMMIT DROP: several windows ingest on one
@@ -336,17 +399,32 @@ CREATE TEMP TABLE _cp_stage (
 )
 """
 
-# DISTINCT ON collapses rows duplicated *within* this window (the same product on
-# a bulletin listed twice) so the ON CONFLICT clause -- which handles collisions
-# with rows another window already owns -- never sees a source row twice, which
-# Postgres would otherwise reject.
-_MERGE_SQL = """
-INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window)
-SELECT DISTINCT ON (nhtsa_id, make, model, model_year)
-       nhtsa_id, make, model, model_year, summary, $1
+# One count per (year, make, model) triple: the distinct bulletins it lists.
+_VOCAB_SQL = """
+INSERT INTO comm_vocab (model_year, make, model, source_window, bulletins)
+SELECT model_year, make, model, $1::text, count(DISTINCT nhtsa_id)
 FROM _cp_stage
-ON CONFLICT (nhtsa_id, make, model, model_year)
+GROUP BY model_year, make, model
+"""
+
+# A vehicle's bulletins in this window: its own spelling and every folded alias,
+# one row per bulletin. DISTINCT ON collapses a bulletin filed under two spellings,
+# keeping the vehicle's own spelling's summary when it has one.
+_SCAN_SQL = """
+INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, summary, source_window)
+SELECT DISTINCT ON (nhtsa_id) $1::bigint, nhtsa_id, coalesce(summary, ''), $2::text
+FROM _cp_stage
+WHERE model_year = $3 AND make = $4 AND model = ANY($5::text[])
+ORDER BY nhtsa_id, model = $6 DESC, model
+ON CONFLICT (vehicle_id, nhtsa_id)
 DO UPDATE SET summary = EXCLUDED.summary, source_window = EXCLUDED.source_window
+"""
+
+_SCANNED_SQL = """
+INSERT INTO vehicle_scans (vehicle_id, source_window, etag, scanned_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (vehicle_id, source_window)
+DO UPDATE SET etag = EXCLUDED.etag, scanned_at = now()
 """
 
 _RECORD_SQL = """
@@ -362,6 +440,12 @@ ON CONFLICT (source_window) DO UPDATE SET
 _ROWCOUNT_RE = re.compile(r"(\d+)\s*$")
 
 
+def _affected(status: Optional[str]) -> int:
+    """Row count out of an asyncpg command tag (``INSERT 0 5``, ``COPY 3``)."""
+    match = _ROWCOUNT_RE.search(status or "")
+    return int(match.group(1)) if match else 0
+
+
 async def ingest_window(
     conn: asyncpg.Connection,
     window: str,
@@ -369,26 +453,53 @@ async def ingest_window(
     *,
     etag: str,
     last_modified: Optional[datetime],
-) -> int:
-    """Replace one window's rows and record its ETag, in a single transaction.
+    vehicles: Iterable[dict[str, Any]] = (),
+) -> dict[str, Any]:
+    """One pass over a window, in a single transaction.
 
-    ``records`` is streamed straight into a temp staging table via COPY, then
-    merged into ``comm_products``; nothing about the window is held whole in
-    memory. Returns the number of ``comm_products`` rows the merge affected.
+    ``records`` is streamed into a temp stage via COPY (nothing about the window is
+    held whole in memory) and indexed on ``(model_year, make, model)``. Then the
+    window's ``comm_vocab`` rows are rebuilt, and each of ``vehicles`` (dicts with
+    ``id, year, make, model``) has its ``vehicle_bulletins`` for this window replaced
+    -- so a bulletin NHTSA withdrew disappears -- with the vehicle's aliases folded in
+    from the vocabulary just written, and its scan recorded at ``etag``.
+
+    Returns ``{"rows": stage rows, "vocab_rows": n, "per_vehicle": {id: bulletins}}``.
     """
+    per_vehicle: dict[int, int] = {}
     async with conn.transaction():
         await conn.execute(_STAGE_DDL)
-        await conn.copy_records_to_table(
-            "_cp_stage",
-            records=records,
-            columns=["nhtsa_id", "make", "model", "model_year", "summary"],
+        rows = _affected(
+            await conn.copy_records_to_table(
+                "_cp_stage",
+                records=records,
+                columns=["nhtsa_id", "make", "model", "model_year", "summary"],
+            )
         )
-        await conn.execute("DELETE FROM comm_products WHERE source_window = $1", window)
-        status = await conn.execute(_MERGE_SQL, window)
-        match = _ROWCOUNT_RE.search(status or "")
-        row_count = int(match.group(1)) if match else 0
-        await conn.execute(_RECORD_SQL, window, etag, last_modified, row_count)
-    return row_count
+        await conn.execute("CREATE INDEX ON _cp_stage (model_year, make, model)")
+        await conn.execute("ANALYZE _cp_stage")
+
+        await conn.execute("DELETE FROM comm_vocab WHERE source_window = $1", window)
+        vocab_rows = _affected(await conn.execute(_VOCAB_SQL, window))
+
+        for vehicle in vehicles:
+            own = normalize_model(vehicle["model"])
+            make = str(vehicle["make"]).upper()
+            aliases = await model_aliases(conn, int(vehicle["year"]), make, vehicle["model"])
+            await conn.execute(
+                "DELETE FROM vehicle_bulletins WHERE vehicle_id = $1 AND source_window = $2",
+                vehicle["id"],
+                window,
+            )
+            per_vehicle[vehicle["id"]] = _affected(
+                await conn.execute(
+                    _SCAN_SQL, vehicle["id"], window, int(vehicle["year"]), make, aliases, own
+                )
+            )
+            await conn.execute(_SCANNED_SQL, vehicle["id"], window, etag)
+
+        await conn.execute(_RECORD_SQL, window, etag, last_modified, rows)
+    return {"rows": rows, "vocab_rows": vocab_rows, "per_vehicle": per_vehicle}
 
 
 async def _recorded_etags(conn: asyncpg.Connection) -> dict[str, str]:
@@ -396,19 +507,62 @@ async def _recorded_etags(conn: asyncpg.Connection) -> dict[str, str]:
     return {r["source_window"]: r["etag"] for r in rows}
 
 
+async def _scope(conn: asyncpg.Connection, vehicles: Literal["all"] | list[int]) -> list[dict]:
+    """The active tracked vehicles a refresh covers: all of them, or just these ids."""
+    tracked = await repo.tracked_vehicles(conn)
+    if vehicles != "all":
+        wanted = set(vehicles)
+        tracked = [v for v in tracked if v["id"] in wanted]
+    return [{k: v[k] for k in ("id", "year", "make", "model")} for v in tracked]
+
+
+async def _window_zip(
+    client: httpx.AsyncClient, window: str, etag: Optional[str]
+) -> tuple[Path, Optional[str], Optional[datetime], bool]:
+    """The zip for a window: the cached file for ``etag``, else a fresh download.
+
+    Returns ``(path, etag, last_modified, temporary)``. ``last_modified`` is None on a
+    cache hit (the caller has the HEAD's). ``temporary`` is True when the path is not
+    in the cache and the caller must delete it.
+    """
+    cached = _cached_zip(window, etag)
+    if cached is not None:
+        return cached, etag, None, False
+    cache = _cache_dir()
+    cache.mkdir(parents=True, exist_ok=True)
+    part = cache / f"{window}.part"
+    try:
+        with open(part, "wb") as dest:
+            dl_etag, last_modified = await _download_window(client, window, dest)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    used = dl_etag or etag
+    path = _store_zip(window, used, part)
+    return path, used, last_modified, path == part
+
+
 async def refresh_index(
     conn: asyncpg.Connection,
     client: Optional[httpx.AsyncClient] = None,
     *,
     windows: Optional[Iterable[str]] = None,
+    vehicles: Literal["all"] | list[int] = "all",
     force: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    """Ingest every window whose S3 ETag changed since its last ingest.
+    """Repair every stale window, and every stale (vehicle, window) scan.
 
-    ``force=True`` re-ingests every window regardless of ETag (the bootstrap).
-    Windows are processed sequentially: it keeps memory flat, avoids temp-table
-    name races on one connection, and is polite to NHTSA. Returns a per-window
-    report: ``{"status": "ingested"|"unchanged"|"error", "rows": int, ...}``.
+    A window is *stale* for a vehicle when ``vehicle_scans`` has no row for the pair
+    or the row's etag differs from the window's current S3 etag. A window whose etag
+    differs from ``flatfile_ingests`` is re-ingested for every vehicle in scope; one
+    whose etag is unchanged is re-read only for the vehicles that are stale, and is
+    skipped when there are none. ``force=True`` re-ingests every window for every
+    vehicle in scope regardless (the bootstrap).
+
+    Windows are processed sequentially: it keeps memory flat, avoids temp-table name
+    races on one connection, and is polite to NHTSA. Returns a per-window report:
+    ``{"status": "ingested"|"unchanged"|"error", "rows": int, "scanned": [vehicle ids]}``.
+    One window failing never aborts the others.
     """
     owns_client = client is None
     client = client or httpx.AsyncClient(headers=_HEADERS, follow_redirects=True)
@@ -416,29 +570,63 @@ async def refresh_index(
     try:
         window_list = list(windows) if windows is not None else await discover_windows(client)
         recorded = await _recorded_etags(conn)
+        scope = await _scope(conn, vehicles)
         for window in window_list:
             try:
-                etag, _ = await head_window(client, window)
-                if not force and etag is not None and recorded.get(window) == etag:
-                    report[window] = {"status": "unchanged", "etag": etag}
+                etag, head_modified = await head_window(client, window)
+                scans = {
+                    r["vehicle_id"]: r["etag"]
+                    for r in await conn.fetch(
+                        "SELECT vehicle_id, etag FROM vehicle_scans "
+                        "WHERE source_window = $1 AND vehicle_id = ANY($2::bigint[])",
+                        window,
+                        [v["id"] for v in scope],
+                    )
+                }
+                stale = [v for v in scope if scans.get(v["id"]) != etag]
+                changed = force or etag is None or recorded.get(window) != etag
+                if not changed and not stale:
+                    report[window] = {"status": "unchanged", "etag": etag, "rows": 0, "scanned": []}
                     log.info("%s: unchanged (etag %s)", window, etag)
                     continue
-                with tempfile.NamedTemporaryFile(suffix=".zip") as tmp:
-                    dl_etag, last_modified = await _download_window(client, window, tmp)
-                    rows = await ingest_window(
+                to_scan = scope if changed else stale
+                path, used_etag, downloaded_modified, temporary = await _window_zip(
+                    client, window, etag
+                )
+                try:
+                    result = await ingest_window(
                         conn,
                         window,
-                        parse_rows(_iter_csv_lines(tmp.name)),
-                        etag=dl_etag or etag or "",
-                        last_modified=last_modified,
+                        parse_rows(_iter_csv_lines(str(path))),
+                        etag=used_etag or "",
+                        last_modified=downloaded_modified or head_modified,
+                        vehicles=to_scan,
                     )
-                report[window] = {"status": "ingested", "rows": rows, "etag": dl_etag or etag}
-                log.info("%s: ingested %d rows", window, rows)
+                finally:
+                    if temporary:
+                        path.unlink(missing_ok=True)
+                recorded[window] = used_etag or ""
+                report[window] = {
+                    "status": "ingested",
+                    "rows": result["rows"],
+                    "etag": used_etag,
+                    "scanned": [v["id"] for v in to_scan],
+                }
+                log.info(
+                    "%s: ingested %d rows, scanned %d vehicle(s)",
+                    window,
+                    result["rows"],
+                    len(to_scan),
+                )
             except (httpx.HTTPError, zipfile.BadZipFile, ValueError, OSError) as exc:
                 # One window failing must not abort the others: the index stays
                 # as it was for that window (bounded staleness), which is the
                 # whole resilience story -- discovery and sync keep working.
-                report[window] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+                report[window] = {
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "scanned": [],
+                }
                 log.error("%s: ingest failed: %s: %s", window, type(exc).__name__, exc)
     finally:
         if owns_client:
@@ -446,9 +634,42 @@ async def refresh_index(
     return report
 
 
+async def scan_vehicle(conn: asyncpg.Connection, vehicle_id: int) -> dict[str, dict[str, Any]]:
+    """Scan one vehicle against every window it is stale for (all, for a new vehicle)."""
+    return await refresh_index(conn, vehicles=[vehicle_id])
+
+
+async def scan_vehicle_background(vehicle_id: int) -> None:
+    """Scan one vehicle without blocking or failing the caller (run on add).
+
+    A failed scan is repaired by the next refresh or nightly run, so every
+    exception is swallowed with a warning.
+    """
+    try:
+        from src.db import get_pool
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            report = await refresh_index(conn, vehicles=[vehicle_id])
+        log.info("background scan of vehicle %s: %s", vehicle_id, report)
+    except Exception as exc:  # noqa: BLE001 - never surface to the add request
+        log.warning(
+            "background scan of vehicle %s failed: %s: %s", vehicle_id, type(exc).__name__, exc
+        )
+
+
+async def vehicle_is_scanned(conn: asyncpg.Connection, vehicle_id: int) -> bool:
+    """True once the vehicle has been scanned against at least one window."""
+    return bool(
+        await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM vehicle_scans WHERE vehicle_id = $1)", vehicle_id
+        )
+    )
+
+
 async def index_is_empty(conn: asyncpg.Connection) -> bool:
     """True when nothing has been ingested yet -- the bootstrap has not run."""
-    return not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM comm_products)")
+    return not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM comm_vocab)")
 
 
 # --------------------------------------------------------------------------
@@ -456,21 +677,44 @@ async def index_is_empty(conn: asyncpg.Connection) -> bool:
 # --------------------------------------------------------------------------
 
 
+def _dir_size(path: Path) -> int:
+    return sum(f.stat().st_size for f in path.glob("*") if f.is_file()) if path.is_dir() else 0
+
+
 async def _status(conn: asyncpg.Connection) -> None:
-    rows = await conn.fetch(
-        "SELECT source_window, etag, row_count, ingested_at FROM flatfile_ingests "
-        "ORDER BY source_window"
+    windows = await conn.fetch(
+        "SELECT i.source_window, i.etag, i.ingested_at, "
+        "(SELECT count(*) FROM comm_vocab c WHERE c.source_window = i.source_window) AS vocab "
+        "FROM flatfile_ingests i ORDER BY i.source_window"
     )
-    if not rows:
+    if not windows:
         print("No windows ingested yet. Run --bootstrap.")
-        return
-    total = 0
-    for r in rows:
-        total += r["row_count"]
+    for r in windows:
         when = f"{r['ingested_at']:%Y-%m-%d %H:%M}"
-        print(f"  {r['source_window']}  {r['row_count']:>9,} rows  ingested {when}")
-    products = await conn.fetchval("SELECT count(*) FROM comm_products")
-    print(f"  {'total':<9}  {total:>9,} rows recorded  |  {products:,} comm_products rows")
+        print(f"  {r['source_window']}  etag {r['etag']}  {r['vocab']:>7,} vocab rows  ingested {when}")
+    vehicles = await conn.fetch(
+        "SELECT v.id, v.year, v.make, v.model, "
+        "(SELECT count(*) FROM vehicle_bulletins b WHERE b.vehicle_id = v.id) AS bulletins, "
+        "array(SELECT i.source_window FROM flatfile_ingests i "
+        "      LEFT JOIN vehicle_scans s ON s.vehicle_id = v.id AND s.source_window = i.source_window "
+        "      WHERE s.etag IS DISTINCT FROM i.etag ORDER BY i.source_window) AS stale "
+        "FROM vehicles v WHERE v.active ORDER BY v.id"
+    )
+    for v in vehicles:
+        stale = ", ".join(v["stale"]) or "none"
+        print(
+            f"  vehicle {v['id']:<5} {v['year']} {v['make']} {v['model']}: "
+            f"{v['bulletins']:,} bulletins  |  stale windows: {stale}"
+        )
+    sizes = await conn.fetchrow(
+        "SELECT pg_size_pretty(pg_total_relation_size('comm_vocab')) AS vocab, "
+        "pg_size_pretty(pg_total_relation_size('vehicle_bulletins')) AS bulletins"
+    )
+    cache = _cache_dir()
+    print(
+        f"  sizes: comm_vocab {sizes['vocab']}, vehicle_bulletins {sizes['bulletins']}, "
+        f"zip cache {_dir_size(cache) / 1e6:,.1f} MB ({cache})"
+    )
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -480,18 +724,21 @@ async def _run(args: argparse.Namespace) -> int:
             await _status(conn)
             return 0
         windows = [args.window] if args.window else None
-        report = await refresh_index(conn, windows=windows, force=args.bootstrap)
+        if args.scan:
+            report = await refresh_index(conn, windows=windows, vehicles=[args.vehicle])
+        else:
+            report = await refresh_index(conn, windows=windows, force=args.bootstrap)
     ingested = sum(1 for r in report.values() if r["status"] == "ingested")
     errors = [w for w, r in report.items() if r["status"] == "error"]
     total_rows = sum(r.get("rows", 0) for r in report.values())
     print(f"Windows ingested: {ingested}/{len(report)}  |  rows: {total_rows:,}")
     for w, r in sorted(report.items()):
-        detail = (
-            r.get("error") or f"{r.get('rows', 0):,} rows"
-            if r["status"] != "unchanged"
-            else "unchanged"
-        )
-        print(f"  {w}: {r['status']}  {detail if r['status'] != 'unchanged' else ''}".rstrip())
+        if r["status"] == "unchanged":
+            print(f"  {w}: unchanged")
+        elif r["status"] == "error":
+            print(f"  {w}: error  {r.get('error')}")
+        else:
+            print(f"  {w}: ingested  {r.get('rows', 0):,} rows, {len(r['scanned'])} vehicle(s) scanned")
     if errors:
         print(f"FAILED windows: {', '.join(errors)}", file=sys.stderr)
     return 1 if errors else 0
@@ -502,16 +749,30 @@ def main() -> int:
         description="Ingest NHTSA manufacturer-communications flat files."
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--bootstrap", action="store_true", help="ingest all windows (ignore ETags)")
     group.add_argument(
-        "--refresh", action="store_true", help="re-ingest only windows whose ETag changed"
+        "--bootstrap",
+        action="store_true",
+        help="rebuild every window and scan every tracked vehicle (ignore ETags)",
     )
-    group.add_argument("--status", action="store_true", help="show per-window ingest state")
+    group.add_argument(
+        "--refresh",
+        action="store_true",
+        help="repair stale windows and stale vehicle scans",
+    )
+    group.add_argument(
+        "--scan", action="store_true", help="scan one tracked vehicle (needs --vehicle N)"
+    )
+    group.add_argument(
+        "--status", action="store_true", help="show windows, vehicle scans, table and cache sizes"
+    )
+    parser.add_argument("--vehicle", type=int, help="the vehicle id for --scan")
     parser.add_argument(
-        "--window", help="restrict --bootstrap/--refresh to a single window, e.g. 2020-2024"
+        "--window", help="restrict --bootstrap/--refresh/--scan to a single window, e.g. 2020-2024"
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+    if args.scan and args.vehicle is None:
+        parser.error("--scan needs --vehicle N")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

@@ -18,7 +18,8 @@ Usage:
     python -m src.jobs.run_pipeline                 # sync + process (dry-run digest)
     python -m src.jobs.run_pipeline --send-digest   # also send the digest email
     python -m src.jobs.run_pipeline --sync-only
-    python -m src.jobs.run_pipeline --skip-sync     # process + digest only
+    python -m src.jobs.run_pipeline --skip-sync     # process + digest only (skips the scan too)
+    python -m src.jobs.run_pipeline --skip-scan     # sync without scanning NHTSA's bulletin files first
 """
 
 import argparse
@@ -29,7 +30,8 @@ import pathlib
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.db import close_pool
+from src.communications import flatfile
+from src.db import close_pool, get_pool
 from src.jobs import digest as digest_job
 from src.jobs import extract as extract_stage
 from src.jobs import process as processor
@@ -128,6 +130,21 @@ def _configure_logging(run_id: str) -> pathlib.Path:
 async def _run(args, now: datetime) -> int:
     failures: list[str] = []
 
+    if not args.skip_sync and not args.skip_scan:
+        log.info("=== STAGE: scan ===")
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                report = await flatfile.refresh_index(conn)
+            for window, result in report.items():
+                if result.get("status") == "error":
+                    # Sync still runs: it uses whatever the ledger already holds.
+                    log.error("scan: %s: %s", window, result.get("error"))
+                    failures.append(f"scan: {window}: {result.get('error')}")
+        except Exception as e:  # noqa: BLE001
+            log.exception("scan stage failed")
+            failures.append(f"scan: {type(e).__name__}: {e}")
+
     if not args.skip_sync:
         log.info("=== STAGE: sync ===")
         try:
@@ -182,7 +199,12 @@ async def _run(args, now: datetime) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the full NHTSA Comms pipeline once.")
     parser.add_argument("--sync-only", action="store_true", help="run sync, skip processing")
-    parser.add_argument("--skip-sync", action="store_true", help="skip sync, process + digest")
+    parser.add_argument(
+        "--skip-sync", action="store_true", help="skip scan and sync, process + digest"
+    )
+    parser.add_argument(
+        "--skip-scan", action="store_true", help="skip the bulletin-file scan before sync"
+    )
     parser.add_argument(
         "--keep-pdfs",
         action="store_true",

@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
+from src.communications import flatfile
 from src.config import get_settings
 from src.jobs import repository as repo
 from src.vehicles import router as vehicles_router
@@ -29,6 +30,19 @@ _app.include_router(vehicles_router.router, prefix="/api")
 
 def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://test")
+
+
+@pytest.fixture(autouse=True)
+def scans(monkeypatch):
+    """Record background scans so no test reaches NHTSA through the scan on add."""
+    calls: list[dict] = []
+
+    async def recorder(conn, *a, **kw):
+        calls.append(kw)
+        return {}
+
+    monkeypatch.setattr(flatfile, "refresh_index", recorder)
+    return calls
 
 
 @pytest_asyncio.fixture
@@ -356,3 +370,43 @@ async def test_a_non_numeric_year_is_rejected(clean):
         await VehicleService.create_vehicle(year="twenty", make="Mazda", model="CX-5")
 
     assert await _rows() == []
+
+
+# --- R6: scan on add -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_returns_201_then_a_background_scan_runs_for_that_vehicle(clean, scans):
+    async with _http() as client:
+        r = await client.post(
+            "/api/vehicles", json={"year": "2019", "make": "Mazda", "model": "CX-5"}
+        )
+        assert r.status_code == 201
+        assert scans == []  # the response did not wait for the scan
+        for _ in range(20):
+            if scans:
+                break
+            await asyncio.sleep(0.05)
+
+    assert scans == [{"vehicles": [int(r.json()["id"])]}]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_background_scan_does_not_fail_the_add(clean, monkeypatch, caplog):
+    attempted = asyncio.Event()
+
+    async def boom(conn, *a, **kw):
+        attempted.set()
+        raise RuntimeError("static.nhtsa.gov unreachable")
+
+    monkeypatch.setattr(flatfile, "refresh_index", boom)
+
+    async with _http() as client:
+        r = await client.post(
+            "/api/vehicles", json={"year": "2019", "make": "Mazda", "model": "CX-5"}
+        )
+        await asyncio.wait_for(attempted.wait(), 2)
+        await asyncio.sleep(0.05)
+
+    assert r.status_code == 201
+    assert any("background scan" in rec.getMessage() for rec in caplog.records)

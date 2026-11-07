@@ -1,7 +1,7 @@
 """API router for Communications feature.
 
 Only the discovery cascade remains: the year, make and model lookups that fill the
-add-vehicle form, now served from the ``comm_products`` flat-file index (ADR 0001,
+add-vehicle form, now served from the ``comm_vocab`` flat-file vocabulary (ADR 0001,
 M3). The variant and trim endpoints were the byYmmt resolve step and are gone --
 association happens on the plain nameplate at fetch time, so the picker never
 resolves a ``vehicleId`` and can no longer be blocked by NHTSA. The list, detail,
