@@ -220,6 +220,22 @@ async def _plan_and_write(
             report.skipped.append(f"communication {nid}")
             continue
         comm_id = row["id"]
+        # A document the destination has and the export does not (sync attached a new PDF
+        # there after the clone) would be left unread while its communication is forced to
+        # `processed`, and the LLM stage only reads `pending`. Skip the whole communication.
+        dest_urls = {
+            r["url"]
+            for r in await conn.fetch(
+                "SELECT url FROM comm_documents WHERE communication_id = $1", comm_id
+            )
+        }
+        extra = sorted(dest_urls - {d["url"] for d in rec["documents"]})
+        if extra:
+            report.skipped.append(
+                f"communication {nid} has {len(extra)} document(s) not in the export: "
+                + ", ".join(extra)
+            )
+            continue
         wanted = [_from_json(c, rec[c]) for c in COMM_COLUMNS]
         if all(row[c] == w for c, w in zip(COMM_COLUMNS, wanted)):
             report.communications_identical += 1

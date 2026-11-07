@@ -169,7 +169,26 @@ _LEDGER_KINDS = "('llm_extract', 'embed')"
 
 # A stranded run leaves communications `failed` for transient reasons; --resume re-queues these
 # classes. `LLM schema violation` and `batch ` failures are deliberately not listed.
-_TRANSIENT_REASON_PATTERNS = ["pdf unavailable:%", "LLM call failed:%", "LLM stage error:%"]
+_TRANSIENT_REASON_PATTERNS = [
+    "pdf unavailable:%",
+    "LLM call failed:%",
+    "LLM stage error:%",
+    # extract._record_failure writes "document <file>: <reason>"; only network-class reasons
+    # count. "pdf open failed", "pdf has zero pages" and "http 404" are permanent.
+    "document %: ConnectError%",
+    "document %: ConnectTimeout%",
+    "document %: ReadTimeout%",
+    "document %: ReadError%",
+    "document %: RemoteProtocolError%",
+    "document %: PoolTimeout%",
+    "document %: http 5%",
+    "document %: download failed%",
+    "document %: empty response body%",
+]
+
+# Token shape of one document at the current model when the ledger has no history for it
+# (the measured effort-high mean: 9,226 in, 1,783 out).
+FALLBACK_TOKENS_PER_DOCUMENT = (9_000, 1_800)
 
 # The reset writes these back to NULL (or empty); `symptoms`, `systems` and `components` are
 # NOT NULL arrays, so they go to '{}'.
@@ -207,12 +226,55 @@ async def _awaiting_llm(conn: Any, vehicle_id: int | None) -> int:
     )
 
 
+async def _per_document_estimate(conn: Any, sync: bool) -> float:
+    """Expected spend per document for the path about to run, never discounted twice.
+
+    `refresh.estimate.cost_per_document` averages every `llm_extract` row, Batch rows included
+    at their already-halved price, so halving it again under-quotes a Batch run by half and a
+    change of model or effort by whatever the history was. Here the mean is taken over the
+    current model's rows on the same path (live or batch); failing that, the model's token
+    averages are priced at list for that path; failing that, a fixed token shape is. The embed
+    share is the ledger's own mean per unit and is never discounted.
+    """
+    from src.config import get_settings
+    from src.usage import pricing
+
+    model = get_settings().extraction_model
+    path = "live" if sync else "batch"
+    row = await conn.fetchrow(
+        """
+        SELECT
+          (SELECT sum(cost_usd) / nullif(count(DISTINCT document_id), 0)
+             FROM usage_events
+            WHERE kind = 'llm_extract' AND model = $1 AND document_id IS NOT NULL
+              AND meta->>'path' = $2)                                        AS same_path,
+          (SELECT avg(tokens_in) FROM usage_events
+            WHERE kind = 'llm_extract' AND model = $1 AND document_id IS NOT NULL) AS tokens_in,
+          (SELECT avg(tokens_out) FROM usage_events
+            WHERE kind = 'llm_extract' AND model = $1 AND document_id IS NOT NULL) AS tokens_out,
+          (SELECT sum(cost_usd) / nullif(sum(unit_count), 0)
+             FROM usage_events WHERE kind = 'embed')                          AS embed_per_unit
+        """,
+        model,
+        path,
+    )
+    if row["same_path"] is not None:
+        llm = float(row["same_path"])
+    elif row["tokens_in"] is not None:
+        llm = pricing.cost_of(
+            model, int(row["tokens_in"]), int(row["tokens_out"] or 0), batch=not sync
+        )
+    else:
+        tin, tout = FALLBACK_TOKENS_PER_DOCUMENT
+        llm = pricing.cost_of(model, tin, tout, batch=not sync)
+    embed = float(row["embed_per_unit"]) if row["embed_per_unit"] is not None else 0.0
+    return llm + embed
+
+
 async def _reextract_plan(
-    vehicle_id: int | None, cap_usd: float, resume: bool = False
+    vehicle_id: int | None, cap_usd: float, resume: bool = False, sync: bool = True
 ) -> dict[str, Any]:
     """What a reset would touch and what re-reading it should cost (a resume resets nothing)."""
-    from src.refresh.estimate import cost_per_document
-
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -243,12 +305,13 @@ async def _reextract_plan(
             SUMMARY_ONLY_REASON,
             _TRANSIENT_REASON_PATTERNS,
         )
+        per_doc = await _per_document_estimate(conn, sync)
     plan = dict(row)
     plan["resume"] = resume
     if resume:
         plan["communications"] = 0
         plan["documents"] = 0
-    per_doc = await cost_per_document()
+    plan["per_document_usd"] = per_doc
     plan["estimated_cost_usd"] = per_doc * (
         plan["documents"]
         + plan["pending_documents"]
@@ -329,6 +392,31 @@ async def _requeue_transient_failures(vehicle_id: int | None) -> int:
     return len(rows)
 
 
+async def _unresolved_batches(conn: Any) -> list[str]:
+    """Batch ids submitted by an earlier run and never collected.
+
+    `_batch_llm_once` records the ids at submission (mode `batch-submitted`) and again when the
+    batch is collected (mode `batch`). An id in the first set and not the second is still
+    Anthropic's to finish; submitting the same pending documents again would pay twice.
+    """
+    rows = await conn.fetch(
+        "SELECT counts->>'mode' AS mode, counts->'jobs' AS jobs FROM pipeline_runs "
+        "WHERE job = 'llm' AND counts->>'mode' IN ('batch-submitted', 'batch')"
+    )
+    submitted: list[str] = []
+    collected: set[str] = set()
+    for r in rows:
+        jobs = r["jobs"]
+        if isinstance(jobs, str):
+            jobs = json.loads(jobs)
+        for job_id in jobs or []:
+            if r["mode"] == "batch-submitted":
+                submitted.append(job_id)
+            else:
+                collected.add(job_id)
+    return [j for j in submitted if j not in collected]
+
+
 async def _unfinished_counts(conn: Any, vehicle_id: int | None) -> dict[str, int]:
     """Post-run state of the in-scope communications (summary-only rows excluded)."""
     scope = (
@@ -354,7 +442,7 @@ async def _unfinished_counts(conn: Any, vehicle_id: int | None) -> dict[str, int
 
 
 async def _batch_llm_once(
-    vehicle_id: int | None, cap_usd: float, started_at: Any
+    vehicle_id: int | None, cap_usd: float, started_at: Any, per_doc: float
 ) -> tuple[str | None, int]:
     """Batch path: one estimate check, ONE submission of everything pending, one collection.
 
@@ -362,14 +450,12 @@ async def _batch_llm_once(
     abandons a batch after its wait, so the whole backlog goes up at once. Returns the error
     (None when done, "cap reached" or "no progress") and the number of failed documents.
     """
-    from src.refresh.estimate import cost_per_document
-
     pool = await get_pool()
     async with pool.acquire() as conn:
         remaining = await _awaiting_llm(conn, vehicle_id)
         if remaining == 0:
             return None, 0
-        estimate = await cost_per_document() * remaining / 2  # Batch API is half price
+        estimate = per_doc * remaining  # per_doc is already the Batch-path figure
         if estimate >= cap_usd:
             log.warning(
                 "cap reached: estimate $%.2f for %d documents is not under the $%.2f cap; "
@@ -383,6 +469,8 @@ async def _batch_llm_once(
     ids = await llm_stage.submit_batch(limit=None, vehicle_id=vehicle_id)
     failed = 0
     if ids:
+        # Recorded before the wait so a lost session (or --resume) can see the batch is out.
+        await record_run("llm", {"mode": "batch-submitted", "jobs": ids})
         log.info(
             "SUBMITTED %d batch job(s): %s -- if this session is lost, finish with: "
             "python -m src.jobs.process --collect %s",
@@ -434,8 +522,34 @@ async def reextract(
     re-queueing communications that failed on a network-class error.
     """
     assert SEVERITY_BY_TYPE  # the reset leans on the type mapping; fail loudly if it is empty
-    plan = await _reextract_plan(vehicle_id, cap_usd, resume)
+    plan = await _reextract_plan(vehicle_id, cap_usd, resume, sync)
     _print_plan(plan, vehicle_id)
+    if plan["estimated_cost_usd"] >= cap_usd:
+        # Refused here, before the confirm and the reset: the old order wiped every summary
+        # and then found the cap, leaving the corpus empty with nothing submitted.
+        log.warning(
+            "cap reached: estimate $%.2f is not under the $%.2f cap; nothing was changed",
+            plan["estimated_cost_usd"],
+            cap_usd,
+        )
+        await record_run(
+            "reextract",
+            {"vehicle": vehicle_id, "cap_usd": cap_usd, "estimate_usd": plan["estimated_cost_usd"]},
+            ok=False,
+            error="cap reached",
+        )
+        return CAP_EXIT_CODE
+    if not sync:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            unresolved = await _unresolved_batches(conn)
+        if unresolved:
+            print(
+                "A batch from an earlier run has not been collected; collect it first so its "
+                "documents are not paid for twice:\n  python -m src.jobs.process --collect "
+                + " --collect ".join(unresolved)
+            )
+            return 1
     if confirm is not None and not confirm():
         print("Aborted; nothing was changed.")
         return 1
@@ -457,7 +571,9 @@ async def reextract(
 
     error: Optional[str] = None
     if not sync:
-        error, llm_failed = await _batch_llm_once(vehicle_id, cap_usd, started_at)
+        error, llm_failed = await _batch_llm_once(
+            vehicle_id, cap_usd, started_at, plan["per_document_usd"]
+        )
         stage_failed["llm"] += llm_failed
     else:
         async with pool.acquire() as conn:
@@ -610,7 +726,15 @@ def main() -> int:
                     args.vehicle, args.cap_usd, args.sync, args.limit, confirm, args.resume
                 )
             if args.collect:
-                await llm_stage.collect_batch(args.collect)
+                stats = await llm_stage.collect_batch(
+                    args.collect, poll_seconds=BATCH_POLL_SECONDS, max_wait=BATCH_WAIT_SECONDS
+                )
+                if stats.unfinished:
+                    log.error(
+                        "not collected, still running at Anthropic: %s; run --collect again",
+                        ", ".join(stats.unfinished),
+                    )
+                    return 1
                 return 0
             if args.prune_archive:
                 removed, freed = await extract_stage.prune_archive(dry_run=args.dry_run)

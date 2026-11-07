@@ -511,3 +511,23 @@ async def test_collect_batch_logs_progress_at_most_every_ten_minutes_while_waiti
     lines = [r.getMessage() for r in caplog.records if "waiting for batch" in r.getMessage()]
     assert len(lines) == 2, lines  # 25 minutes of polling: lines at 10 and 20 minutes
     assert "msgbatch_1" in lines[0] and "in_progress" in lines[0] and "10 min" in lines[0]
+
+
+async def test_collect_batch_reports_a_batch_it_gave_up_waiting_for(stage, monkeypatch):
+    """A batch still running at max_wait used to be dropped with only a warning, so the caller
+    exited 0 and could resubmit the same documents; now the id comes back as unfinished."""
+
+    async def no_sleep(seconds):
+        return None
+
+    monkeypatch.setattr(llm.asyncio, "sleep", no_sleep)
+    stage.client = FakeAnthropic(results=[])
+    stage.client.messages.batches.retrieve = lambda batch_id: SimpleNamespace(
+        processing_status="in_progress", request_counts=None
+    )
+
+    stats = await llm.collect_batch(["msgbatch_slow"], poll_seconds=60, max_wait=120)
+
+    assert stats.unfinished == ["msgbatch_slow"]
+    assert stats.errors == ["batch msgbatch_slow not ended after 120s"]
+    assert stats.processed == 0 and stats.failed == 0

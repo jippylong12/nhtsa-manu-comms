@@ -278,3 +278,30 @@ async def test_missing_v2_columns_are_named_and_stop_the_apply():
 async def test_a_file_that_is_not_a_v2_export_is_refused(conn):
     with pytest.raises(cs.PreconditionError):
         await cs.apply_records(conn, {"communications": []})
+
+
+async def test_a_destination_document_outside_the_export_skips_that_whole_communication(conn):
+    """Sync can attach a new PDF on production after the clone and reopen the communication.
+    Forcing it to `processed` would leave that document unread forever (the LLM stage only
+    reads `pending`), so the communication is skipped and listed, status untouched."""
+    v = await vehicle(conn)
+    cid = await comm(conn, v)
+    payload = json.loads(json.dumps(await cs.export_records(conn, [v])))
+    await conn.execute(BLANK_DOC, [cid])
+    await conn.execute(BLANK_COMM, [cid])
+    extra_url = f"https://{NS}/{cid}/late.pdf"
+    await conn.execute(
+        "INSERT INTO comm_documents (communication_id, url) VALUES ($1, $2)", cid, extra_url
+    )
+
+    code, report = await cs.apply_records(conn, payload, apply=True, allow_skips=True)
+
+    nid = payload["communications"][0]["nhtsa_id"]
+    assert code == 1
+    assert report.skipped == [f"communication {nid} has 1 document(s) not in the export: {extra_url}"]
+    row = await conn.fetchrow("SELECT status, severity_source FROM communications WHERE id=$1", cid)
+    assert (row["status"], row["severity_source"]) == ("pending", "type")
+    assert await conn.fetchval(
+        "SELECT count(*) FROM comm_documents WHERE communication_id=$1 AND llm_summary IS NOT NULL",
+        cid,
+    ) == 0

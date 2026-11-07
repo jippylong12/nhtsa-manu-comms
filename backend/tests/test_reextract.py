@@ -241,10 +241,7 @@ async def world(monkeypatch):
         await conn.execute("DELETE FROM communications WHERE nhtsa_id LIKE $1", f"{NS}-%")
         await conn.execute("DELETE FROM vehicles WHERE make = $1", NS)
         await conn.execute("DELETE FROM usage_events WHERE meta->>'ns' = $1", NS)
-        await conn.execute(
-            "DELETE FROM pipeline_runs WHERE job IN ('reextract', 'reextract-reset') AND id > $1",
-            w.baseline_run,
-        )
+        await conn.execute("DELETE FROM pipeline_runs WHERE id > $1", w.baseline_run)
         await conn.close()
 
 
@@ -493,7 +490,7 @@ def _patch_batch_path(monkeypatch, world, *, per_doc_cost=0.001, collect_spend=0
     """Fake the Batch API calls and the price estimate; records how they were called."""
     rec = SimpleNamespace(submits=[], collects=[])
 
-    async def cost_per_document():
+    async def per_document_estimate(conn, sync):
         return per_doc_cost
 
     async def fake_submit(limit=None, vehicle_id=None):
@@ -524,7 +521,7 @@ def _patch_batch_path(monkeypatch, world, *, per_doc_cost=0.001, collect_spend=0
             processed=0, failed=0, tokens_in=0, tokens_out=0, cost_usd=0.0, errors=[]
         )
 
-    monkeypatch.setattr("src.refresh.estimate.cost_per_document", cost_per_document)
+    monkeypatch.setattr(process, "_per_document_estimate", per_document_estimate)
     monkeypatch.setattr(llm_stage, "submit_batch", fake_submit)
     monkeypatch.setattr(llm_stage, "collect_batch", fake_collect)
     return rec
@@ -556,8 +553,8 @@ async def test_a_batch_estimate_at_or_over_the_cap_stops_before_submitting(world
     vehicle = await world.vehicle()
     for _ in range(2):
         await world.comm(vehicle, status="pending", summarised=False)
-    # 2 documents x $1.00 / 2 (batch pricing) = $1.00 estimate against a $1.00 cap
-    batch = _patch_batch_path(monkeypatch, world, per_doc_cost=1.0)
+    # 2 documents x $0.50 (already the Batch-path figure) = $1.00 estimate against a $1.00 cap
+    batch = _patch_batch_path(monkeypatch, world, per_doc_cost=0.5)
 
     code = await process.reextract(vehicle, cap_usd=1.0, sync=False, limit=None)
 
@@ -583,3 +580,161 @@ async def test_a_ledger_over_the_cap_after_the_batch_is_collected_exits_three(wo
     final = await world.last_run("reextract")
     assert final["ok"] is False
     assert final["error"] == "cap reached"
+
+
+# --- review fixes (closeout) --------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_estimate_at_the_cap_is_refused_before_the_reset_so_nothing_is_wiped(
+    world, monkeypatch
+):
+    """The cap used to be checked after the reset: the corpus was emptied, then nothing was
+    submitted, and the run exited 3 with every bulletin unsummarised."""
+    vehicle = await world.vehicle()
+    kept = await world.comm(vehicle)
+    await world.comm(vehicle)
+    batch = _patch_batch_path(monkeypatch, world, per_doc_cost=1.0)
+
+    code = await process.reextract(vehicle, cap_usd=1.0, sync=False, limit=None)
+
+    assert code == 3
+    assert await world.last_run("reextract-reset") is None, "refused before the reset"
+    assert (await world.doc_rows(kept))[0]["llm_summary"] == "summary"
+    assert (await world.comm_row(kept))["status"] == "processed"
+    assert batch.submits == [] and batch.collects == []
+    assert world.calls == [], "no stage ran"
+    final = await world.last_run("reextract")
+    assert final["ok"] is False and final["error"] == "cap reached"
+
+
+@pytest.mark.asyncio
+async def test_the_estimate_is_the_ledger_mean_for_the_current_model_and_path_without_halving(
+    world, monkeypatch
+):
+    """Batch rows are recorded at the discounted price already; halving them again under-quoted
+    a Batch run by half, and a model or effort change by whatever the history was."""
+    from src.config import get_settings
+
+    vehicle = await world.vehicle()
+    comm_id = await world.comm(vehicle, docs=2)
+    doc_ids = [d["id"] for d in await world.doc_rows(comm_id)]
+    model = get_settings().extraction_model
+    for doc_id, cost in zip(doc_ids, (0.0010, 0.0030)):
+        await world.conn.execute(
+            """
+            INSERT INTO usage_events (kind, model, tokens_in, tokens_out, cost_usd,
+                document_id, communication_id, meta)
+            VALUES ('llm_extract', $1, 9000, 1800, $2, $3, $4, $5::jsonb)
+            """,
+            model,
+            cost,
+            doc_id,
+            comm_id,
+            json.dumps({"ns": NS, "path": "batch", "project": "test"}),
+        )
+    # A stale low-effort live row at a tenth of the price must not drag the Batch mean down.
+    await world.conn.execute(
+        """
+        INSERT INTO usage_events (kind, model, tokens_in, tokens_out, cost_usd,
+            document_id, communication_id, meta)
+        VALUES ('llm_extract', $1, 3000, 600, 0.0001, $2, $3, $4::jsonb)
+        """,
+        model,
+        doc_ids[0],
+        comm_id,
+        json.dumps({"ns": NS, "path": "live"}),
+    )
+
+    batch_estimate = await process._per_document_estimate(world.conn, sync=False)
+
+    # The embed share is the database's own ledger mean per unit (real history on the
+    # replica, cents per thousand documents); it is added, never discounted.
+    embed_share = float(
+        await world.conn.fetchval(
+            "SELECT coalesce(sum(cost_usd) / nullif(sum(unit_count), 0), 0) "
+            "FROM usage_events WHERE kind = 'embed'"
+        )
+    )
+    assert abs(batch_estimate - embed_share - 0.0020) < 1e-9, "mean of the two Batch rows, not halved"
+
+
+@pytest.mark.asyncio
+async def test_resume_requeues_an_extract_stage_network_failure_but_not_a_corrupt_pdf(world):
+    """A network drop during extract writes `document <file>: ConnectError ...`, which the
+    resume patterns did not match, so such a run could never be finished."""
+    vehicle = await world.vehicle()
+    dropped = await world.comm(
+        vehicle,
+        status="failed",
+        summarised=False,
+        reason="document MC-1.pdf: ConnectError: [Errno 8] nodename nor servname provided",
+    )
+    corrupt = await world.comm(
+        vehicle, status="failed", summarised=False, reason="document MC-2.pdf: pdf open failed: x"
+    )
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=True, limit=None, resume=True)
+
+    assert code == 1, "the corrupt one stays failed"
+    assert (await world.comm_row(dropped))["status"] == "processed"
+    assert (await world.doc_rows(dropped))[0]["llm_summary"] == "new"
+    assert (await world.comm_row(corrupt))["status"] == "failed"
+    assert json.loads((await world.last_run("reextract"))["counts"])["requeued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_batch_still_out_from_an_earlier_run_blocks_a_new_submission(world, monkeypatch):
+    """Submitting the same pending documents into a second batch pays twice and drops the first
+    batch's results as unmatched when it ends."""
+    vehicle = await world.vehicle()
+    await world.comm(vehicle, status="pending", summarised=False)
+    await world.conn.execute(
+        "INSERT INTO pipeline_runs (job, finished_at, ok, counts) "
+        "VALUES ('llm', now(), true, $1::jsonb)",
+        json.dumps({"mode": "batch-submitted", "jobs": ["msgbatch_earlier"]}),
+    )
+    batch = _patch_batch_path(monkeypatch, world)
+
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=False, limit=None, resume=True)
+
+    assert code == 1
+    assert batch.submits == []
+    assert await world.pending_docs(vehicle) == 1
+
+    # Once a collection records the same id, the block lifts.
+    await world.conn.execute(
+        "INSERT INTO pipeline_runs (job, finished_at, ok, counts) "
+        "VALUES ('llm', now(), true, $1::jsonb)",
+        json.dumps({"mode": "batch", "jobs": ["msgbatch_earlier"]}),
+    )
+    code = await process.reextract(vehicle, cap_usd=5.0, sync=False, limit=None, resume=True)
+
+    assert code == 0
+    assert batch.submits == [(None, vehicle)]
+
+
+def test_collect_waits_the_whole_batch_window_and_exits_one_when_a_batch_has_not_ended(
+    monkeypatch,
+):
+    """`--collect` used the one-hour default wait, returned 0 and stored nothing for a batch
+    still in the queue, so the operator resumed and paid for the same documents again."""
+    seen = {}
+
+    async def fake_collect(batch_ids, poll_seconds=30, max_wait=3600):
+        seen.update(ids=list(batch_ids), poll_seconds=poll_seconds, max_wait=max_wait)
+        return SimpleNamespace(
+            processed=0, failed=0, tokens_in=0, tokens_out=0, cost_usd=0.0,
+            errors=["batch b1 not ended after 90000s"], unfinished=["b1"],
+        )
+
+    async def no_close():
+        return None
+
+    monkeypatch.setattr(llm_stage, "collect_batch", fake_collect)
+    monkeypatch.setattr(process, "close_pool", no_close)
+    monkeypatch.setattr("sys.argv", ["process", "--collect", "b1"])
+
+    assert process.main() == 1
+    assert seen["ids"] == ["b1"]
+    assert seen["max_wait"] >= 86400 and seen["poll_seconds"] == process.BATCH_POLL_SECONDS

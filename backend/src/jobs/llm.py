@@ -171,6 +171,8 @@ class LLMStats:
     tokens_out: int = 0
     cost_usd: float = 0.0
     errors: list[str] = field(default_factory=list)
+    # Batch ids still running when collect_batch gave up waiting; nothing of theirs is stored.
+    unfinished: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
@@ -822,6 +824,8 @@ async def collect_batch(
                 log.warning(
                     "batch %s still %s after %ds; leaving it running", batch_id, status, waited
                 )
+                stats.unfinished.append(batch_id)
+                stats.errors.append(f"batch {batch_id} not ended after {waited}s")
                 break
             await asyncio.sleep(poll_seconds)
             waited += poll_seconds
