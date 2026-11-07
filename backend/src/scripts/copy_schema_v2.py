@@ -207,29 +207,52 @@ class Report:
         return out
 
 
+PROGRESS_EVERY = 100
+
+
 async def _plan_and_write(
     conn: asyncpg.Connection, payload: dict[str, Any], write: bool
 ) -> Report:
+    """Compare every exported record with the destination and, when ``write``, update it.
+
+    The destination rows are fetched in two queries up front and the updates go out through
+    ``executemany``; against a remote database one round trip per bulletin and per document
+    made a 773-bulletin dry run take minutes with nothing on screen. Progress is logged every
+    ``PROGRESS_EVERY`` communications.
+    """
     report = Report()
-    for rec in payload["communications"]:
+    records = payload["communications"]
+    nids = [rec["nhtsa_id"] for rec in records]
+    comm_rows = await conn.fetch(
+        f"SELECT id, nhtsa_id, {', '.join(COMM_COLUMNS)} FROM communications "
+        "WHERE nhtsa_id = ANY($1::text[])",
+        nids,
+    )
+    comms_by_nid = {r["nhtsa_id"]: r for r in comm_rows}
+    doc_rows = await conn.fetch(
+        f"SELECT id, communication_id, url, {_DOC_SELECT} FROM comm_documents "
+        "WHERE communication_id = ANY($1::bigint[])",
+        [r["id"] for r in comm_rows],
+    )
+    docs_by_comm: dict[int, dict[str, Any]] = {}
+    for d in doc_rows:
+        docs_by_comm.setdefault(d["communication_id"], {})[d["url"]] = d
+
+    comm_updates: list[tuple] = []
+    doc_updates: list[tuple] = []
+    total = len(records)
+    for i, rec in enumerate(records, 1):
         nid = rec["nhtsa_id"]
-        row = await conn.fetchrow(
-            f"SELECT id, {', '.join(COMM_COLUMNS)} FROM communications WHERE nhtsa_id = $1", nid
-        )
+        row = comms_by_nid.get(nid)
         if row is None:
             report.skipped.append(f"communication {nid}")
             continue
         comm_id = row["id"]
+        dest_docs = docs_by_comm.get(comm_id, {})
         # A document the destination has and the export does not (sync attached a new PDF
         # there after the clone) would be left unread while its communication is forced to
         # `processed`, and the LLM stage only reads `pending`. Skip the whole communication.
-        dest_urls = {
-            r["url"]
-            for r in await conn.fetch(
-                "SELECT url FROM comm_documents WHERE communication_id = $1", comm_id
-            )
-        }
-        extra = sorted(dest_urls - {d["url"] for d in rec["documents"]})
+        extra = sorted(set(dest_docs) - {d["url"] for d in rec["documents"]})
         if extra:
             report.skipped.append(
                 f"communication {nid} has {len(extra)} document(s) not in the export: "
@@ -241,15 +264,9 @@ async def _plan_and_write(
             report.communications_identical += 1
         else:
             report.communications_updated += 1
-            if write:
-                await conn.execute(_UPDATE_COMM, comm_id, *wanted)
+            comm_updates.append((comm_id, *wanted))
         for doc in rec["documents"]:
-            drow = await conn.fetchrow(
-                f"SELECT id, {_DOC_SELECT} FROM comm_documents "
-                "WHERE communication_id = $1 AND url = $2",
-                comm_id,
-                doc["url"],
-            )
+            drow = dest_docs.get(doc["url"])
             if drow is None:
                 report.skipped.append(f"document {nid} {doc['url']}")
                 continue
@@ -258,8 +275,22 @@ async def _plan_and_write(
                 report.documents_identical += 1
             else:
                 report.documents_updated += 1
-                if write:
-                    await conn.execute(_UPDATE_DOC, drow["id"], *dwanted)
+                doc_updates.append((drow["id"], *dwanted))
+        if i % PROGRESS_EVERY == 0 or i == total:
+            log.info(
+                "%d/%d communications compared: %d to update, %d documents to update, %d skipped",
+                i,
+                total,
+                report.communications_updated,
+                report.documents_updated,
+                len(report.skipped),
+            )
+    if write:
+        if comm_updates:
+            await conn.executemany(_UPDATE_COMM, comm_updates)
+        if doc_updates:
+            await conn.executemany(_UPDATE_DOC, doc_updates)
+        log.info("wrote %d communications and %d documents", len(comm_updates), len(doc_updates))
     return report
 
 
