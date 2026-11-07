@@ -1232,3 +1232,91 @@ def test_score_cli_writes_to_score_out_and_restricts_to_the_subset(tmp_path, mon
     assert score["arms"]["H-pdf-max"]["n"] == 2
     assert score["arms"]["H-pdf-max"]["vs_reference"]["symptoms"] == 1.0
     assert bs.main(["--run-dir", str(run), "--arms", "S-pdf", "--reference-arm", "nope"]) == 2
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+def test_a_reference_arm_that_is_not_among_the_scored_arms_is_still_compared_against(tmp_path):
+    ref = _out(symptoms=["engine stalls"], remedy="Replace the pump")
+    _write_arm(tmp_path, "S-pdf", [_line("S-pdf", 1, ref), _line("S-pdf", 2, ref)])
+    _write_arm(tmp_path, "H-pdf-max", [_line("H-pdf-max", i, ref) for i in (1, 2)])
+    _write_reference(tmp_path, [1, 2])
+
+    score = bs.score_run(tmp_path, ["H-pdf-max"], reference_arm="S-pdf")
+
+    assert score["arms_present"] == ["H-pdf-max"]
+    vs = score["arms"]["H-pdf-max"]["vs_reference"]
+    assert vs["n"] == 2 and vs["symptoms"] == 1.0
+    with pytest.raises(ValueError, match="no results"):
+        bs.score_run(tmp_path, ["H-pdf-max"], reference_arm="H-pdf-high")
+
+
+def test_subset_scoring_refuses_rather_than_silently_scoring_every_document(tmp_path):
+    _write_arm(tmp_path, "S-pdf", [_line("S-pdf", 1, _out())])
+    _write_reference(tmp_path, [1])
+
+    assert bs.main(["--run-dir", str(tmp_path), "--arms", "S-pdf", "--subset"]) == 2
+    assert not (tmp_path / "score.json").exists()
+
+
+async def test_an_account_error_stops_the_six_way_judge_and_writes_nothing(pdf6_env):
+    import httpx
+
+    def no_credit(content, schema):
+        raise anthropic.AuthenticationError(
+            "invalid x-api-key",
+            response=httpx.Response(401, request=httpx.Request("POST", "https://x.test")),
+            body=None,
+        )
+
+    pdf6_env.monkeypatch.setattr(bs, "_generate_pdf6", no_credit)
+
+    with pytest.raises(bs.eb.LiveCallFatal):
+        await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=3, n_random=0)
+
+    path = pdf6_env.run_dir / "judge-pdf6" / "judge.jsonl"
+    assert not path.exists() or _lines(path) == []
+    assert len(bs.plan_pdf6(pdf6_env.run_dir, n_hard=3, n_random=0).jobs) == 3
+
+
+async def test_an_overloaded_judge_call_leaves_the_document_for_the_next_run(pdf6_env):
+    import httpx
+
+    fail = {"on": True}
+    real = bs._generate_pdf6
+
+    def overloaded(content, schema):
+        if fail["on"]:
+            raise anthropic.InternalServerError(
+                "overloaded",
+                response=httpx.Response(529, request=httpx.Request("POST", "https://x.test")),
+                body=None,
+            )
+        return real(content, schema)
+
+    pdf6_env.monkeypatch.setattr(bs, "_generate_pdf6", overloaded)
+
+    out = await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=2, n_random=0)
+
+    assert out["judged"] == 0 and out["retry_later"] == 2
+    fail["on"] = False
+    again = await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=2, n_random=0)
+    assert again["judged"] == 2
+    lines = _lines(pdf6_env.run_dir / "judge-pdf6" / "judge.jsonl")
+    assert len(lines) == 2 and all(x["error"] is None for x in lines)
+
+
+@pytest.mark.parametrize("judge_dir", [".", "../elsewhere"])
+def test_a_judge_folder_outside_the_run_dir_is_refused_so_its_spend_cannot_escape_the_cap(
+    pdf6_env, judge_dir
+):
+    argv = ["--run-dir", str(pdf6_env.run_dir), "--judge-pdf", "--judge-dir", judge_dir]
+    pdf6_env.monkeypatch.setattr(bs, "ensure_reference", _no_reference_refresh)
+
+    assert bs.main([*argv, "--estimate"]) == 2
+    assert pdf6_env.calls == []
+
+
+async def _no_reference_refresh(*_a, **_k):
+    return None

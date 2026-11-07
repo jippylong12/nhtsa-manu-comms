@@ -334,11 +334,23 @@ def score_run(
     run_dir = pathlib.Path(run_dir)
     wanted = resolve_arms(arms)
     results = load_results(run_dir, wanted)
-    if doc_ids is not None:
-        keep = set(doc_ids)
+    keep = set(doc_ids) if doc_ids is not None else None
+    if keep is not None:
         results = {a: [r for r in rows if r["doc_id"] in keep] for a, rows in results.items()}
+    reference_rows: list[dict] = []
+    if reference_arm:
+        # Read on its own so the reference need not be one of the scored arms; with no results
+        # every vs_reference would silently come out empty.
+        resolve_arms([reference_arm])
+        ref_path = run_dir / reference_arm / "results.jsonl"
+        if not ref_path.exists():
+            raise ValueError(f"reference arm {reference_arm!r} has no results.jsonl in {run_dir}")
+        reference_rows = [r for r in _read_jsonl(ref_path) if keep is None or r["doc_id"] in keep]
     reference = load_reference(run_dir)
     by_doc = valid_outputs_by_doc(results)
+    ref_by_doc = {
+        r["doc_id"]: r["output"] for r in reference_rows if r.get("valid") and r.get("output")
+    }
 
     arms: dict[str, Any] = {}
     for arm, rows in results.items():
@@ -356,11 +368,6 @@ def score_run(
             for r in valid
             if reference.get(r["doc_id"])
         ]
-        ref_by_doc = {
-            r["doc_id"]: r["output"]
-            for r in (results.get(reference_arm) or [])
-            if r.get("valid") and r.get("output")
-        }
         vs_reference = (
             [
                 compare_outputs(r["output"], ref_by_doc[r["doc_id"]])
@@ -1194,7 +1201,7 @@ async def run_judge_pdf6(
             [{"doc_id": j.doc_id, "url": j.url} for j in plan.jobs if j.url]
         )
 
-    judged, stopped_at_cap = 0, False
+    judged, retry_later, stopped_at_cap = 0, 0, False
     with (out_dir / "judge.jsonl").open("a") as fh:
         for job in plan.jobs:
             b64, reason = _judge_source(job, pdfs)
@@ -1221,6 +1228,16 @@ async def run_judge_pdf6(
                 try:
                     got = await asyncio.to_thread(_generate_pdf6, content, schema)
                 except Exception as e:  # noqa: BLE001
+                    if isinstance(e, anthropic.APIError) and eb._is_fatal(e):
+                        # Bad key, no access, no credit: written as an error line it would mark
+                        # every remaining document judged, and a re-run would skip them.
+                        raise eb.LiveCallFatal(
+                            f"judge-pdf6 doc {job.doc_id}: {e}; nothing written for it"
+                        ) from e
+                    if eb._is_retryable(e):
+                        # Still failing after the SDK's retries: no line, so a re-run judges it.
+                        got = None
+                        break
                     got = {
                         "verdict": None,
                         "tokens_in": 0,
@@ -1247,6 +1264,9 @@ async def run_judge_pdf6(
                 break
             if stopped_at_cap:
                 break
+            if got is None:
+                retry_later += 1
+                continue
             verdict = got.get("verdict")
             error = got.get("error") or _check_pdf6_verdict(verdict, job.labels)
             fh.write(
@@ -1273,6 +1293,7 @@ async def run_judge_pdf6(
     return {
         "judged": judged,
         "skipped": len(plan.done),
+        "retry_later": retry_later,
         "estimate_usd": plan.estimate,
         "stopped_at_cap": stopped_at_cap,
         "out_dir": str(out_dir),
@@ -1465,6 +1486,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return 2
             asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference, arms=arms))
             out_dir = run_dir / (args.judge_dir or PDF6_DIR)
+            target, root = out_dir.resolve(), run_dir.resolve()
+            if target == root or not target.is_relative_to(root):
+                # Outside the run dir its spend is invisible to the cap; the run dir itself
+                # would mix six-way lines into the five-way judge.jsonl.
+                raise ValueError(f"--judge-dir must be a folder inside the run dir, not {out_dir}")
             gap = ALL_GAP_FIELDS if args.gap_fields == "all" else GAP_FIELDS
             plan = plan_pdf6(
                 run_dir,
@@ -1520,10 +1546,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
         if args.reference_arm and args.reference_arm not in eb.ALL_ARMS:
             raise ValueError(f"unknown reference arm {args.reference_arm!r}")
+        subset = sonnet_doc_ids() if args.subset else None
+        if args.subset and subset is None:
+            raise ValueError(f"--subset needs the Sonnet subset file {eb.SONNET_SAMPLE_PATH}")
         score = score_run(
             run_dir,
             arms,
-            doc_ids=sonnet_doc_ids() if args.subset else None,
+            doc_ids=subset,
             reference_arm=args.reference_arm,
         )
         (args.score_out or run_dir / "score.json").write_text(

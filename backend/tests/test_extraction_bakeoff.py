@@ -1809,3 +1809,49 @@ async def test_a_live_arm_refuses_to_send_when_pairwise_and_probe_spend_leave_no
 
 def test_the_cap_is_thirty_dollars():
     assert eb.CAP_USD == 30.0
+
+
+# ---- review fixes: a dropped or failed stream is retried, nested judge folders count
+
+
+async def test_a_connection_dropped_mid_stream_is_retried_not_a_crash_of_the_whole_arm(live):
+    def drop_first(n, params):
+        if n == 1:
+            raise httpx.RemoteProtocolError("peer closed connection without sending complete body")
+
+    client = FakeStreamLive(on_call=drop_first)
+
+    out = await _run_pdf_arm(live, "H-pdf-xhigh", anthropic_client=client)
+
+    assert client.streamed == 3, "the dropped call is tried again"
+    assert out["H-pdf-xhigh"].valid == 2 and live.sleeps == [eb.LIVE_BACKOFF_SECONDS]
+
+
+async def test_an_api_error_event_mid_stream_is_retried_not_written_as_a_final_error(live):
+    request = httpx.Request("POST", "https://api.anthropic.test/v1/messages")
+    body = {"type": "error", "error": {"type": "api_error", "message": "Internal server error"}}
+
+    def fail_first(n, params):
+        if n == 1:
+            # What the SDK raises for an "error" SSE event: the stream's HTTP status is 200.
+            raise anthropic.APIStatusError(
+                str(body), response=httpx.Response(200, request=request), body=body
+            )
+
+    client = FakeStreamLive(on_call=fail_first)
+
+    await _run_pdf_arm(live, "H-pdf-max", anthropic_client=client)
+
+    lines = _results(live.run_dir, "H-pdf-max")
+    assert client.streamed == 3 and all(x["valid"] and x["error"] is None for x in lines)
+
+
+def test_a_judge_folder_nested_deeper_than_one_level_still_counts_toward_the_cap():
+    run = eb.BAKEOFF_ROOT / "20261106-2117"
+    (run / "judge-effort" / "v2").mkdir(parents=True)
+    (run / "judge-effort" / "v2" / "judge.jsonl").write_text(json.dumps({"cost_usd": 1.25}) + "\n")
+    (run / "pairwise" / "again").mkdir(parents=True)
+    (run / "pairwise" / "again" / "verdicts.jsonl").write_text(json.dumps({"cost_usd": 0.5}) + "\n")
+
+    assert eb.judge_spend(run) == pytest.approx(1.25)
+    assert eb.experiment_spend(run) == pytest.approx(1.75)

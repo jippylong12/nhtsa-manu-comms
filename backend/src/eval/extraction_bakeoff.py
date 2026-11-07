@@ -533,7 +533,9 @@ class _AnthropicArm:
 
     provider = "anthropic"
     est_pdf_tokens_per_page = PDF_TOKENS_PER_PAGE
-    api_errors = (anthropic.APIError,)
+    # A streamed response is read after the SDK's retry layer, so a connection dropped mid-stream
+    # surfaces as a raw httpx error rather than anthropic.APIConnectionError.
+    api_errors = (anthropic.APIError, httpx.TransportError)
 
     def __init__(
         self,
@@ -1060,12 +1062,12 @@ def _jsonl_cost(path: pathlib.Path) -> float:
 
 def judge_spend(run_dir: pathlib.Path) -> float:
     """What the blind judges (``bakeoff_score``) have spent in ``run_dir``: the five-way
-    ``judge.jsonl`` and every ``<subdir>/judge.jsonl`` (the six-way ``judge-pdf6``)."""
+    ``judge.jsonl`` and every ``judge.jsonl`` below it at any depth (the six-way
+    ``judge-pdf6``, or any ``--judge-dir``)."""
     run_dir = pathlib.Path(run_dir)
-    total = _jsonl_cost(run_dir / "judge.jsonl")
-    if run_dir.exists():
-        total += sum(_jsonl_cost(p) for p in sorted(run_dir.glob("*/judge.jsonl")))
-    return total
+    if not run_dir.exists():
+        return 0.0
+    return sum(_jsonl_cost(p) for p in sorted(run_dir.rglob("judge.jsonl")))
 
 
 def side_spend(run_dir: pathlib.Path) -> float:
@@ -1076,7 +1078,7 @@ def side_spend(run_dir: pathlib.Path) -> float:
     run_dir = pathlib.Path(run_dir)
     if not run_dir.exists():
         return 0.0
-    total = sum(_jsonl_cost(p) for p in sorted(run_dir.glob("*/verdicts.jsonl")))
+    total = sum(_jsonl_cost(p) for p in sorted(run_dir.rglob("verdicts.jsonl")))
     for path in sorted(run_dir.glob("probe-*/results.json")):
         for key, variant in _read_json(path).items():
             if isinstance(variant, dict) and not key.startswith("_"):
@@ -1315,17 +1317,27 @@ def _sleep(seconds: float) -> None:
 
 
 def _is_retryable(error: Exception) -> bool:
-    """Rate limits, overload (529), other 5xx, timeouts and dropped connections."""
+    """Rate limits, overload (529), other 5xx, timeouts and dropped connections, including an
+    ``api_error`` or ``overloaded_error`` event in the middle of a stream (the HTTP status
+    of a stream is 200, so only the event's type says it was a server fault)."""
     if isinstance(
         error,
-        (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError),
+        (
+            anthropic.RateLimitError,
+            anthropic.APIConnectionError,
+            anthropic.InternalServerError,
+            httpx.TransportError,
+        ),
     ):
         return True
     if isinstance(error, anthropic.APIStatusError):
+        body = error.body if isinstance(error.body, dict) else {}
+        inner = body.get("error") if isinstance(body.get("error"), dict) else {}
         return (
             error.status_code in (408, 409, 429)
             or error.status_code >= 500
             or "overloaded" in str(error).lower()
+            or inner.get("type") in ("api_error", "overloaded_error")
         )
     return False
 
