@@ -1,16 +1,22 @@
 """Scoring and the blind judge for the extraction bake-off (JIP-1568).
 
-Reads the three ``results.jsonl`` files the harness (``extraction_bakeoff``)
-wrote, and produces objective scores that need no model, then an optional blind
-Opus judge. Run as ``python -m src.eval.bakeoff_score --run-dir RUN [--judge]``.
+Reads the ``results.jsonl`` files the harness (``extraction_bakeoff``) wrote, and
+produces objective scores that need no model, then an optional blind Opus judge.
+Run as ``python -m src.eval.bakeoff_score --run-dir RUN [--arms G H-text-live ...]
+[--judge [--estimate]]``.
+
+It works over an arm list: by default ``G`` and the four live arms. ``H-text`` and
+``H-pdf`` (their batches were canceled) are superseded by the live re-run and are
+scored only when ``--arms`` names them.
 
 Every metric is a pure function over dicts. The database is read only for the
 stored (production) output, ``associatedProducts`` and the source text, and that
 read is frozen into ``<run-dir>/reference.json`` so scoring, judging and the
 report can all be re-run without it.
 
-An arm that has no ``results.jsonl`` (a provider batch still running) is simply
-absent: everything here works on the arms that exist and says which are missing.
+An arm that has no ``results.jsonl`` (a live arm not run yet, a batch still running)
+is simply absent: everything here works on the arms that exist and says which are
+missing.
 """
 
 import argparse
@@ -21,8 +27,9 @@ import random
 import re
 import sys
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from src.eval import extraction_bakeoff as eb
 from src.usage import pricing
@@ -134,14 +141,26 @@ def _read_jsonl(path: pathlib.Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
 
 
-def present_arms(run_dir: pathlib.Path) -> list[str]:
-    """The arms with a ``results.jsonl``, in harness order; the rest are missing."""
-    return [a for a in eb.ARMS if (pathlib.Path(run_dir) / a / "results.jsonl").exists()]
+def resolve_arms(arms: Optional[Iterable[str]] = None) -> list[str]:
+    """``arms`` (or the default five) in the harness's order. Unknown names are an error."""
+    wanted = list(arms) if arms else list(eb.DEFAULT_ARMS)
+    for a in wanted:
+        if a not in eb.ALL_ARMS:
+            raise ValueError(f"unknown arm {a!r}; expected some of {', '.join(eb.ALL_ARMS)}")
+    return sorted(set(wanted), key=eb.ALL_ARMS.index)
 
 
-def load_results(run_dir: pathlib.Path) -> dict[str, list[dict]]:
+def present_arms(run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None) -> list[str]:
+    """The wanted arms that have a ``results.jsonl``, in harness order; the rest are missing."""
+    return [a for a in resolve_arms(arms) if (pathlib.Path(run_dir) / a / "results.jsonl").exists()]
+
+
+def load_results(
+    run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None
+) -> dict[str, list[dict]]:
     return {
-        a: _read_jsonl(pathlib.Path(run_dir) / a / "results.jsonl") for a in present_arms(run_dir)
+        a: _read_jsonl(pathlib.Path(run_dir) / a / "results.jsonl")
+        for a in present_arms(run_dir, arms)
     }
 
 
@@ -196,12 +215,14 @@ async def fetch_reference(doc_ids: list[int]) -> dict[int, dict]:
     return out
 
 
-async def ensure_reference(run_dir: pathlib.Path, refresh: bool = False) -> dict[int, dict]:
+async def ensure_reference(
+    run_dir: pathlib.Path, refresh: bool = False, arms: Optional[Iterable[str]] = None
+) -> dict[int, dict]:
     """``reference.json`` for the run, fetched from the database once and then reused."""
     run_dir = pathlib.Path(run_dir)
     if not refresh and (run_dir / "reference.json").exists():
         return load_reference(run_dir)
-    doc_ids = sorted({r["doc_id"] for rows in load_results(run_dir).values() for r in rows})
+    doc_ids = sorted({r["doc_id"] for rows in load_results(run_dir, arms).values() for r in rows})
     ref = await fetch_reference(doc_ids)
     (run_dir / "reference.json").write_text(
         json.dumps({str(k): v for k, v in sorted(ref.items())}, ensure_ascii=False) + "\n"
@@ -239,6 +260,24 @@ def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[float
     return (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
 
 
+def _wall_seconds(run_dir: pathlib.Path, arm: str, rows: list[dict]) -> Optional[float]:
+    """A batch arm: submitted to collected (``batch.json``). A live arm: the sum of its runs
+    (``live.json``)."""
+    arm_dir = run_dir / arm
+    if arm in eb.LIVE_ARMS:
+        path = arm_dir / "live.json"
+        if not path.exists():
+            return None
+        info = json.loads(path.read_text())
+        return info.get("wall_seconds") or _seconds_between(
+            info.get("started_at"), info.get("finished_at")
+        )
+    path = arm_dir / "batch.json"
+    submitted = json.loads(path.read_text()).get("submitted_at") if path.exists() else None
+    finished = max((r["collected_at"] for r in rows if r.get("collected_at")), default=None)
+    return _seconds_between(submitted, finished)
+
+
 def disagreement(outputs: dict[str, dict]) -> Optional[float]:
     """How much the arms' outputs for one document differ on symptoms and remedy.
 
@@ -266,10 +305,16 @@ def valid_outputs_by_doc(results: dict[str, list[dict]]) -> dict[int, dict[str, 
     return out
 
 
-def score_run(run_dir: pathlib.Path) -> dict[str, Any]:
-    """Every objective metric for the arms that have results. Pure: writes nothing."""
+def score_run(run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None) -> dict[str, Any]:
+    """Every objective metric for the arms that have results. Pure: writes nothing.
+
+    Per-arm figures are over that arm's own documents; ``pairwise`` agreement is over
+    the documents each pair shares. Cost per 1,000 documents divides by the documents
+    the arm was billed for, and a live arm also gets its batch-equivalent (half).
+    """
     run_dir = pathlib.Path(run_dir)
-    results = load_results(run_dir)
+    wanted = resolve_arms(arms)
+    results = load_results(run_dir, wanted)
     reference = load_reference(run_dir)
     by_doc = valid_outputs_by_doc(results)
 
@@ -290,13 +335,13 @@ def score_run(run_dir: pathlib.Path) -> dict[str, Any]:
             if reference.get(r["doc_id"])
         ]
         usd = sum(r.get("cost_usd") or 0.0 for r in rows)
-        batch_path = run_dir / arm / "batch.json"
-        submitted = (
-            json.loads(batch_path.read_text()).get("submitted_at") if batch_path.exists() else None
-        )
-        finished = max((r["collected_at"] for r in rows if r.get("collected_at")), default=None)
+        billed = sum(1 for r in rows if (r.get("cost_usd") or 0.0) > 0)
+        per_1000 = usd / billed * 1000 if billed else None
+        mode = eb.arm_mode(arm)
         arms[arm] = {
             "model": rows[0].get("model") if rows else None,
+            "mode": mode,
+            "input": eb.arm_input(arm),
             "n": n,
             "valid": len(valid),
             "validity": len(valid) / n if n else None,
@@ -311,9 +356,16 @@ def score_run(run_dir: pathlib.Path) -> dict[str, Any]:
                 "tokens_in": sum(r.get("tokens_in") or 0 for r in rows),
                 "tokens_out": sum(r.get("tokens_out") or 0 for r in rows),
                 "usd": usd,
-                "usd_per_1000": usd / n * 1000 if n else None,
+                "billed": billed,
+                "usd_per_1000": per_1000,
+                # A live call costs twice what the same call costs as a batch.
+                "usd_per_1000_batch_equivalent": (
+                    per_1000 * pricing.BATCH_DISCOUNT
+                    if per_1000 is not None and mode == "live"
+                    else per_1000
+                ),
             },
-            "wall_seconds": _seconds_between(submitted, finished),
+            "wall_seconds": _wall_seconds(run_dir, arm, rows),
         }
 
     pairwise: dict[str, Any] = {}
@@ -335,7 +387,11 @@ def score_run(run_dir: pathlib.Path) -> dict[str, Any]:
     return {
         "run": str(run_dir),
         "arms_present": names,
-        "arms_missing": [a for a in eb.ARMS if a not in results],
+        "arms_missing": [a for a in wanted if a not in results],
+        # The canceled batch arms, named so a reader knows where they went.
+        "arms_superseded": [
+            a for a in eb.SUPERSEDED_ARMS if a not in wanted and (run_dir / a).exists()
+        ],
         "arms": arms,
         "overall": overall,
         "pairwise": pairwise,
@@ -350,10 +406,11 @@ JUDGE_EFFORT = "high"
 JUDGE_MAX_TOKENS = 16_000
 N_HARD = 30
 N_RANDOM = 30
-# Adaptive thinking at high effort is not predictable; the cap check prices a call at
-# the prompt's size (4 characters a token) plus this many output tokens.
-JUDGE_OUT_TOKENS_EST = 4_000
-LABELS = "ABC"
+# Adaptive thinking at high effort is not predictable, and with up to five candidates to
+# weigh it thinks longer than it did for three; the estimate prices a call at the
+# prompt's size (4 characters a token) plus this many output tokens.
+JUDGE_OUT_TOKENS_EST = 6_000
+LABELS = "ABCDE"  # one per arm, up to five
 
 _LABEL_ENUM = {"type": "string", "enum": list(LABELS)}
 JUDGE_SCHEMA: dict[str, Any] = {
@@ -397,7 +454,7 @@ JUDGE_SCHEMA: dict[str, Any] = {
 }
 
 _JUDGE_INSTRUCTIONS = """You are judging structured extractions of one manufacturer communication issued for a motor vehicle. \
-Below is the source text (possibly cut short), then several candidate extractions labelled A, B, C. \
+Below is the source text (possibly cut short), then several candidate extractions, each labelled with a letter (A, B, C, ...). \
 You do not know how any candidate was produced.
 
 Judge only against the source text. For each candidate:
@@ -430,18 +487,33 @@ def build_judge_prompt(source: str, labels: dict[str, str], outputs: dict[str, d
     return "\n".join(parts)
 
 
+def sonnet_doc_ids(path: Optional[pathlib.Path] = None) -> Optional[set[int]]:
+    """The Sonnet subset's document ids, or ``None`` if that file has not been written
+    (then nothing is restricted). Read at call time so tests can point it elsewhere."""
+    path = pathlib.Path(path or eb.SONNET_SAMPLE_PATH)
+    if not path.exists():
+        return None
+    return {int(r["doc_id"]) for r in json.loads(path.read_text())}
+
+
 def select_judge_docs(
     by_doc: dict[int, dict[str, dict]],
     n_hard: int = N_HARD,
     n_random: int = N_RANDOM,
     seed: int = eb.SEED,
+    restrict_to: Optional[set[int]] = None,
 ) -> tuple[list[int], list[int]]:
-    """``(hard, random)`` document ids. Eligible documents have two or more valid outputs.
+    """``(hard, random)`` document ids. Eligible documents have two or more valid outputs
+    and, when ``restrict_to`` is given, are in it (the Sonnet subset, where every arm ran).
 
     ``hard`` is the ``n_hard`` with the largest symptom/remedy disagreement; ``random``
     is a seeded draw of ``n_random`` from the rest.
     """
-    gaps = {d: disagreement(o) for d, o in by_doc.items() if len(o) >= 2}
+    gaps = {
+        d: disagreement(o)
+        for d, o in by_doc.items()
+        if len(o) >= 2 and (restrict_to is None or d in restrict_to)
+    }
     ranked = sorted(gaps, key=lambda d: (-gaps[d], d))
     hard = ranked[:n_hard]
     rest = sorted(ranked[n_hard:])
@@ -506,8 +578,71 @@ def _read_judge_lines(run_dir: pathlib.Path) -> list[dict]:
     return _read_jsonl(path) if path.exists() else []
 
 
+@dataclass
+class JudgePlan:
+    """The judge calls still to make, and what they could cost."""
+
+    jobs: list  # (doc_id, {label: arm}, prompt)
+    stratum: dict[int, str]
+    done: set[int]
+    estimate: float
+    worst_case: float  # every call thinking all the way to JUDGE_MAX_TOKENS
+    spent: float  # the whole bake-off so far: arms and judge, every run
+
+
+def _worst_case(prompt: str) -> float:
+    # 2 characters a token and every output token used.
+    return pricing.cost_of(JUDGE_MODEL, len(prompt) // 2, JUDGE_MAX_TOKENS, batch=False)
+
+
+def plan_judge(
+    run_dir: pathlib.Path,
+    n_hard: int = N_HARD,
+    n_random: int = N_RANDOM,
+    seed: int = eb.SEED,
+    arms: Optional[Iterable[str]] = None,
+) -> JudgePlan:
+    """Which documents to judge (from the Sonnet subset when its file exists), with the
+    label shuffle and prompt for each, and the cost estimate. Calls nothing."""
+    run_dir = pathlib.Path(run_dir)
+    results = load_results(run_dir, arms)
+    reference = load_reference(run_dir)
+    by_doc = {d: o for d, o in valid_outputs_by_doc(results).items() if d in reference}
+    hard, rand = select_judge_docs(by_doc, n_hard, n_random, seed, restrict_to=sonnet_doc_ids())
+    stratum = {**{d: "random" for d in rand}, **{d: "hard" for d in hard}}
+    done = {x["doc_id"] for x in _read_judge_lines(run_dir)}
+    jobs = []
+    for d in [*hard, *rand]:
+        if d in done:
+            continue
+        labels = label_arms(d, list(by_doc[d]), seed)
+        jobs.append((d, labels, build_judge_prompt(reference[d]["source"], labels, by_doc[d])))
+    return JudgePlan(
+        jobs=jobs,
+        stratum=stratum,
+        done=done,
+        estimate=estimate_judge_cost([p for _, _, p in jobs]),
+        worst_case=sum(_worst_case(p) for _, _, p in jobs),
+        spent=eb.experiment_spend(run_dir),
+    )
+
+
+def format_plan(plan: JudgePlan) -> str:
+    """The line shown before the judge runs."""
+    return (
+        f"judge: {len(plan.jobs)} call(s) on {JUDGE_MODEL}, estimate ${plan.estimate:.4f}, "
+        f"worst case ${plan.worst_case:.4f} if every call thinks to {JUDGE_MAX_TOKENS:,} tokens; "
+        f"bake-off spent ${plan.spent:.4f}, cap ${eb.CAP_USD:.2f}, "
+        f"headroom ${eb.CAP_USD - plan.spent:.4f}"
+    )
+
+
 async def run_judge(
-    run_dir: pathlib.Path, n_hard: int = N_HARD, n_random: int = N_RANDOM, seed: int = eb.SEED
+    run_dir: pathlib.Path,
+    n_hard: int = N_HARD,
+    n_random: int = N_RANDOM,
+    seed: int = eb.SEED,
+    arms: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
     """Judge the selected documents, blind, and write ``judge.jsonl`` and ``judge_labels.json``.
 
@@ -517,26 +652,16 @@ async def run_judge(
     A document already in ``judge.jsonl`` is not judged again.
     """
     run_dir = pathlib.Path(run_dir)
-    results = load_results(run_dir)
+    plan = plan_judge(run_dir, n_hard, n_random, seed, arms)
+    jobs, stratum, done, estimate = plan.jobs, plan.stratum, plan.done, plan.estimate
     reference = load_reference(run_dir)
-    by_doc = {d: o for d, o in valid_outputs_by_doc(results).items() if d in reference}
-    hard, rand = select_judge_docs(by_doc, n_hard, n_random, seed)
-    stratum = {**{d: "random" for d in rand}, **{d: "hard" for d in hard}}
-
-    done = {x["doc_id"] for x in _read_judge_lines(run_dir)}
-    todo = [d for d in [*hard, *rand] if d not in done]
     labels_path = run_dir / "judge_labels.json"
     all_labels: dict[str, dict[str, str]] = (
         json.loads(labels_path.read_text()) if labels_path.exists() else {}
     )
-    jobs = []
-    for d in todo:
-        labels = label_arms(d, list(by_doc[d]), seed)
-        jobs.append((d, labels, build_judge_prompt(reference[d]["source"], labels, by_doc[d])))
 
-    estimate = estimate_judge_cost([p for _, _, p in jobs])
     # Arms (collected + committed) and judge, across every run of the bake-off.
-    spent = eb.experiment_spend(run_dir)
+    spent = plan.spent
     if spent + estimate > eb.CAP_USD:
         raise eb.SpendCapExceeded(
             f"refusing to judge: bake-off spent or committed ${spent:.4f} (arms and judge), "
@@ -556,8 +681,7 @@ async def run_judge(
             # The estimate above is a guess; adaptive thinking can run to max_tokens.
             # Before every call, the worst case it could cost (2 characters a token,
             # every output token used) must still fit, so the cap holds on actuals.
-            worst = pricing.cost_of(JUDGE_MODEL, len(prompt) // 2, JUDGE_MAX_TOKENS, batch=False)
-            if spent + worst > eb.CAP_USD:
+            if spent + _worst_case(prompt) > eb.CAP_USD:
                 stopped_at_cap = True
                 break
             try:
@@ -618,10 +742,16 @@ def load_judge(run_dir: pathlib.Path) -> tuple[list[dict], dict[int, dict[str, s
     return _read_judge_lines(run_dir), labels
 
 
-def summarize_judge(run_dir: pathlib.Path) -> dict[str, Any]:
-    """Judge results with labels mapped back to arms: wins, mean rank, faithfulness flags."""
+def summarize_judge(run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None) -> dict[str, Any]:
+    """Judge results with labels mapped back to arms: wins, mean rank, faithfulness flags.
+
+    Covers the wanted arms that have results, plus any arm the saved label maps name, so a
+    judge run made over a different arm list still summarizes. A label with no output
+    behind it (the schema allows up to five) is ignored.
+    """
     lines, labels = load_judge(run_dir)
-    arms = present_arms(run_dir)
+    named = {a for mapping in labels.values() for a in mapping.values()}
+    arms = sorted({*present_arms(run_dir, arms), *named}, key=eb.ALL_ARMS.index)
     wins = {a: 0 for a in arms}
     ranks: dict[str, list[int]] = {a: [] for a in arms}
     flags = {a: 0 for a in arms}
@@ -638,7 +768,7 @@ def summarize_judge(run_dir: pathlib.Path) -> dict[str, Any]:
             ranks[mapping[label]].append(pos)
         for item in verdict["faithfulness"]:
             if item.get("label") not in mapping:
-                continue  # the schema allows A-C; a label with no output behind it
+                continue  # the schema allows A-E; a label with no output behind it
             n = len(item["unsupported_claims"])
             flags[mapping[item["label"]]] += n
             flagged_docs[mapping[item["label"]]] += 1 if n else 0
@@ -665,17 +795,31 @@ def _print_summary(score: dict[str, Any]) -> None:
     print(f"arms scored: {', '.join(score['arms_present']) or 'none'}")
     if score["arms_missing"]:
         print(f"MISSING arms (no results.jsonl): {', '.join(score['arms_missing'])}")
+    if score["arms_superseded"]:
+        print(
+            f"superseded arms: {', '.join(score['arms_superseded'])} "
+            "(batch canceled, superseded by the live re-run)"
+        )
     print(
-        f"{'arm':<8} {'valid':>7} {'symp J':>7} {'rem F1':>7} {'appl':>6} {'$/1000':>8} {'wall':>8}"
+        f"{'arm':<12} {'docs':>5} {'valid':>7} {'symp J':>7} {'rem F1':>7} {'appl':>6} "
+        f"{'$/1000':>8} {'$/1000 batch':>12} {'wall':>8}"
     )
     f = lambda v, d=3: "-" if v is None else f"{v:.{d}f}"  # noqa: E731
     for arm, a in score["arms"].items():
         wall = "-" if a["wall_seconds"] is None else f"{a['wall_seconds'] / 60:.0f}m"
         print(
-            f"{arm:<8} {f(a['validity']):>7} {f(a['vs_stored']['symptoms']):>7} "
+            f"{arm:<12} {a['n']:>5} {f(a['validity']):>7} {f(a['vs_stored']['symptoms']):>7} "
             f"{f(a['vs_stored']['remedy']):>7} {f(a['applicability']['recall']):>6} "
-            f"{f(a['cost']['usd_per_1000'], 2):>8} {wall:>8}"
+            f"{f(a['cost']['usd_per_1000'], 2):>8} "
+            f"{f(a['cost']['usd_per_1000_batch_equivalent'], 2):>12} {wall:>8}"
         )
+
+
+def parse_arm_names(values: Optional[list[str]]) -> Optional[list[str]]:
+    """``--arms G,S-text`` and ``--arms G S-text`` both work."""
+    if not values:
+        return None
+    return [name for v in values for name in v.split(",") if name]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -686,10 +830,21 @@ def _parser() -> argparse.ArgumentParser:
         help="run directory (default: newest under backend/.bakeoff/)",
     )
     p.add_argument(
+        "--arms",
+        nargs="+",
+        metavar="ARM",
+        help=f"arms to score (default: {' '.join(eb.DEFAULT_ARMS)}); commas or spaces",
+    )
+    p.add_argument(
         "--refresh-reference", action="store_true", help="re-read reference.json from the database"
     )
     p.add_argument(
         "--judge", action="store_true", help="run the blind Opus judge (spends money, capped)"
+    )
+    p.add_argument(
+        "--estimate",
+        action="store_true",
+        help="with --judge: print the call count and cost estimate, then stop without calling",
     )
     p.add_argument("--n-hard", type=int, default=N_HARD, help="judge: most-disagreeing documents")
     p.add_argument("--n-random", type=int, default=N_RANDOM, help="judge: random documents")
@@ -699,22 +854,27 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parser().parse_args(argv)
     run_dir = args.run_dir or eb.latest_run_dir()
-    if run_dir is None or not present_arms(run_dir):
-        print("error: no run directory with results.jsonl; pass --run-dir", file=sys.stderr)
-        return 2
     try:
-        asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference))
+        arms = parse_arm_names(args.arms)
+        if run_dir is None or not present_arms(run_dir, arms):
+            print("error: no run directory with results.jsonl; pass --run-dir", file=sys.stderr)
+            return 2
+        asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference, arms=arms))
         if args.judge:
-            out = asyncio.run(run_judge(run_dir, args.n_hard, args.n_random))
+            plan = plan_judge(run_dir, args.n_hard, args.n_random, arms=arms)
+            print(format_plan(plan))
+            if args.estimate:
+                return 0
+            out = asyncio.run(run_judge(run_dir, args.n_hard, args.n_random, arms=arms))
             print(f"judged {out['judged']} document(s) (estimate ${out['estimate_usd']:.4f})")
             if out["stopped_at_cap"]:
                 print(
                     f"stopped early: the next call could have passed the ${eb.CAP_USD:.2f} cap",
                     file=sys.stderr,
                 )
-            print(json.dumps(summarize_judge(run_dir), indent=1))
+            print(json.dumps(summarize_judge(run_dir, arms), indent=1))
             return 0
-        score = score_run(run_dir)
+        score = score_run(run_dir, arms)
         (run_dir / "score.json").write_text(json.dumps(score, indent=1, default=str) + "\n")
         _print_summary(score)
         return 0

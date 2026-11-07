@@ -154,7 +154,7 @@ so a new call site cannot reintroduce the unbounded case by omission.
 
 ## Experiment spend
 
-Spend on a one-off experiment is marked with `usage_events.meta->>'bakeoff'`, so it can be totalled apart from production. The extraction bake-off (`src/eval/extraction_bakeoff.py`, scored by `src/eval/bakeoff_score.py`) writes `meta.bakeoff` as the arm name (`G`, `H-text`, `H-pdf`) for each arm's responses and as `judge` for the Opus judge's calls, with `meta.run` naming the run directory. Rows keep an ordinary `kind` (`llm_extract`), so the kind breakdown above still adds up; to total only the experiment, filter on the marker:
+Spend on a one-off experiment is marked with `usage_events.meta->>'bakeoff'`, so it can be totalled apart from production. The extraction bake-off (`src/eval/extraction_bakeoff.py`, scored by `src/eval/bakeoff_score.py`) writes `meta.bakeoff` as the arm name (`G`, `H-text`, `H-pdf`, `H-text-live`, `H-pdf-live`, `S-text`, `S-pdf`) for each arm's responses and as `judge` for the Opus judge's calls, with `meta.run` naming the run directory. Rows keep an ordinary `kind` (`llm_extract`), so the kind breakdown above still adds up; to total only the experiment, filter on the marker:
 
 ```sql
 SELECT meta->>'bakeoff'        AS arm,
@@ -166,4 +166,4 @@ GROUP BY ROLLUP (meta->>'bakeoff')
 ORDER BY arm NULLS LAST;
 ```
 
-The bake-off holds itself to one $10 cap shared by the arms and the judge across every run directory under `backend/.bakeoff/`, so starting a new run never resets it. `submit` reuses the newest run unless `--new-run` is passed, so an arm submitted twice is refused. The judge refuses to start when the spend so far plus its estimate would pass the cap, and before every call it checks that the call's worst case (every `max_tokens` output token used) still fits, stopping early otherwise.
+The bake-off holds itself to one $20 cap (raised from $10 on 2026-11-06 for the Sonnet arms) shared by the arms and the judge across every run directory under `backend/.bakeoff/`, so starting a new run never resets it. `submit` reuses the newest run unless `--new-run` is passed, so an arm submitted twice is refused. The judge refuses to start when the spend so far plus its estimate would pass the cap, and before every call it checks that the call's worst case (every `max_tokens` output token used) still fits, stopping early otherwise. Rows from the live arms (`run-live`, the synchronous Messages API at list price, `batch = false`) carry `meta.mode = "live"`, while the batch arms are costed at half price and carry no `mode`; `run-live` checks every call's worst case against the same cap before sending it.

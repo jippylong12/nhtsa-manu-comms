@@ -12,6 +12,7 @@ import pytest
 
 from src.eval import bakeoff_report as report
 from src.eval import bakeoff_score as bs
+from src.eval import extraction_bakeoff as eb
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +28,8 @@ def _no_real_clients(monkeypatch):
 def _isolated_bakeoff_root(tmp_path, monkeypatch):
     """Runs under the real backend/.bakeoff/ never count toward a test's cap."""
     monkeypatch.setattr(bs.eb, "BAKEOFF_ROOT", tmp_path / "bakeoff-root")
+    # No Sonnet subset file unless a test writes one: the judge and report use every document.
+    monkeypatch.setattr(bs.eb, "SONNET_SAMPLE_PATH", tmp_path / "no-sonnet-sample.json")
 
 
 # --------------------------------------------------------------------------- S1 metric math
@@ -122,7 +125,8 @@ def test_a_year_inside_a_stated_range_counts_and_a_model_must_not_match_inside_a
 
 # --------------------------------------------------------------------------- run fixtures
 
-ARMS = ("G", "H-text", "H-pdf")
+ARMS = ("G", "H-text-live", "H-pdf-live")
+FIVE = eb.DEFAULT_ARMS
 
 
 def _line(arm, doc_id, output, *, error=None, cost=0.001, tin=1000, tout=200):
@@ -145,9 +149,21 @@ def _write_arm(run_dir: pathlib.Path, arm, lines):
     d = run_dir / arm
     d.mkdir(parents=True, exist_ok=True)
     (d / "results.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
-    (d / "batch.json").write_text(
-        json.dumps({"arm": arm, "submitted_at": "2026-11-07T09:00:00+00:00", "batches": []})
-    )
+    if arm in eb.LIVE_ARMS:
+        (d / "live.json").write_text(
+            json.dumps(
+                {
+                    "arm": arm,
+                    "started_at": "2026-11-07T09:00:00+00:00",
+                    "finished_at": "2026-11-07T09:10:00+00:00",
+                    "wall_seconds": 600.0,
+                }
+            )
+        )
+    else:
+        (d / "batch.json").write_text(
+            json.dumps({"arm": arm, "submitted_at": "2026-11-07T09:00:00+00:00", "batches": []})
+        )
 
 
 def _write_reference(run_dir: pathlib.Path, doc_ids, products=None):
@@ -197,21 +213,21 @@ def test_score_run_scores_the_arms_that_exist_and_names_the_missing_one(tmp_path
     )
     _write_arm(
         tmp_path,
-        "H-text",
+        "H-text-live",
         [
-            _line("H-text", 1, good, cost=0.002),
-            _line("H-text", 2, None, error="missing fields: remedy", cost=0.002),
-            _line("H-text", 3, None, error="no extracted text", cost=0.0),
+            _line("H-text-live", 1, good, cost=0.002),
+            _line("H-text-live", 2, None, error="missing fields: remedy", cost=0.002),
+            _line("H-text-live", 3, None, error="no extracted text", cost=0.0),
         ],
     )
     _write_reference(tmp_path, [1, 2, 3])
 
     score = bs.score_run(tmp_path)
 
-    assert score["arms_present"] == ["G", "H-text"]
-    assert score["arms_missing"] == ["H-pdf"]
-    assert "H-pdf" not in score["arms"]
-    g, h = score["arms"]["G"], score["arms"]["H-text"]
+    assert score["arms_present"] == ["G", "H-text-live"]
+    assert score["arms_missing"] == ["H-pdf-live", "S-text", "S-pdf"]
+    assert "H-pdf-live" not in score["arms"]
+    g, h = score["arms"]["G"], score["arms"]["H-text-live"]
     assert g["validity"] == pytest.approx(2 / 3) and h["validity"] == pytest.approx(1 / 3)
     assert g["empty_rates"]["remedy"] == 0.0
     # against the stored output: doc 1 identical, doc 2 differs on symptoms (1/2) and remedy
@@ -221,18 +237,55 @@ def test_score_run_scores_the_arms_that_exist_and_names_the_missing_one(tmp_path
     assert h["vs_stored"]["n"] == 1 and h["vs_stored"]["symptoms"] == 1.0
     # applicability recall: doc 1 is 4/4, doc 2 is 2/4 (2015 and F 150 only)
     assert g["applicability"]["recall"] == pytest.approx((1.0 + 0.5) / 2)
-    # cost: G $0.002 over 3 results, H-text $0.004 over 3
+    # cost: G $0.002 over 3 results, 2 of them billed; per 1,000 uses the billed count
     assert g["cost"]["usd"] == pytest.approx(0.002)
-    assert g["cost"]["usd_per_1000"] == pytest.approx(0.002 / 3 * 1000)
+    assert g["cost"]["billed"] == 2 and h["cost"]["billed"] == 2
+    assert g["cost"]["usd_per_1000"] == pytest.approx(0.002 / 2 * 1000)
     assert g["cost"]["tokens_in"] == 3000
-    assert g["wall_seconds"] == 3600.0
+    # G ran as a batch, so its cost already is the batch price; a live arm's is halved to match
+    assert (g["mode"], h["mode"]) == ("batch", "live")
+    assert g["cost"]["usd_per_1000_batch_equivalent"] == pytest.approx(1.0)
+    assert h["cost"]["usd_per_1000"] == pytest.approx(0.004 / 2 * 1000)
+    assert h["cost"]["usd_per_1000_batch_equivalent"] == pytest.approx(1.0)
+    # wall time: submitted to collected for a batch arm, live.json for a live arm
+    assert g["wall_seconds"] == 3600.0 and h["wall_seconds"] == 600.0
     # pairwise between the arms: only doc 1 has both valid
-    assert score["pairwise"]["G|H-text"]["n"] == 1
-    assert score["pairwise"]["G|H-text"]["symptoms"] == 1.0
+    assert score["pairwise"]["G|H-text-live"]["n"] == 1
+    assert score["pairwise"]["G|H-text-live"]["symptoms"] == 1.0
     assert score["disagreement"] == {
         1: 0.0
     }, "only document 1 has two valid outputs, and they agree"
     assert (tmp_path / "score.json").exists() is False, "score_run is pure; the CLI writes"
+
+
+def test_score_run_takes_an_arm_list_and_names_the_canceled_batch_arms_as_superseded(tmp_path):
+    _three_arm_run(tmp_path, n=4, arms=(*FIVE, "H-text", "H-pdf"))
+    # the canceled batch arms: every line an unbilled error
+    for arm in ("H-text", "H-pdf"):
+        _write_arm(
+            tmp_path,
+            arm,
+            [_line(arm, i, None, error="batch canceled", cost=0.0, tin=0, tout=0) for i in (1, 2)],
+        )
+
+    default = bs.score_run(tmp_path)
+    chosen = bs.score_run(tmp_path, arms=["G", "S-text"])
+    old = bs.score_run(tmp_path, arms=["G", "H-text", "H-pdf"])
+
+    assert default["arms_present"] == list(FIVE)
+    assert default["arms_missing"] == []
+    assert default["arms_superseded"] == ["H-text", "H-pdf"]
+    assert "H-text" not in default["arms"]
+    assert chosen["arms_present"] == ["G", "S-text"] and list(chosen["pairwise"]) == ["G|S-text"]
+    assert chosen["arms_superseded"] == ["H-text", "H-pdf"]
+    assert old["arms_present"] == ["G", "H-text", "H-pdf"] and old["arms_superseded"] == []
+    assert old["arms"]["H-text"]["valid"] == 0 and old["arms"]["H-text"]["cost"]["billed"] == 0
+    assert old["arms"]["H-text"]["cost"]["usd_per_1000"] is None
+
+
+def test_an_unknown_arm_name_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="unknown arm"):
+        bs.score_run(tmp_path, arms=["G", "nope"])
 
 
 # --------------------------------------------------------------------------- S3 blind judge
@@ -305,7 +358,7 @@ def judge_env(tmp_path, monkeypatch):
         labels = sorted(
             set(
                 __import__("re").findall(
-                    r"^=== OUTPUT ([A-C]) ===$", prompt, flags=__import__("re").M
+                    r"^=== OUTPUT ([A-E]) ===$", prompt, flags=__import__("re").M
                 )
             )
         )
@@ -328,12 +381,24 @@ def test_labels_are_shuffled_deterministically_and_reversible():
     assert len(orders) > 1, "the assignment varies by document"
 
 
+def test_five_arms_get_five_shuffled_labels_and_the_mapping_restores_every_arm_name():
+    first = bs.label_arms(7, list(FIVE), seed=20261106)
+
+    assert sorted(first) == list("ABCDE") and sorted(first.values()) == sorted(FIVE)
+    assert bs.label_arms(7, list(reversed(FIVE)), seed=20261106) == first
+    assert len({tuple(bs.label_arms(d, list(FIVE), seed=20261106).values()) for d in range(40)}) > 5
+    # the verdict schema ranks and credits up to five labels
+    schema = bs.JUDGE_SCHEMA["properties"]
+    assert schema["ranking"]["items"]["enum"] == list("ABCDE")
+    assert schema["completeness"]["properties"]["remedy"]["enum"] == list("ABCDE")
+
+
 def test_the_judge_prompt_has_the_source_and_every_output_and_no_arm_name():
-    labels = {"A": "H-pdf", "B": "G", "C": "H-text"}
+    labels = {"A": "H-pdf-live", "B": "G", "C": "H-text-live"}
     outputs = {
-        "H-pdf": _out(remedy="remedy zebra"),
+        "H-pdf-live": _out(remedy="remedy zebra"),
         "G": _out(remedy="remedy yak"),
-        "H-text": _out(remedy="remedy wombat"),
+        "H-text-live": _out(remedy="remedy wombat"),
     }
     prompt = bs.build_judge_prompt("SOURCE-MARKER " + "x" * 20000, labels, outputs)
     for marker in ("zebra", "yak", "wombat", "SOURCE-MARKER"):
@@ -342,7 +407,7 @@ def test_the_judge_prompt_has_the_source_and_every_output_and_no_arm_name():
         prompt.index("zebra") < prompt.index("yak") < prompt.index("wombat")
     ), "ordered by label A, B, C"
     assert len(prompt) < 12_000 + 5_000, "the source is cut to its first 12,000 characters"
-    for name in ("H-pdf", "H-text", "gemini", "haiku", "Haiku", "Gemini"):
+    for name in ("H-pdf-live", "H-text-live", "gemini", "haiku", "Haiku", "Gemini"):
         assert name not in prompt
 
 
@@ -362,7 +427,7 @@ async def test_run_judge_is_blind_records_the_label_map_and_meters_every_call(ju
     assert out["judged"] == 6
     assert len(judge_env.prompts) == 6
     for prompt in judge_env.prompts:
-        assert "H-pdf" not in prompt and "H-text" not in prompt
+        assert "H-pdf-live" not in prompt and "H-text-live" not in prompt
     labels = json.loads((judge_env.run_dir / "judge_labels.json").read_text())
     assert len(labels) == 6
     for mapping in labels.values():
@@ -395,7 +460,7 @@ async def test_run_judge_refuses_before_any_call_when_the_cap_would_be_passed(
 
 
 async def test_run_judge_works_on_the_arms_that_exist(tmp_path, monkeypatch):
-    _three_arm_run(tmp_path, arms=("G", "H-text"))
+    _three_arm_run(tmp_path, arms=("G", "H-text-live"))
     seen = []
     monkeypatch.setattr(
         bs,
@@ -411,16 +476,38 @@ async def test_run_judge_works_on_the_arms_that_exist(tmp_path, monkeypatch):
     out = await bs.run_judge(tmp_path, n_hard=2, n_random=2)
     assert out["judged"] == 4
     assert all("=== OUTPUT C ===" not in p for p in seen)
-    assert list(bs.summarize_judge(tmp_path)["wins"]) == ["G", "H-text"]
+    assert list(bs.summarize_judge(tmp_path)["wins"]) == ["G", "H-text-live"]
 
 
 # --------------------------------------------------------------------------- S4 report
 
 
-async def test_report_renders_both_files_with_twenty_documents_and_a_judge_note(
-    tmp_path, judge_env
+async def test_report_renders_five_arms_twenty_sonnet_subset_documents_and_a_judge_note(
+    tmp_path, monkeypatch
 ):
-    _three_arm_run(tmp_path, n=30)
+    import re
+
+    _three_arm_run(tmp_path, n=40, arms=(*FIVE, "H-text", "H-pdf"))
+    for arm in ("H-text", "H-pdf"):  # the canceled batch arms
+        _write_arm(
+            tmp_path,
+            arm,
+            [_line(arm, i, None, error="batch canceled", cost=0.0) for i in range(1, 41)],
+        )
+    subset = list(range(11, 41))
+    path = tmp_path / "sonnet.json"
+    path.write_text(json.dumps([{"doc_id": d} for d in subset]))
+    monkeypatch.setattr(bs.eb, "SONNET_SAMPLE_PATH", path)
+    monkeypatch.setattr(
+        bs,
+        "_generate",
+        lambda p: {"verdict": _verdict(list("ABCDE")), "tokens_in": 5, "tokens_out": 5},
+    )
+
+    async def fake_record_usage(kind, model, **kw):
+        return 0.0
+
+    monkeypatch.setattr(bs, "record_usage", fake_record_usage)
     await bs.run_judge(tmp_path, n_hard=5, n_random=5)
 
     paths = report.write_report(tmp_path)
@@ -429,28 +516,70 @@ async def test_report_renders_both_files_with_twenty_documents_and_a_judge_note(
     md, html = (p.read_text() for p in paths)
     assert html.count('<section class="doc"') == 20
     assert md.count("\n### Document ") == 20
-    for arm in ARMS:
-        assert arm in html and arm in md
+    shown = {int(x) for x in re.findall(r'<section class="doc" id="doc-(\d+)"', html)}
+    assert len(shown) == 20 and shown <= set(subset), "drawn from the Sonnet subset"
+    assert html.count('<div class="col"') == 100, "all five outputs beside each other"
+    # the headline: one row per arm in this order, with the columns the comparison needs
+    table = html.split("<h2>Headline</h2>")[1].split("</table>")[0]
+    positions = [table.index(f"<td>{arm}</td>") for arm in FIVE]
+    assert positions == sorted(positions)
+    assert "<td>H-text</td>" not in table and "<td>H-pdf</td>" not in table
+    for head in (
+        "Model",
+        "Input",
+        "Docs",
+        "Validity",
+        "Agreement with stored",
+        "Applicability recall",
+        "Judge wins / avg rank",
+        "Faithfulness flags",
+        "Cost actual",
+        "Cost per 1,000 docs",
+        "Batch-equivalent cost per 1,000 docs",
+        "Wall time",
+        "Batch or live",
+    ):
+        assert f"<th>{head}</th>" in table, head
+    assert "<td>batch</td>" in table and table.count("<td>live</td>") == 4
+    # G was a batch at half price; the rest ran live at list price
+    for doc in (md, html):
+        assert "Batch API at half price" in doc and "list price" in doc
+        assert "Superseded arms: H-text, H-pdf (batch canceled, superseded by live re-run)" in doc
+        assert "Missing arms" not in doc
     # a side-by-side document shows NHTSA's summary, the source and the judge's note
     assert "NHTSA summary" in html and "Source text for document" in html
     assert "A names the fix directly." in html and "A names the fix directly." in md
     assert "invented a torque value" in html
-    # single file, readable in both themes, nothing fetched from elsewhere
+    # one file, light and dark, a grid that wraps, nothing fetched from elsewhere
     assert "prefers-color-scheme: dark" in html and "<style>" in html
+    assert "repeat(auto-fit,minmax(" in html
     assert "<script src" not in html and "<link " not in html and "http://" not in html
-    assert "Cost per 1,000 docs" in html and "Wall time" in html
-    assert "Missing arms" not in html
 
 
 def test_report_names_the_arms_that_have_no_results_yet(tmp_path):
-    _three_arm_run(tmp_path, n=30, arms=("G", "H-text"))
+    _three_arm_run(tmp_path, n=30, arms=("G", "H-text-live"))
 
     paths = report.write_report(tmp_path)
 
     md, html = (p.read_text() for p in paths)
-    assert "Missing arms: H-pdf" in md and "Missing arms: H-pdf" in html
+    missing = "Missing arms: H-pdf-live, S-text, S-pdf"
+    assert missing in md and missing in html
     assert html.count('<section class="doc"') == 20
     assert "Judge has not run" in html
+
+
+def test_a_document_an_arm_has_no_valid_output_for_still_gets_its_column(tmp_path):
+    _three_arm_run(tmp_path, n=10, arms=FIVE)
+    _write_arm(
+        tmp_path,
+        "S-pdf",
+        [_line("S-pdf", i, None, error="pdf unavailable", cost=0.0) for i in range(1, 11)],
+    )
+
+    html = report.write_report(tmp_path)[1].read_text()
+
+    assert html.count('<div class="col none"') == 10 and html.count('<div class="col"') == 40
+    assert "no valid output" in html
 
 
 # --------------------------------------------------------------------------- review fixes
@@ -477,7 +606,7 @@ async def test_run_judge_stops_before_a_call_whose_worst_case_could_pass_the_cap
 
 async def test_run_judge_counts_spend_from_another_run_of_the_bakeoff(judge_env, monkeypatch):
     other = bs.eb.BAKEOFF_ROOT / "20261101-0900"
-    _write_arm(other, "G", [_line("G", 1, _out(), cost=9.99)])
+    _write_arm(other, "G", [_line("G", 1, _out(), cost=19.99)])
 
     with pytest.raises(bs.eb.SpendCapExceeded, match="cap"):
         await bs.run_judge(judge_env.run_dir, n_hard=4, n_random=2)
@@ -485,13 +614,104 @@ async def test_run_judge_counts_spend_from_another_run_of_the_bakeoff(judge_env,
 
 
 def test_summarize_ignores_a_faithfulness_label_with_no_output_behind_it(tmp_path):
-    _three_arm_run(tmp_path, arms=("G", "H-text"))
+    _three_arm_run(tmp_path, arms=("G", "H-text-live"))
     verdict = _verdict(["A", "B"])
     verdict["faithfulness"].append({"label": "C", "unsupported_claims": ["x"]})
     (tmp_path / "judge.jsonl").write_text(json.dumps({"doc_id": 1, "verdict": verdict}) + "\n")
-    (tmp_path / "judge_labels.json").write_text(json.dumps({"1": {"A": "G", "B": "H-text"}}))
+    (tmp_path / "judge_labels.json").write_text(json.dumps({"1": {"A": "G", "B": "H-text-live"}}))
 
     summary = bs.summarize_judge(tmp_path)
 
     assert summary["judged"] == 1
     assert sum(summary["faithfulness_flags"].values()) == 1
+
+
+# --------------------------------------------------------------------------- five arms and the Sonnet subset
+
+
+async def test_the_judge_blinds_five_arms_and_summarizes_all_of_them(tmp_path, monkeypatch):
+    _three_arm_run(tmp_path, arms=FIVE)
+    prompts = []
+
+    def fake_generate(prompt):
+        import re
+
+        prompts.append(prompt)
+        labels = sorted(set(re.findall(r"^=== OUTPUT ([A-E]) ===$", prompt, flags=re.M)))
+        return {"verdict": _verdict(labels), "tokens_in": 5000, "tokens_out": 3000}
+
+    async def fake_record_usage(kind, model, **kw):
+        return 0.0
+
+    monkeypatch.setattr(bs, "_generate", fake_generate)
+    monkeypatch.setattr(bs, "record_usage", fake_record_usage)
+
+    out = await bs.run_judge(tmp_path, n_hard=4, n_random=2)
+
+    assert out["judged"] == 6
+    for prompt in prompts:
+        assert "=== OUTPUT E ===" in prompt
+        for name in FIVE[1:]:
+            assert name not in prompt
+    labels = json.loads((tmp_path / "judge_labels.json").read_text())
+    assert all(
+        sorted(m) == list("ABCDE") and sorted(m.values()) == sorted(FIVE) for m in labels.values()
+    )
+    summary = bs.summarize_judge(tmp_path)
+    assert list(summary["wins"]) == list(FIVE) and sum(summary["wins"].values()) == 6
+    assert all(summary["mean_rank"][a] is not None for a in FIVE)
+    assert sum(summary["faithfulness_flags"].values()) == 6
+
+
+async def test_the_judge_only_draws_from_the_sonnet_subset(tmp_path, monkeypatch):
+    _three_arm_run(tmp_path, n=20, arms=FIVE)
+    subset = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    path = tmp_path / "sonnet.json"
+    path.write_text(json.dumps([{"doc_id": d} for d in subset]))
+    monkeypatch.setattr(bs.eb, "SONNET_SAMPLE_PATH", path)
+    monkeypatch.setattr(
+        bs,
+        "_generate",
+        lambda p: {"verdict": _verdict(list("ABCDE")), "tokens_in": 1, "tokens_out": 1},
+    )
+
+    async def fake_record_usage(kind, model, **kw):
+        return 0.0
+
+    monkeypatch.setattr(bs, "record_usage", fake_record_usage)
+
+    out = await bs.run_judge(tmp_path, n_hard=3, n_random=3)
+
+    assert out["judged"] == 6
+    lines = [json.loads(x) for x in (tmp_path / "judge.jsonl").read_text().splitlines()]
+    assert {x["doc_id"] for x in lines} <= set(subset)
+    assert {x["stratum"] for x in lines} == {"hard", "random"}
+
+
+def test_the_judge_estimate_is_shown_before_anything_is_sent(tmp_path, monkeypatch, capsys):
+    _three_arm_run(tmp_path, n=12, arms=FIVE)
+    monkeypatch.setattr(
+        bs, "_generate", lambda p: pytest.fail("--estimate must not call the judge")
+    )
+
+    code = bs.main(
+        ["--run-dir", str(tmp_path), "--judge", "--estimate", "--n-hard", "4", "--n-random", "2"]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "judge: 6 call(s)" in out and "estimate $" in out and "worst case $" in out
+    assert "cap $20.00" in out
+    assert not (tmp_path / "judge.jsonl").exists()
+
+
+def test_the_scorer_and_report_commands_take_an_arms_option(tmp_path, capsys):
+    _three_arm_run(tmp_path, n=6, arms=FIVE)
+
+    assert bs.main(["--run-dir", str(tmp_path), "--arms", "G,S-text"]) == 0
+    out = capsys.readouterr().out
+    assert "arms scored: G, S-text" in out
+    assert json.loads((tmp_path / "score.json").read_text())["arms_present"] == ["G", "S-text"]
+
+    assert report.main(["--run-dir", str(tmp_path), "--arms", "G", "S-text"]) == 0
+    assert "S-pdf" not in (tmp_path / "report.md").read_text().split("## Judge")[0]

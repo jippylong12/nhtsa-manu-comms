@@ -41,6 +41,8 @@ def _no_real_clients(monkeypatch):
 def _isolated_bakeoff_root(tmp_path, monkeypatch):
     """Runs under the real backend/.bakeoff/ never count toward a test's cap."""
     monkeypatch.setattr(eb, "BAKEOFF_ROOT", tmp_path / "bakeoff-root")
+    # No Sonnet subset file unless a test writes one.
+    monkeypatch.setattr(eb, "SONNET_SAMPLE_PATH", tmp_path / "no-sonnet-sample.json")
 
 
 # --------------------------------------------------------------------------- fixtures
@@ -774,14 +776,14 @@ async def test_spend_in_another_run_of_the_bakeoff_counts_against_the_cap(harnes
     other = eb.BAKEOFF_ROOT / "20261101-0900" / "H-text"
     other.mkdir(parents=True)
     (other / "batch.json").write_text(json.dumps({"estimate_usd": 0.0, "batches": []}))
-    (other / "results.jsonl").write_text(json.dumps({"cost_usd": 9.99}) + "\n")
+    (other / "results.jsonl").write_text(json.dumps({"cost_usd": 19.99}) + "\n")
     (eb.BAKEOFF_ROOT / "20261101-0900" / "judge.jsonl").write_text(
         json.dumps({"cost_usd": 0.5}) + "\n"
     )
     gemini = FakeGemini()
     harness.use(gemini_client=gemini)
 
-    assert eb.experiment_spend(harness.run_dir) == pytest.approx(10.49)
+    assert eb.experiment_spend(harness.run_dir) == pytest.approx(20.49)
     with pytest.raises(eb.SpendCapExceeded, match="across the bake-off"):
         await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
     assert gemini.created == []
@@ -846,3 +848,483 @@ def test_the_largest_pdf_allowed_still_fits_a_request_once_base64_encoded():
     request_limit = 32 * 1024 * 1024
     base64_bytes = -(-eb.MAX_PDF_BYTES // 3) * 4
     assert base64_bytes + 256 * 1024 < request_limit
+
+
+# --------------------------------------------------------------------------- Sonnet subset
+
+
+def test_the_sonnet_subset_is_one_hundred_deterministic_rows_drawn_from_the_sample():
+    sample = eb.load_sample(eb.SAMPLE_PATH)
+
+    first = eb.select_sonnet_subset(sample)
+    second = eb.select_sonnet_subset(list(reversed(sample)))
+
+    assert [r["doc_id"] for r in first] == [r["doc_id"] for r in second]
+    assert len(first) == len({r["doc_id"] for r in first}) == 100
+    by_id = {r["doc_id"]: r for r in sample}
+    assert all(by_id[r["doc_id"]] == r for r in first), "same row shape, same values"
+    # every (doc_kind, communication_type) cell that has a usable document is represented
+    usable = {
+        (r["doc_kind"], r["communication_type"]) for r in sample if r["llm_tokens_in"] is not None
+    }
+    assert {(r["doc_kind"], r["communication_type"]) for r in first} == usable
+    assert all(r["llm_tokens_in"] is not None and r["url"] for r in first)
+
+
+def test_the_sonnet_subset_shares_cells_in_proportion_to_the_sample():
+    sample = eb.load_sample(eb.SAMPLE_PATH)
+
+    subset = eb.select_sonnet_subset(sample)
+
+    big = Counter((r["doc_kind"], r["communication_type"]) for r in subset)
+    assert (
+        big[("informational", "PIT")] > big[("informational", "MC")] > big[("warranty_admin", "WA")]
+    )
+
+
+def test_the_sonnet_subset_prefers_documents_with_text_and_a_url_and_floors_each_cell_at_one():
+    rows = [_row(i, "informational", "PIT") for i in range(1, 41)]
+    rows += [_row(100, "recall", "DL"), _row(101, "other", "MC")]
+    rows.append({**_row(200, "other", "MC"), "llm_tokens_in": None})  # no text
+    rows.append({**_row(201, "other", "BL"), "url": ""})  # no url
+
+    subset = eb.select_sonnet_subset(rows, size=10)
+
+    ids = {r["doc_id"] for r in subset}
+    assert len(ids) == 10 and {100, 101} <= ids
+    assert not ids & {200, 201}
+
+
+def test_sample_sonnet_writes_the_subset_file_and_it_is_the_one_committed(tmp_path, capsys):
+    out = tmp_path / "subset.json"
+
+    code = eb.main(["sample-sonnet", "--sample", str(eb.SAMPLE_PATH), "--out", str(out)])
+
+    assert code == 0
+    assert "wrote 100 documents" in capsys.readouterr().out
+    committed = eb.SAMPLE_PATH.with_name("extraction_sample_sonnet100.json")
+    assert out.read_bytes() == committed.read_bytes(), "regenerate the committed subset"
+
+
+# --------------------------------------------------------------------------- live arms
+
+
+def _message(text, tin=1500, tout=220, stop="end_turn"):
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=text)],
+        usage=SimpleNamespace(input_tokens=tin, output_tokens=tout),
+        stop_reason=stop,
+    )
+
+
+def _http_error(cls, status, message="boom"):
+    request = httpx.Request("POST", "https://api.anthropic.test/v1/messages")
+    return cls(message, response=httpx.Response(status, request=request), body=None)
+
+
+class FakeLive:
+    """Stands in for ``anthropic.Anthropic`` on the synchronous Messages API."""
+
+    def __init__(self, reply=None, on_call=None):
+        self.calls = []
+        self._reply = reply or (lambda params: _message(json.dumps(GOOD)))
+        self._on_call = on_call
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **params):
+        self.calls.append(params)
+        if self._on_call:
+            self._on_call(len(self.calls), params)
+        return self._reply(params)
+
+
+@pytest.fixture
+def live(harness, tmp_path):
+    """``harness`` plus the Sonnet subset file, recorded sleeps and one-at-a-time calls."""
+    sonnet_path = tmp_path / "sonnet.json"
+    sonnet_path.write_text(json.dumps(harness.entries[:2]))
+    sleeps = []
+    harness.monkeypatch.setattr(eb, "_sleep", sleeps.append)
+    harness.sonnet_path, harness.sleeps = sonnet_path, sleeps
+
+    async def run(arm, client, **kw):
+        harness.use(anthropic_client=client)
+        return await eb.run_live(
+            arm,
+            harness.run_dir,
+            sample_path=harness.sample_path,
+            sonnet_sample_path=sonnet_path,
+            concurrency=kw.pop("concurrency", 1),
+            **kw,
+        )
+
+    harness.run_live = run
+    return harness
+
+
+async def test_a_live_arm_writes_each_finished_document_at_once_and_a_rerun_sends_nothing(live):
+    seen = []
+
+    def on_call(n, params):
+        path = live.run_dir / "H-text-live" / "results.jsonl"
+        seen.append(len(path.read_text().splitlines()) if path.exists() else 0)
+
+    client = FakeLive(on_call=on_call)
+
+    await live.run_live("H-text-live", client)
+
+    assert seen == [0, 1, 2], "each result is on disk before the next call starts"
+    lines = _results(live.run_dir, "H-text-live")
+    assert sorted(r["doc_id"] for r in lines) == [1, 2, 3]
+    first = lines[0]
+    assert first["arm"] == "H-text-live" and first["model"] == "claude-haiku-5-5"
+    assert first["mode"] == "live" and first["valid"] is True and first["error"] is None
+    assert (first["tokens_in"], first["tokens_out"]) == (1500, 220)
+    assert first["cost_usd"] == pytest.approx(
+        eb.pricing.cost_of("claude-haiku-5-5", 1500, 220, batch=False)
+    ), "live calls are costed at list price"
+    call = client.calls[0]
+    assert call["model"] == "claude-haiku-5-5" and call["max_tokens"] == 8192
+    assert call["output_config"]["effort"] == "low" and "temperature" not in call
+    assert "thinking" not in call
+
+    again = FakeLive()
+    out = await live.run_live("H-text-live", again)
+
+    assert again.calls == []
+    assert len(_results(live.run_dir, "H-text-live")) == 3
+    assert len(live.usage) == 3, "the re-run recorded nothing twice"
+    assert out["H-text-live"].sent == 0 and out["H-text-live"].lines == 3
+
+
+async def test_a_live_arm_resumes_a_crashed_run_without_resending_finished_documents(live):
+    class Crash(Exception):
+        pass
+
+    def crash_on_third(n, params):
+        if n == 3:
+            raise Crash
+
+    with pytest.raises(Crash):
+        await live.run_live("H-text-live", FakeLive(on_call=crash_on_third))
+    assert sorted(r["doc_id"] for r in _results(live.run_dir, "H-text-live")) == [1, 2]
+    assert (live.run_dir / "H-text-live" / "live.json").exists(), "wall time kept on a crash"
+
+    client = FakeLive()
+    await live.run_live("H-text-live", client)
+
+    assert len(client.calls) == 1
+    assert sorted(r["doc_id"] for r in _results(live.run_dir, "H-text-live")) == [1, 2, 3]
+
+
+async def test_each_billed_live_result_is_recorded_once_at_list_price_with_the_live_marker(live):
+    replies = iter(
+        [
+            _message(json.dumps(GOOD), tin=1500, tout=220),
+            _message("not json at all", tin=700, tout=30),  # still billed
+            _message(json.dumps(GOOD), tin=650, tout=40),
+        ]
+    )
+
+    await live.run_live("H-text-live", FakeLive(reply=lambda p: next(replies)))
+
+    assert len(live.usage) == 3
+    first = live.usage[0]
+    assert first["kind"] == "llm_extract" and first["model"] == "claude-haiku-5-5"
+    assert first["batch"] is False
+    assert first["meta"] == {
+        "bakeoff": "H-text-live",
+        "run": str(live.run_dir),
+        "doc_id": 1,
+        "mode": "live",
+    }
+    lines = {r["doc_id"]: r for r in _results(live.run_dir, "H-text-live")}
+    assert lines[2]["valid"] is False and "invalid JSON" in lines[2]["error"]
+    assert lines[2]["cost_usd"] > 0
+
+
+async def test_a_retryable_error_is_retried_with_backoff_and_then_succeeds(live):
+    failures = [
+        _http_error(anthropic.RateLimitError, 429),
+        _http_error(anthropic.InternalServerError, 529, "overloaded_error"),
+        anthropic.APIConnectionError(request=httpx.Request("POST", "https://x.test")),
+    ]
+
+    def on_call(n, params):
+        if n <= len(failures):
+            raise failures[n - 1]
+
+    live.sample_path.write_text(json.dumps(live.entries[:1]))
+    client = FakeLive(on_call=on_call)
+
+    await live.run_live("H-text-live", client)
+
+    [line] = _results(live.run_dir, "H-text-live")
+    assert line["valid"] is True and len(client.calls) == 4
+    assert live.sleeps == [2.0, 4.0, 8.0], "exponential backoff between tries"
+    assert len(live.usage) == 1, "only the response that came back was billed"
+
+
+async def test_a_call_that_keeps_failing_is_left_for_the_next_run_not_recorded(live):
+    live.sample_path.write_text(json.dumps(live.entries[:1]))
+
+    def always(n, params):
+        raise _http_error(anthropic.RateLimitError, 429)
+
+    out = await live.run_live("H-text-live", FakeLive(on_call=always))
+
+    assert not (live.run_dir / "H-text-live" / "results.jsonl").exists() or not _results(
+        live.run_dir, "H-text-live"
+    )
+    assert out["H-text-live"].retry_later == 1 and live.usage == []
+
+    client = FakeLive()
+    await live.run_live("H-text-live", client)
+    assert len(client.calls) == 1 and len(_results(live.run_dir, "H-text-live")) == 1
+
+
+async def test_a_non_retryable_api_error_becomes_an_unbilled_error_line(live):
+    def reject_second(n, params):
+        if n == 2:
+            raise _http_error(anthropic.BadRequestError, 400, "schema not supported")
+
+    client = FakeLive(on_call=reject_second)
+
+    await live.run_live("H-text-live", client)
+
+    lines = {r["doc_id"]: r for r in _results(live.run_dir, "H-text-live")}
+    assert lines[2]["valid"] is False and "schema not supported" in lines[2]["error"]
+    assert lines[2]["cost_usd"] == 0.0 and lines[2]["tokens_in"] == 0
+    assert len(client.calls) == 3, "a bad request is not retried and does not stop the arm"
+    assert len(live.usage) == 2 and live.sleeps == []
+
+
+async def test_a_live_pdf_arm_skips_documents_without_a_pdf_and_sends_the_rest_as_document_blocks(
+    live,
+):
+    async def pdfs(sample):
+        ok = base64.standard_b64encode(b"%PDF-1.4 x").decode()
+        return {1: (ok, None), 2: (None, "pdf unavailable"), 3: (ok, None)}
+
+    live.monkeypatch.setattr(eb, "_fetch_pdfs", pdfs)
+    client = FakeLive()
+
+    await live.run_live("H-pdf-live", client)
+
+    assert len(client.calls) == 2
+    block = client.calls[0]["messages"][0]["content"][0]
+    assert block["type"] == "document" and block["source"]["media_type"] == "application/pdf"
+    lines = {r["doc_id"]: r for r in _results(live.run_dir, "H-pdf-live")}
+    assert lines[2]["error"] == "pdf unavailable" and lines[2]["cost_usd"] == 0.0
+    assert lines[2]["mode"] == "live"
+    assert len(live.usage) == 2
+
+
+async def test_a_text_arm_skips_a_document_with_no_extracted_text(live):
+    async def texts(doc_ids):
+        return {1: "text one", 2: None, 3: "text three"}
+
+    live.monkeypatch.setattr(eb, "_fetch_texts", texts)
+    client = FakeLive()
+
+    await live.run_live("H-text-live", client)
+
+    lines = {r["doc_id"]: r for r in _results(live.run_dir, "H-text-live")}
+    assert lines[2]["error"] == "no extracted text" and len(client.calls) == 2
+
+
+async def test_the_sonnet_arms_send_only_the_subset_to_sonnet_with_the_same_params(live):
+    client = FakeLive()
+
+    out = await live.run_live("S-text", client)
+
+    assert sorted(r["doc_id"] for r in _results(live.run_dir, "S-text")) == [1, 2]
+    call = client.calls[0]
+    assert call["model"] == "claude-sonnet-5-5" and call["max_tokens"] == 8192
+    assert (
+        call["output_config"]
+        == eb.build_requests("H-text-live", [_fake_doc()])[0].params["output_config"]
+    )
+    assert "thinking" not in call and "temperature" not in call
+    assert live.usage[0]["model"] == "claude-sonnet-5-5"
+    first = _results(live.run_dir, "S-text")[0]
+    assert first["cost_usd"] == pytest.approx(
+        eb.pricing.cost_of("claude-sonnet-5-5", 1500, 220, batch=False)
+    )
+    assert out["S-text"].lines == 2
+
+
+async def test_live_wall_time_is_recorded_for_the_report(live):
+    await live.run_live("H-text-live", FakeLive())
+
+    info = json.loads((live.run_dir / "H-text-live" / "live.json").read_text())
+    assert info["arm"] == "H-text-live" and info["started_at"] and info["finished_at"]
+    assert info["wall_seconds"] >= 0
+
+
+async def test_the_cap_stops_a_live_arm_before_a_call_whose_worst_case_does_not_fit(live):
+    [req] = eb.build_requests("S-text", [{**_fake_doc(1), "text": "Bulletin text for document 1."}])
+    worst = eb.live_worst_case_usd(
+        "S-text", req, {**_fake_doc(1), "text": "Bulletin text for document 1."}
+    )
+    actual = eb.pricing.cost_of("claude-sonnet-5-5", 1500, 220, batch=False)
+    assert actual < worst
+    # The first call fits; once it has been paid for, the second one's worst case cannot.
+    live.monkeypatch.setattr(eb, "CAP_USD", worst + actual / 2)
+    client = FakeLive()
+
+    out = await live.run_live("S-text", client)
+
+    assert len(client.calls) == 1
+    assert out["S-text"].stopped_at_cap is True
+    assert "stopped_at_cap" in eb.format_live_result(out["S-text"])
+    assert eb.experiment_spend(live.run_dir) <= eb.CAP_USD
+
+
+async def test_the_cap_counts_spend_already_in_the_bakeoff_and_sends_nothing_when_full(live):
+    other = eb.BAKEOFF_ROOT / "20261101-0900" / "judge.jsonl"
+    other.parent.mkdir(parents=True)
+    other.write_text(json.dumps({"cost_usd": eb.CAP_USD}) + "\n")
+    client = FakeLive()
+
+    out = await live.run_live("H-text-live", client)
+
+    assert client.calls == [] and out["H-text-live"].stopped_at_cap is True
+    assert live.usage == []
+
+
+async def test_in_flight_calls_count_against_the_cap_when_several_run_at_once(live):
+    [req] = eb.build_requests("S-text", [{**_fake_doc(1), "text": "Bulletin text for document 1."}])
+    worst = eb.live_worst_case_usd(
+        "S-text", req, {**_fake_doc(1), "text": "Bulletin text for document 1."}
+    )
+    actual = eb.pricing.cost_of("claude-sonnet-5-5", 1500, 220, batch=False)
+    # Room for one call in flight, not two; and once the first is paid for, not a second.
+    live.monkeypatch.setattr(eb, "CAP_USD", worst + actual / 2)
+    client = FakeLive()
+
+    out = await live.run_live("S-text", client, concurrency=2)
+
+    assert len(client.calls) == 1 and out["S-text"].stopped_at_cap is True
+
+
+async def test_run_live_all_live_runs_every_live_arm_in_order(live):
+    client = FakeLive()
+
+    out = await live.run_live("all-live", client)
+
+    assert list(out) == ["H-text-live", "H-pdf-live", "S-text", "S-pdf"]
+    assert len(client.calls) == 3 + 3 + 2 + 2
+
+
+async def test_run_live_rejects_a_batch_arm_and_a_missing_key_before_reading_anything(live):
+    with pytest.raises(ValueError, match="live arm"):
+        await live.run_live("H-text", FakeLive())
+
+    def no_key():
+        raise RuntimeError("CLAUDE_API_KEY (or ANTHROPIC_API_KEY) is not set.")
+
+    live.monkeypatch.setattr(eb, "_anthropic_client", no_key)
+    live.monkeypatch.setattr(
+        eb, "_fetch_texts", lambda ids: pytest.fail("a missing key must fail before the database")
+    )
+    with pytest.raises(RuntimeError, match="CLAUDE_API_KEY"):
+        await eb.run_live(
+            "H-text-live",
+            live.run_dir,
+            sample_path=live.sample_path,
+            sonnet_sample_path=live.sonnet_path,
+        )
+
+
+def test_the_run_live_command_uses_the_newest_run_and_prints_one_summary_line_per_arm(live, capsys):
+    client = FakeLive()
+    live.use(anthropic_client=client)
+    newest = eb.BAKEOFF_ROOT / "20261106-2117"
+    newest.mkdir(parents=True)
+
+    code = eb.main(
+        [
+            "run-live",
+            "--arm",
+            "S-text",
+            "--concurrency",
+            "1",
+            "--sample",
+            str(live.sample_path),
+            "--sonnet-sample",
+            str(live.sonnet_path),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0 and len(client.calls) == 2
+    assert (newest / "S-text" / "results.jsonl").exists()
+    [summary] = [line for line in out.splitlines() if line.startswith("S-text:")]
+    for part in ("lines 2", "valid 2", "errors 0", "tokens 3000/440", "cost $", "wall"):
+        assert part in summary
+
+
+def test_status_lists_the_live_arms_with_a_list_price_estimate(live, capsys):
+    entries = live.entries
+    code = eb.main(
+        [
+            "status",
+            "--run-dir",
+            str(live.run_dir),
+            "--sample",
+            str(live.sample_path),
+            "--sonnet-sample",
+            str(live.sonnet_path),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    for arm in eb.LIVE_ARMS:
+        assert arm in out
+    sonnet_estimate = 2 * pricing_cost("claude-sonnet-5-5", 1000, 200) * 2
+    haiku_estimate = 3 * pricing_cost("claude-haiku-5-5", 1000, 200) * 2
+    assert eb.estimate_cost("H-text-live", entries) == pytest.approx(haiku_estimate)
+    assert eb.estimate_cost("S-text", entries[:2]) == pytest.approx(sonnet_estimate)
+    assert f"${sonnet_estimate:.4f}" in out and f"${haiku_estimate:.4f}" in out
+
+
+# --------------------------------------------------------------------------- canceled batches
+
+
+def _canceled(doc_id):
+    return SimpleNamespace(custom_id=str(doc_id), result=SimpleNamespace(type="canceled"))
+
+
+async def test_a_fully_canceled_batch_arm_collects_into_unbilled_canceled_lines(harness):
+    client = FakeAnthropic(results=[_canceled(i) for i in (1, 2, 3)])
+    harness.use(anthropic_client=client)
+    await eb.submit("H-pdf", harness.run_dir, sample_path=harness.sample_path)
+
+    report = await eb.collect(harness.run_dir)
+
+    assert report["H-pdf"] == "collected 3 (0 valid)"
+    lines = _results(harness.run_dir, "H-pdf")
+    assert sorted(r["doc_id"] for r in lines) == [1, 2, 3]
+    assert all("canceled" in r["error"] and r["valid"] is False for r in lines)
+    assert all(r["cost_usd"] == 0.0 and r["tokens_in"] == 0 for r in lines)
+    assert harness.usage == []
+    spend = eb.run_spend(harness.run_dir)
+    assert spend.collected == 0.0 and spend.committed == 0.0, "no longer committed once collected"
+
+
+async def test_a_canceled_batch_with_some_results_that_ran_bills_those_once(harness):
+    client = FakeAnthropic(
+        results=[_succeeded(1, json.dumps(GOOD), tin=900, tout=100), _canceled(2), _canceled(3)]
+    )
+    harness.use(anthropic_client=client)
+    await eb.submit("H-text", harness.run_dir, sample_path=harness.sample_path)
+
+    await eb.collect(harness.run_dir)
+    await eb.collect(harness.run_dir)
+
+    lines = {r["doc_id"]: r for r in _results(harness.run_dir, "H-text")}
+    assert lines[1]["valid"] is True and lines[1]["cost_usd"] > 0
+    assert "canceled" in lines[2]["error"] and lines[3]["cost_usd"] == 0.0
+    assert len(harness.usage) == 1 and harness.usage[0]["batch"] is True

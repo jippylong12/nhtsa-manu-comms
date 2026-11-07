@@ -1,24 +1,32 @@
 """Extraction bake-off harness (JIP-1567).
 
-Sends one fixed, stratified sample of already-parsed documents through three arms
+Sends one fixed, stratified sample of already-parsed documents through several arms
 and writes one ``results.jsonl`` per arm, so a later step can score them against
 the production extractions and a judge.
 
-    G        gemini-3.5-flash-lite, extracted text      (Gemini Batch API)
-    H-text   claude-haiku-5-5,      extracted text      (Anthropic Message Batches)
-    H-pdf    claude-haiku-5-5,      the PDF itself      (Anthropic Message Batches)
+    G            gemini-3.5-flash-lite, extracted text   Gemini Batch API
+    H-text       claude-haiku-5-5,      extracted text   Message Batches (canceled, superseded)
+    H-pdf        claude-haiku-5-5,      the PDF itself   Message Batches (canceled, superseded)
+    H-text-live  claude-haiku-5-5,      extracted text   Messages API, all 300 documents
+    H-pdf-live   claude-haiku-5-5,      the PDF itself   Messages API, all 300 documents
+    S-text       claude-sonnet-5-5,     extracted text   Messages API, the 100-document subset
+    S-pdf        claude-sonnet-5-5,     the PDF itself   Messages API, the 100-document subset
 
-All three use the production prompt and response schema from ``src.jobs.llm``
-unchanged. Run as ``python -m src.eval.extraction_bakeoff <command>``:
+Every arm uses the production prompt and response schema from ``src.jobs.llm``
+unchanged. The two Haiku batches sat queued for 25+ minutes and were canceled; the
+live arms re-run them (and add Sonnet) through the synchronous Messages API at list
+price. Run as ``python -m src.eval.extraction_bakeoff <command>``:
 
     sample                      pick the sample and write extraction_sample.json
-    submit --arm G|H-text|H-pdf|all
-    collect [--wait SECONDS]    write results.jsonl for every arm whose batches ended
+    sample-sonnet               pick 100 of those 300 and write extraction_sample_sonnet100.json
+    submit --arm G|H-text|H-pdf|all                      (batch arms)
+    collect [--wait SECONDS]    write results.jsonl for every batch arm that ended
+    run-live --arm H-text-live|H-pdf-live|S-text|S-pdf|all-live [--concurrency N]
     status [--remote]           estimates, batch state and spend
 
-State lives in ``backend/.bakeoff/<run>/<arm>/`` (``requests.jsonl``,
-``batch.json``, ``results.jsonl``). ``submit`` is the only command that spends
-money, and it refuses past ``CAP_USD``.
+State lives in ``backend/.bakeoff/<run>/<arm>/`` (``requests.jsonl``, ``batch.json``,
+``results.jsonl``, and ``live.json`` for a live arm). ``submit`` and ``run-live`` are
+the commands that spend money; both refuse past ``CAP_USD``.
 """
 
 import argparse
@@ -31,10 +39,14 @@ import logging
 import pathlib
 import random
 import sys
+import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
+import anthropic
 from google.genai import types as genai_types
 
 from src.jobs import extract, llm
@@ -45,7 +57,9 @@ log = logging.getLogger("extraction_bakeoff")
 
 # --------------------------------------------------------------------------- constants
 
-CAP_USD = 10.0
+# Raised from 10 by Marcus 2026-11-06 for the Sonnet arms. One budget for the whole
+# experiment: the arms and the judge, across every run directory.
+CAP_USD = 20.0
 SEED = 20261106
 SAMPLE_SIZE = 300
 MIN_PER_CELL = 5
@@ -53,7 +67,9 @@ LARGEST_FORCED = 10
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 HAIKU_MODEL = "claude-haiku-5-5"
-HAIKU_MAX_TOKENS = 8192
+SONNET_MODEL = "claude-sonnet-5-5"
+HAIKU_MAX_TOKENS = 8192  # every Anthropic arm, Sonnet included, so the arms cannot drift
+SONNET_SUBSET_SIZE = 100
 
 # Gemini: chunks of 100 as in llm.submit_batch, and inline payloads must stay under
 # 20 MB (ai.google.dev batch docs), so a chunk also closes at 18 MB.
@@ -71,11 +87,25 @@ MAX_PDF_BYTES = 23 * 1024 * 1024
 PDF_TOKENS_PER_PAGE = 3000
 PDF_OUTPUT_TOKENS = 300
 
+# Batch arms: submitted, then collected.
 ARMS = ("G", "H-text", "H-pdf")
+# Live arms: run through the synchronous Messages API, one result line per document.
+LIVE_ARMS = ("H-text-live", "H-pdf-live", "S-text", "S-pdf")
+ALL_ARMS = (*ARMS, *LIVE_ARMS)
+# Canceled before they ran; the live arms replace them in scoring.
+SUPERSEDED_ARMS = ("H-text", "H-pdf")
+# What scoring, the judge and the report use unless told otherwise.
+DEFAULT_ARMS = ("G", *LIVE_ARMS)
+SONNET_ARMS = ("S-text", "S-pdf")
+
+LIVE_CONCURRENCY = 6
+LIVE_ATTEMPTS = 4  # tries per call, on top of the SDK's own retries
+LIVE_BACKOFF_SECONDS = 2.0  # doubled after each failed try
 
 BACKEND_DIR = pathlib.Path(__file__).resolve().parents[2]
 BAKEOFF_ROOT = BACKEND_DIR / ".bakeoff"
 SAMPLE_PATH = pathlib.Path(__file__).with_name("extraction_sample.json")
+SONNET_SAMPLE_PATH = pathlib.Path(__file__).with_name("extraction_sample_sonnet100.json")
 
 SAMPLE_FIELDS = (
     "doc_id",
@@ -182,6 +212,70 @@ def select_sample(
     return [{k: r.get(k) for k in SAMPLE_FIELDS} for r in chosen]
 
 
+def select_sonnet_subset(
+    rows: Iterable[dict], size: int = SONNET_SUBSET_SIZE, seed: int = SEED
+) -> list[dict]:
+    """``size`` documents drawn from the sample for the Sonnet arms, identical for identical input.
+
+    Stratified over the same ``(doc_kind, communication_type)`` cells as the sample:
+    every cell that has a usable document gets one, and the rest is shared in
+    proportion to what each cell has left (largest remainder). A usable document has
+    extracted text (a recorded ``llm_tokens_in``) and a URL, so neither Sonnet arm
+    wastes a call on a row it cannot send. Unusable documents are used only if the
+    usable ones cannot fill ``size``. Input order does not matter.
+    """
+    ordered = sorted(rows, key=lambda r: r["doc_id"])
+    usable = [r for r in ordered if r.get("llm_tokens_in") is not None and r.get("url")]
+    usable_ids = {r["doc_id"] for r in usable}
+    spare_rows = [r for r in ordered if r["doc_id"] not in usable_ids]
+
+    pool: dict[tuple, list[dict]] = {}
+    for r in usable:
+        pool.setdefault(_cell(r), []).append(r)
+    cells = sorted(pool, key=_cell_sort_key)
+    if size < len(cells):
+        raise ValueError(f"size {size} is smaller than the {len(cells)} cells")
+
+    take = {c: 1 for c in cells}
+    spare = min(size - len(cells), sum(len(pool[c]) - 1 for c in cells))
+    capacity = {c: len(pool[c]) - 1 for c in cells}
+    total_capacity = sum(capacity.values())
+    if spare and total_capacity:
+        exact = {c: spare * capacity[c] / total_capacity for c in cells}
+        share = {c: int(exact[c]) for c in cells}
+        leftover = spare - sum(share.values())
+        for c in sorted(cells, key=lambda c: (-(exact[c] - share[c]), _cell_sort_key(c))):
+            if leftover <= 0:
+                break
+            if share[c] < capacity[c]:
+                share[c] += 1
+                leftover -= 1
+        for c in cells:
+            take[c] += share[c]
+
+    rng = random.Random(seed)
+    chosen = []
+    for c in cells:
+        chosen.extend(rng.sample(pool[c], take[c]))
+    short = size - len(chosen)
+    if short > 0 and spare_rows:
+        chosen.extend(rng.sample(spare_rows, min(short, len(spare_rows))))
+    chosen.sort(key=lambda r: r["doc_id"])
+    return [{k: r.get(k) for k in SAMPLE_FIELDS} for r in chosen]
+
+
+def write_sonnet_sample(
+    src: pathlib.Path = SAMPLE_PATH,
+    dest: Optional[pathlib.Path] = None,
+    size: int = SONNET_SUBSET_SIZE,
+) -> list[dict]:
+    """Pick the Sonnet subset from the sample file (no database, no network) and write it."""
+    subset = select_sonnet_subset(json.loads(pathlib.Path(src).read_text()), size=size)
+    dest = pathlib.Path(dest or SONNET_SAMPLE_PATH)
+    dest.write_text(json.dumps(subset, indent=1, ensure_ascii=False) + "\n")
+    return subset
+
+
 _CANDIDATES_SQL = """
     SELECT d.id AS doc_id, c.nhtsa_id, d.url, d.doc_kind, c.communication_type,
            d.llm_tokens_in, d.llm_tokens_out, d.page_count, d.extraction_method
@@ -285,6 +379,9 @@ class _GeminiArm:
     name = "G"
     model = GEMINI_MODEL
     provider = "gemini"
+    pdf = False
+    live = False
+    input_mode = "text"
 
     def build_requests(self, docs: list[dict]) -> list[_Request]:
         out = []
@@ -381,19 +478,25 @@ class _GeminiArm:
 
 
 class _AnthropicArm:
-    """Arms H-text and H-pdf: claude-haiku-5-5 through the Message Batches API.
+    """The Anthropic arms: Haiku or Sonnet, over extracted text or the PDF.
 
-    No ``temperature`` is sent: the current API rejects it, and ``effort`` is the
-    knob. ``output_config.format`` is the structured-outputs form
-    ``{"type": "json_schema", "schema": ...}``.
+    ``live=False`` arms (H-text, H-pdf) go through the Message Batches API; ``live=True``
+    arms (H-text-live, H-pdf-live, S-text, S-pdf) go through the synchronous Messages
+    API. Both build their request here, so the parameters cannot drift between arms.
+
+    No ``temperature`` and no ``thinking`` is sent: the current API rejects the first,
+    and ``effort`` is the knob. ``output_config.format`` is the structured-outputs
+    form ``{"type": "json_schema", "schema": ...}``.
     """
 
-    model = HAIKU_MODEL
     provider = "anthropic"
 
-    def __init__(self, name: str, pdf: bool):
+    def __init__(self, name: str, pdf: bool, model: str = HAIKU_MODEL, live: bool = False):
         self.name = name
         self.pdf = pdf
+        self.model = model
+        self.live = live
+        self.input_mode = "pdf" if pdf else "text"
 
     def _params(self, content: Any) -> dict[str, Any]:
         return {
@@ -503,7 +606,21 @@ _ARM_IMPLS = {
     "G": _GeminiArm(),
     "H-text": _AnthropicArm("H-text", pdf=False),
     "H-pdf": _AnthropicArm("H-pdf", pdf=True),
+    "H-text-live": _AnthropicArm("H-text-live", pdf=False, live=True),
+    "H-pdf-live": _AnthropicArm("H-pdf-live", pdf=True, live=True),
+    "S-text": _AnthropicArm("S-text", pdf=False, model=SONNET_MODEL, live=True),
+    "S-pdf": _AnthropicArm("S-pdf", pdf=True, model=SONNET_MODEL, live=True),
 }
+
+
+def arm_mode(arm: str) -> str:
+    """``"live"`` (Messages API, list price) or ``"batch"`` (half price)."""
+    return "live" if _ARM_IMPLS[arm].live else "batch"
+
+
+def arm_input(arm: str) -> str:
+    """``"pdf"`` (the PDF as a document block) or ``"text"`` (the extracted text)."""
+    return _ARM_IMPLS[arm].input_mode
 
 
 def build_requests(arm: str, docs: list[dict]) -> list[_Request]:
@@ -583,7 +700,7 @@ async def _fetch_pdfs(sample: list[dict]) -> dict[int, tuple[Optional[str], Opti
 async def _hydrate(arm: str, sample: list[dict]) -> list[dict]:
     """The sample entries plus what ``arm`` needs to build a request (text or PDF)."""
     docs = [dict(e) for e in sample]
-    if arm == "H-pdf":
+    if _ARM_IMPLS[arm].pdf:
         pdfs = await _fetch_pdfs(sample)
         for d in docs:
             d["pdf_b64"], d["pdf_error"] = pdfs.get(d["doc_id"], (None, "pdf unavailable"))
@@ -655,31 +772,33 @@ class RunSpend:
 
 
 def estimate_cost(arm: str, sample: list[dict]) -> float:
-    """Batch-rate cost of sending ``sample`` through ``arm``.
+    """Cost of sending ``sample`` through ``arm``: batch rate for a batch arm, list price
+    for a live arm.
 
-    G and H-text use the token counts the production run recorded for each
-    document (Haiku tokenises differently, so this is an estimate, not a
-    prediction). H-pdf has no recorded count: 3000 input tokens per page plus 300
-    output tokens per document. Documents with no text are not sent to text arms.
+    Text arms use the token counts the production run recorded for each document
+    (Haiku and Sonnet tokenise differently, so this is an estimate, not a
+    prediction). PDF arms have no recorded count: 3000 input tokens per page plus
+    300 output tokens per document. Documents with no text are not sent to text arms.
     """
     impl = _ARM_IMPLS[arm]
     total = 0.0
     for d in sample:
-        if arm == "H-pdf":
+        if impl.pdf:
             tin = max(d.get("page_count") or 1, 1) * PDF_TOKENS_PER_PAGE
             tout = PDF_OUTPUT_TOKENS
         else:
             if d.get("llm_tokens_in") is None:
                 continue
             tin, tout = d["llm_tokens_in"], d.get("llm_tokens_out") or 0
-        total += pricing.cost_of(impl.model, tin, tout, batch=True)
+        total += pricing.cost_of(impl.model, tin, tout, batch=not impl.live)
     return total
 
 
 def run_spend(run_dir: pathlib.Path) -> RunSpend:
     """Money this run has spent (collected) or is committed to (submitted, estimated)."""
     spend = RunSpend()
-    for arm in ARMS:
+    for arm in ALL_ARMS:
+        # A live arm's results.jsonl grows line by line, so it counts as spent as it goes.
         if _is_collected(run_dir, arm):
             cost = sum(r["cost_usd"] for r in _read_jsonl(_arm_dir(run_dir, arm) / "results.jsonl"))
             spend.collected += cost
@@ -833,9 +952,12 @@ def _result_line(arm: str, request: dict, raw: Optional[_Raw], run_dir: pathlib.
         "tokens_in": tin,
         "tokens_out": tout,
         "cost_usd": (
-            pricing.cost_of(impl.model, tin, tout, batch=True) if raw and raw.billed else 0.0
+            pricing.cost_of(impl.model, tin, tout, batch=not impl.live)
+            if raw and raw.billed
+            else 0.0
         ),
         "collected_at": datetime.now(timezone.utc).isoformat(),
+        **({"mode": "live"} if impl.live else {}),
     }
 
 
@@ -907,17 +1029,328 @@ async def collect(
     return report
 
 
+# --------------------------------------------------------------------------- live arms
+
+
+def _sleep(seconds: float) -> None:
+    """Isolated so tests do not wait out a backoff."""
+    time.sleep(seconds)
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Rate limits, overload (529), other 5xx, timeouts and dropped connections."""
+    if isinstance(
+        error,
+        (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError),
+    ):
+        return True
+    if isinstance(error, anthropic.APIStatusError):
+        return (
+            error.status_code in (408, 409, 429)
+            or error.status_code >= 500
+            or "overloaded" in str(error).lower()
+        )
+    return False
+
+
+def _call_live(client, params: dict, doc_id: int) -> Optional[_Raw]:
+    """One document through the Messages API, retried on top of the SDK's own retries.
+
+    Returns the response as a ``_Raw``; an unbilled error ``_Raw`` for an API error that
+    retrying cannot fix (a 400, say); ``None`` when every try hit a retryable error, so
+    the caller leaves the document for the next run. Anything that is not an API error
+    is a bug and propagates.
+    """
+    for attempt in range(LIVE_ATTEMPTS):
+        try:
+            message = client.messages.create(**params)
+        except anthropic.APIError as e:
+            if not _is_retryable(e):
+                status = getattr(e, "status_code", None)
+                detail = getattr(e, "message", None) or str(e)
+                return _Raw(doc_id, error=f"api error{f' {status}' if status else ''}: {detail}")
+            if attempt == LIVE_ATTEMPTS - 1:
+                log.warning("doc %s: still failing after %d tries: %s", doc_id, LIVE_ATTEMPTS, e)
+                return None
+            _sleep(LIVE_BACKOFF_SECONDS * 2**attempt)
+            continue
+        text = next((b.text for b in message.content if b.type == "text"), None)
+        return _Raw(
+            doc_id,
+            text=text,
+            tokens_in=message.usage.input_tokens,
+            tokens_out=message.usage.output_tokens,
+            billed=True,
+            stop_reason=message.stop_reason,
+        )
+    return None  # unreachable: the last attempt returns or raises
+
+
+def live_worst_case_usd(arm: str, req: _Request, doc: dict) -> float:
+    """The most one call could cost at list price: a generous prompt estimate plus every
+    output token. Text is 2 characters a token; a PDF is ``page_count`` * 3000 tokens
+    plus its prompt text."""
+    impl = _ARM_IMPLS[arm]
+    if impl.pdf:
+        pages = max(doc.get("page_count") or 1, 1)
+        tin = pages * PDF_TOKENS_PER_PAGE + len(PDF_PROMPT) // 2
+    else:
+        tin = len(req.params["messages"][0]["content"]) // 2
+    return pricing.cost_of(impl.model, tin, HAIKU_MAX_TOKENS, batch=False)
+
+
+@dataclass
+class LiveResult:
+    """What one ``run_live`` did for one arm, and where the arm stands now."""
+
+    arm: str
+    lines: int = 0  # in results.jsonl, this run and earlier ones
+    valid: int = 0
+    errors: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
+    wall_seconds: float = 0.0  # summed over every run, from live.json
+    sent: int = 0  # documents this run got a response or a final API error for
+    retry_later: int = 0  # documents whose every try failed; the next run sends them
+    stopped_at_cap: bool = False
+
+
+def format_live_result(r: LiveResult) -> str:
+    line = (
+        f"{r.arm}: lines {r.lines} valid {r.valid} errors {r.errors} "
+        f"tokens {r.tokens_in}/{r.tokens_out} cost ${r.cost_usd:.4f} wall {r.wall_seconds:.0f}s"
+    )
+    if r.retry_later:
+        line += f" retry_later {r.retry_later}"
+    if r.stopped_at_cap:
+        line += " stopped_at_cap"
+    return line
+
+
+class _Budget:
+    """The cap for one live arm: money spent, plus the worst case of calls in flight."""
+
+    def __init__(self, spent: float):
+        self.spent = spent
+        self.reserved = 0.0
+
+    def reserve(self, worst: float) -> bool:
+        if self.spent + self.reserved + worst > CAP_USD:
+            return False
+        self.reserved += worst
+        return True
+
+    def settle(self, worst: float, cost: float) -> None:
+        self.reserved -= worst
+        self.spent += cost
+
+
+def _live_sample(arm: str, sample_path: pathlib.Path, sonnet_sample_path: pathlib.Path):
+    """The Sonnet arms run the 100-document subset; the Haiku arms run all of the sample."""
+    return load_sample(sonnet_sample_path if arm in SONNET_ARMS else sample_path)
+
+
+def _live_wall(arm_dir: pathlib.Path) -> float:
+    path = arm_dir / "live.json"
+    return float(_read_json(path).get("wall_seconds") or 0.0) if path.exists() else 0.0
+
+
+def _write_live_json(arm_dir: pathlib.Path, arm: str, started: datetime, finished: datetime):
+    """Wall time of every run of this arm: the first start, the last finish, and the sum."""
+    path = arm_dir / "live.json"
+    previous = _read_json(path) if path.exists() else {}
+    seconds = (finished - started).total_seconds()
+    runs = [
+        *previous.get("runs", []),
+        {
+            "started_at": started.isoformat(),
+            "finished_at": finished.isoformat(),
+            "wall_seconds": seconds,
+        },
+    ]
+    path.write_text(
+        json.dumps(
+            {
+                "arm": arm,
+                "model": _ARM_IMPLS[arm].model,
+                "started_at": runs[0]["started_at"],
+                "finished_at": finished.isoformat(),
+                "wall_seconds": sum(r["wall_seconds"] for r in runs),
+                "runs": runs,
+            },
+            indent=1,
+        )
+        + "\n"
+    )
+
+
+async def _run_live_arm(
+    arm: str,
+    client,
+    run_dir: pathlib.Path,
+    sample: list[dict],
+    concurrency: int,
+) -> LiveResult:
+    impl = _ARM_IMPLS[arm]
+    arm_dir = _arm_dir(run_dir, arm)
+    arm_dir.mkdir(parents=True, exist_ok=True)
+    results_path = arm_dir / "results.jsonl"
+    done = {r["doc_id"] for r in _read_jsonl(results_path)} if results_path.exists() else set()
+    todo = [e for e in sample if e["doc_id"] not in done]
+    result = LiveResult(arm)
+    started = datetime.now(timezone.utc)
+
+    if todo:
+        docs = await _hydrate(arm, todo)
+        by_id = {d["doc_id"]: d for d in docs}
+        requests = impl.build_requests(docs)
+        budget = _Budget(experiment_spend(run_dir))
+        loop = asyncio.get_running_loop()
+        pool = ThreadPoolExecutor(max_workers=max(concurrency, 1))
+        stop = False
+
+        # Appended and flushed one line at a time, so a crash or Ctrl-C loses nothing
+        # that finished. A document is only "done" once its line is on disk.
+        with results_path.open("a") as fh:
+
+            def write(line: dict) -> None:
+                fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+                fh.flush()
+
+            def request_row(req: _Request) -> dict:
+                return {"doc_id": req.doc_id, "nhtsa_id": req.nhtsa_id, "error": req.error}
+
+            # Documents with nothing to send cost nothing and get their error line first.
+            for req in requests:
+                if req.params is None:
+                    write(_result_line(arm, request_row(req), None, run_dir))
+            queue = deque(r for r in requests if r.params is not None)
+
+            async def worker() -> None:
+                nonlocal stop
+                while queue and not stop:
+                    req = queue.popleft()
+                    worst = live_worst_case_usd(arm, req, by_id[req.doc_id])
+                    while not budget.reserve(worst):
+                        if budget.reserved == 0:
+                            # Nothing in flight to wait for: this call cannot fit.
+                            result.stopped_at_cap = stop = True
+                            return
+                        await asyncio.sleep(0.05)  # in-flight calls may settle for less
+                    try:
+                        raw = await loop.run_in_executor(
+                            pool, _call_live, client, req.params, req.doc_id
+                        )
+                    except BaseException:
+                        budget.settle(worst, 0.0)
+                        raise
+                    line = _result_line(arm, request_row(req), raw, run_dir) if raw else None
+                    budget.settle(worst, line["cost_usd"] if line else 0.0)
+                    if line is None:
+                        result.retry_later += 1
+                        continue
+                    write(line)
+                    result.sent += 1
+                    if raw.billed:
+                        # Metered after the line is safely on disk: a crash between the two
+                        # loses a ledger row, never pays for the document twice.
+                        await record_usage(
+                            kind="llm_extract",
+                            model=impl.model,
+                            tokens_in=raw.tokens_in,
+                            tokens_out=raw.tokens_out,
+                            batch=False,
+                            meta={
+                                "bakeoff": arm,
+                                "run": str(run_dir),
+                                "doc_id": req.doc_id,
+                                "mode": "live",
+                            },
+                        )
+
+            workers = [asyncio.ensure_future(worker()) for _ in range(max(concurrency, 1))]
+            try:
+                await asyncio.gather(*workers)
+            except BaseException:
+                for w in workers:
+                    w.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
+                raise
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+                _write_live_json(arm_dir, arm, started, datetime.now(timezone.utc))
+    else:
+        log.info("%s: every document already has a result line", arm)
+
+    rows = _read_jsonl(results_path) if results_path.exists() else []
+    result.lines = len(rows)
+    result.valid = sum(1 for r in rows if r["valid"])
+    result.errors = result.lines - result.valid
+    result.tokens_in = sum(r["tokens_in"] for r in rows)
+    result.tokens_out = sum(r["tokens_out"] for r in rows)
+    result.cost_usd = sum(r["cost_usd"] for r in rows)
+    result.wall_seconds = _live_wall(arm_dir)
+    return result
+
+
+async def run_live(
+    arm: str,
+    run_dir: pathlib.Path,
+    sample_path: pathlib.Path = SAMPLE_PATH,
+    sonnet_sample_path: Optional[pathlib.Path] = None,
+    concurrency: int = LIVE_CONCURRENCY,
+) -> dict[str, LiveResult]:
+    """Run a live arm (or ``all-live``, in order) through the synchronous Messages API.
+
+    The key is checked first (a missing one fails here, clearly), and only then is
+    anything read from the database or NHTSA. Each finished document is appended to
+    ``<run>/<arm>/results.jsonl`` at once, and a re-run skips the documents already
+    there. Before every call its worst case must fit under ``CAP_USD`` minus what the
+    bake-off has spent and what calls in flight could still cost; otherwise the arm
+    stops with ``stopped_at_cap``.
+    """
+    run_dir = pathlib.Path(run_dir)
+    if arm == "all-live":
+        arms = list(LIVE_ARMS)
+    elif arm in LIVE_ARMS:
+        arms = [arm]
+    else:
+        raise ValueError(f"{arm!r} is not a live arm; expected one of {LIVE_ARMS} or 'all-live'")
+    sonnet_sample_path = pathlib.Path(sonnet_sample_path or SONNET_SAMPLE_PATH)
+
+    client = _anthropic_client()
+    out: dict[str, LiveResult] = {}
+    for a in arms:
+        sample = _live_sample(a, sample_path, sonnet_sample_path)
+        out[a] = await _run_live_arm(a, client, run_dir, sample, concurrency)
+    return out
+
+
 # --------------------------------------------------------------------------- status
 
 
 def status(
-    run_dir: pathlib.Path, sample_path: pathlib.Path = SAMPLE_PATH, remote: bool = False
+    run_dir: pathlib.Path,
+    sample_path: pathlib.Path = SAMPLE_PATH,
+    remote: bool = False,
+    sonnet_sample_path: Optional[pathlib.Path] = None,
 ) -> str:
-    """Per-arm estimate, batch state and spend. Local only unless ``remote``."""
+    """Per-arm estimate, batch state and spend. Local only unless ``remote``.
+
+    Batch arms are estimated at the batch rate, live arms at list price; the Sonnet
+    arms over the Sonnet subset (no estimate if that file has not been written).
+    """
     run_dir = pathlib.Path(run_dir)
     sample = load_sample(sample_path)
+    sonnet_path = pathlib.Path(sonnet_sample_path or SONNET_SAMPLE_PATH)
+    sonnet = load_sample(sonnet_path) if sonnet_path.exists() else []
     spend = run_spend(run_dir)
-    lines = [f"run {run_dir}", f"sample {len(sample)} documents", ""]
+    lines = [
+        f"run {run_dir}",
+        f"sample {len(sample)} documents, Sonnet subset {len(sonnet)}",
+        "",
+    ]
     clients: dict[str, Any] = {}
     for arm in ARMS:
         impl = _ARM_IMPLS[arm]
@@ -940,11 +1373,25 @@ def status(
         else:
             state = "submitted, awaiting collect"
         lines.append(f"{head}  {state}  [{ids}] submitted {batch['submitted_at']}")
+    for arm in LIVE_ARMS:
+        impl = _ARM_IMPLS[arm]
+        docs = sonnet if arm in SONNET_ARMS else sample
+        head = f"{arm:<11} {impl.model:<18} estimate ${estimate_cost(arm, docs):.4f} (list price)"
+        path = _arm_dir(run_dir, arm) / "results.jsonl"
+        if not path.exists():
+            lines.append(f"{head}  not run")
+            continue
+        rows = _read_jsonl(path)
+        valid = sum(1 for r in rows if r["valid"])
+        cost = sum(r["cost_usd"] for r in rows)
+        lines.append(
+            f"{head}  live: {len(rows)} of {len(docs)} lines ({valid} valid), spent ${cost:.4f}"
+        )
     lines += [
         "",
         f"cap ${CAP_USD:.2f} | spent ${spend.collected:.4f} | "
         f"committed, not yet collected ${spend.committed:.4f} | "
-        f"headroom ${CAP_USD - spend.total:.4f}",
+        f"headroom ${CAP_USD - experiment_spend(run_dir):.4f} (arms and judge, all runs)",
     ]
     return "\n".join(lines)
 
@@ -964,13 +1411,38 @@ def _parser() -> argparse.ArgumentParser:
         )
         sp.add_argument("--sample", type=pathlib.Path, default=SAMPLE_PATH, help="sample JSON")
 
+    def with_sonnet(sp):
+        sp.add_argument(
+            "--sonnet-sample",
+            type=pathlib.Path,
+            default=SONNET_SAMPLE_PATH,
+            help="the Sonnet subset JSON",
+        )
+
     sub.add_parser("sample", help="pick the sample from the database and write the JSON")
+    sp = sub.add_parser(
+        "sample-sonnet", help="pick the 100-document Sonnet subset from the sample file"
+    )
+    sp.add_argument("--sample", type=pathlib.Path, default=SAMPLE_PATH, help="sample JSON to read")
+    sp.add_argument(
+        "--out", type=pathlib.Path, help=f"where to write (default: {SONNET_SAMPLE_PATH})"
+    )
     sp = sub.add_parser("submit", help="send an arm as provider batches (spends money)")
     sp.add_argument("--arm", required=True, choices=[*ARMS, "all"])
     sp.add_argument(
         "--new-run", action="store_true", help="start a new run directory instead of the newest"
     )
     common(sp, "the newest run under backend/.bakeoff/, or a new one if there is none")
+    sp = sub.add_parser("run-live", help="run a live arm through the Messages API (spends money)")
+    sp.add_argument("--arm", required=True, choices=[*LIVE_ARMS, "all-live"])
+    sp.add_argument(
+        "--concurrency",
+        type=int,
+        default=LIVE_CONCURRENCY,
+        help=f"calls in flight at once (default {LIVE_CONCURRENCY})",
+    )
+    common(sp, "the newest run under backend/.bakeoff/, or a new one if there is none")
+    with_sonnet(sp)
     sp = sub.add_parser("collect", help="write results.jsonl for finished batches")
     sp.add_argument("--wait", type=float, default=0, help="poll up to this many seconds")
     sp.add_argument("--poll", type=float, default=30, help="seconds between polls")
@@ -978,6 +1450,7 @@ def _parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="estimates, batch state, spend")
     sp.add_argument("--remote", action="store_true", help="also ask the providers for batch state")
     common(sp, "the newest run under backend/.bakeoff/")
+    with_sonnet(sp)
     return p
 
 
@@ -989,6 +1462,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"wrote {len(sample)} documents to {SAMPLE_PATH}")
             print(f"{'doc_kind':<20} {'communication_type':<20} count")
             for kind, ctype, n in strata_table(sample):
+                print(f"{str(kind):<20} {str(ctype):<20} {n}")
+            return 0
+
+        if args.command == "sample-sonnet":
+            subset = write_sonnet_sample(args.sample, args.out)
+            print(f"wrote {len(subset)} documents to {args.out or SONNET_SAMPLE_PATH}")
+            print(f"{'doc_kind':<20} {'communication_type':<20} count")
+            for kind, ctype, n in strata_table(subset):
                 print(f"{str(kind):<20} {str(ctype):<20} {n}")
             return 0
 
@@ -1005,12 +1486,43 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
 
         run_dir = args.run_dir or latest_run_dir() or new_run_dir()
+        if args.command == "run-live":
+            if args.concurrency < 1:
+                raise ValueError("--concurrency must be at least 1")
+            print(f"run dir: {run_dir}")
+            try:
+                done = asyncio.run(
+                    run_live(
+                        args.arm,
+                        run_dir,
+                        sample_path=args.sample,
+                        sonnet_sample_path=args.sonnet_sample,
+                        concurrency=args.concurrency,
+                    )
+                )
+            except KeyboardInterrupt:
+                print(
+                    "interrupted: every finished document is already in results.jsonl; "
+                    "run the same command again to resume",
+                    file=sys.stderr,
+                )
+                return 130
+            for result in done.values():
+                print(format_live_result(result))
+            return 0
         if args.command == "collect":
             report = asyncio.run(collect(run_dir, poll_seconds=args.poll, max_wait=args.wait))
             for arm, line in report.items():
                 print(f"{arm}: {line}")
             return 0
-        print(status(run_dir, sample_path=args.sample, remote=args.remote))
+        print(
+            status(
+                run_dir,
+                sample_path=args.sample,
+                remote=args.remote,
+                sonnet_sample_path=args.sonnet_sample,
+            )
+        )
         return 0
     except (RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
