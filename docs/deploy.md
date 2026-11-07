@@ -63,7 +63,8 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `LOW_YIELD_CHARS_PER_PAGE` | no | optional | no | Vision-fallback threshold (default 200) |
 | `NHTSA_API_BASE_URL` | optional | optional | no | NHTSA API base |
 | `API_HOST` | optional | no | no | Bind host (default 0.0.0.0) |
-| `API_PORT` | optional | no | no | Settings default 8000; the image CMD binds 8000 |
+| `API_PORT` | optional | no | no | Settings default 8000; not read by the image CMD |
+| `PORT` | injected | no | no | Railway sets it and health-checks that port; `start.sh` binds `${PORT:-8000}` |
 | `FLATFILE_CACHE_DIR` | optional | optional | no | Flat-file zip cache directory |
 | `VITE_FIREBASE_*` | build | no | no | Frontend build variables (see above) |
 
