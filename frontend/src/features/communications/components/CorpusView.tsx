@@ -10,6 +10,7 @@ import {
 } from '../hooks/useCorpus';
 import { RefreshSurface } from '../../refresh/components/RefreshSurface';
 import { useRefreshFlow } from '../../refresh/hooks/useRefresh';
+import { useReadOnly } from '../../vehicles/hooks/useVehicles';
 
 import type { Vehicle, CommType, CorpusFilters, ProcessingStatus } from '@/client';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
@@ -48,7 +49,9 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
   const { data: tagsData } = useCorpusTagsQuery(vehicleId);
   // Its own flow instance, so arriving here mid-run picks the run up from the
   // server rather than showing an empty page.
-  const refresh = useRefreshFlow(vehicleId);
+  // Read-only mode unmounts the refresh endpoints: no flow, no status poll, no controls.
+  const readOnly = useReadOnly();
+  const refresh = useRefreshFlow(readOnly ? null : vehicleId);
 
   const filters: CorpusFilters = useMemo(() => {
     const f: CorpusFilters = { vehicleId, perPage: 200 };
@@ -115,21 +118,23 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
               {processedCount > 0 && ` · ${processedCount} analyzed on this page`}
             </p>
           </div>
-          <button
-            className="btn btn-ghost"
-            onClick={() => refresh.ask(vehicleId)}
-            disabled={refresh.isAsking || refresh.isStarting || refresh.isActive}
-            title="Check NHTSA for new bulletins"
-          >
-            <RefreshCw
-              size={16}
-              className={refresh.isActive || refresh.isAsking ? styles.spinning : ''}
-            />
-            {refresh.isActive ? 'Loading' : 'Refresh'}
-          </button>
+          {!readOnly && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => refresh.ask(vehicleId)}
+              disabled={refresh.isAsking || refresh.isStarting || refresh.isActive}
+              title="Check NHTSA for new bulletins"
+            >
+              <RefreshCw
+                size={16}
+                className={refresh.isActive || refresh.isAsking ? styles.spinning : ''}
+              />
+              {refresh.isActive ? 'Loading' : 'Refresh'}
+            </button>
+          )}
         </div>
 
-        <RefreshSurface flow={refresh} />
+        {!readOnly && <RefreshSurface flow={refresh} />}
 
         {/* Search */}
         <form onSubmit={handleSubmit} className={styles.searchForm}>
@@ -250,14 +255,16 @@ export function CorpusView({ vehicleId, vehicle, onBack }: CorpusViewProps) {
               Fetch its manufacturer communications from NHTSA and analyse them. You will see
               the cost before anything runs.
             </p>
-            <button
-              className="btn btn-primary"
-              onClick={() => refresh.ask(vehicleId)}
-              disabled={refresh.isAsking || refresh.isStarting}
-            >
-              <RefreshCw size={18} className={refresh.isAsking ? styles.spinning : ''} />
-              {refresh.isAsking ? 'Checking NHTSA...' : 'Load bulletins'}
-            </button>
+            {!readOnly && (
+              <button
+                className="btn btn-primary"
+                onClick={() => refresh.ask(vehicleId)}
+                disabled={refresh.isAsking || refresh.isStarting}
+              >
+                <RefreshCw size={18} className={refresh.isAsking ? styles.spinning : ''} />
+                {refresh.isAsking ? 'Checking NHTSA...' : 'Load bulletins'}
+              </button>
+            )}
           </div>
         ) : (
           <CorpusCommunicationList
