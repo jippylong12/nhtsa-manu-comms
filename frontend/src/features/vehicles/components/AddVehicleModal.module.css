@@ -22,6 +22,14 @@
   flex-direction: column;
 }
 
+/* The form wraps body + footer; let it shrink so the body scrolls and the footer stays visible */
+.modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .modalHeader {
   display: flex;
   align-items: center;
