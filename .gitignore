@@ -47,3 +47,6 @@ backend/digest_preview.html
 
 # Scratch
 /tmp/
+
+# Extraction bake-off run state (JIP-1567)
+backend/.bakeoff/

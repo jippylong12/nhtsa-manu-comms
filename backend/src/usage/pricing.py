@@ -5,7 +5,8 @@ answer composition) computes cost from this table, so ledger totals reconcile
 with the provider's billing and a price change is a one-line edit here rather
 than a hunt through job modules.
 
-Rates are USD per token, from the Gemini published list prices.
+Rates are USD per token, from the Gemini and Anthropic published list prices.
+Both providers' Batch APIs are half list price, so BATCH_DISCOUNT applies to both.
 """
 
 from dataclasses import dataclass
@@ -24,15 +25,21 @@ class ModelRate:
 
 RATES: dict[str, ModelRate] = {
     # Text generation
+    "gemini-3.5-flash-lite": ModelRate(0.30 / 1e6, 2.50 / 1e6),
     "gemini-3.1-flash-lite": ModelRate(0.25 / 1e6, 1.50 / 1e6),
     "gemini-3-flash-preview": ModelRate(0.30 / 1e6, 2.50 / 1e6),
+    # Anthropic list prices (USD per token). Haiku 5.5's rate applies to prompts up
+    # to 100K tokens; the longest document in the corpus is ~37K tokens.
+    "claude-haiku-5-5": ModelRate(0.10 / 1e6, 0.50 / 1e6),
+    "claude-sonnet-5-5": ModelRate(2.00 / 1e6, 10.00 / 1e6),
+    "claude-opus-5-5": ModelRate(4.00 / 1e6, 20.00 / 1e6),
     # Embeddings (output tokens are not billed)
     "gemini-embedding-001": ModelRate(0.15 / 1e6, 0.0),
 }
 
 # Used when a model id is not in RATES, so an unknown model is costed
 # conservatively instead of silently reporting zero spend.
-FALLBACK = RATES["gemini-3.1-flash-lite"]
+FALLBACK = RATES["gemini-3.5-flash-lite"]
 
 
 def rate_for(model: str) -> ModelRate:

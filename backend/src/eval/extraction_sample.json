@@ -1,0 +1,3002 @@
+[
+ {
+  "doc_id": 7,
+  "nhtsa_id": "11034038",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11034038-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 382,
+  "llm_tokens_out": 278,
+  "page_count": 1
+ },
+ {
+  "doc_id": 11,
+  "nhtsa_id": "11011801",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011801-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SU",
+  "llm_tokens_in": 1818,
+  "llm_tokens_out": 214,
+  "page_count": 4
+ },
+ {
+  "doc_id": 13,
+  "nhtsa_id": "11021792",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11021792-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 2016,
+  "llm_tokens_out": 312,
+  "page_count": 12
+ },
+ {
+  "doc_id": 14,
+  "nhtsa_id": "11007729",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007729-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 1405,
+  "llm_tokens_out": 233,
+  "page_count": 3
+ },
+ {
+  "doc_id": 29,
+  "nhtsa_id": "11022223",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11022223-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 379,
+  "llm_tokens_out": 191,
+  "page_count": 1
+ },
+ {
+  "doc_id": 32,
+  "nhtsa_id": "11006398",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006398-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 536,
+  "llm_tokens_out": 230,
+  "page_count": 1
+ },
+ {
+  "doc_id": 35,
+  "nhtsa_id": "11033755",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11033755-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1182,
+  "llm_tokens_out": 313,
+  "page_count": 2
+ },
+ {
+  "doc_id": 37,
+  "nhtsa_id": "11017311",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017311-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 943,
+  "llm_tokens_out": 355,
+  "page_count": 2
+ },
+ {
+  "doc_id": 38,
+  "nhtsa_id": "11012845",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012845-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 2285,
+  "llm_tokens_out": 376,
+  "page_count": 3
+ },
+ {
+  "doc_id": 42,
+  "nhtsa_id": "11017310",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017310-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1001,
+  "llm_tokens_out": 359,
+  "page_count": 2
+ },
+ {
+  "doc_id": 44,
+  "nhtsa_id": "11006357",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006357-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 3087,
+  "llm_tokens_out": 598,
+  "page_count": 6
+ },
+ {
+  "doc_id": 47,
+  "nhtsa_id": "11019516",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11019516-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1575,
+  "llm_tokens_out": 333,
+  "page_count": 7
+ },
+ {
+  "doc_id": 55,
+  "nhtsa_id": "10250003",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10250003-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 527,
+  "llm_tokens_out": 180,
+  "page_count": 2
+ },
+ {
+  "doc_id": 65,
+  "nhtsa_id": "11007726",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007726-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "TSB",
+  "llm_tokens_in": 3333,
+  "llm_tokens_out": 397,
+  "page_count": 5
+ },
+ {
+  "doc_id": 69,
+  "nhtsa_id": "11011694",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011694-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 672,
+  "llm_tokens_out": 192,
+  "page_count": 2
+ },
+ {
+  "doc_id": 72,
+  "nhtsa_id": "11017271",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017271-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1419,
+  "llm_tokens_out": 508,
+  "page_count": 5
+ },
+ {
+  "doc_id": 73,
+  "nhtsa_id": "11020716",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11020716-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "CSP",
+  "llm_tokens_in": 4194,
+  "llm_tokens_out": 248,
+  "page_count": 5
+ },
+ {
+  "doc_id": 76,
+  "nhtsa_id": "10250278",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10250278-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1998,
+  "llm_tokens_out": 211,
+  "page_count": 7
+ },
+ {
+  "doc_id": 80,
+  "nhtsa_id": "11011692",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011692-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1514,
+  "llm_tokens_out": 411,
+  "page_count": 2
+ },
+ {
+  "doc_id": 82,
+  "nhtsa_id": "10250261",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10250261-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 4763,
+  "llm_tokens_out": 394,
+  "page_count": 9
+ },
+ {
+  "doc_id": 83,
+  "nhtsa_id": "11017257",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017257-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1053,
+  "llm_tokens_out": 207,
+  "page_count": 2
+ },
+ {
+  "doc_id": 92,
+  "nhtsa_id": "11019670",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11019670-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "BL",
+  "llm_tokens_in": 2711,
+  "llm_tokens_out": 191,
+  "page_count": 8
+ },
+ {
+  "doc_id": 93,
+  "nhtsa_id": "11011193",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011193-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SU",
+  "llm_tokens_in": 2122,
+  "llm_tokens_out": 193,
+  "page_count": 3
+ },
+ {
+  "doc_id": 98,
+  "nhtsa_id": "11017258",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017258-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 2647,
+  "llm_tokens_out": 573,
+  "page_count": 5
+ },
+ {
+  "doc_id": 123,
+  "nhtsa_id": "11017886",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017886-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 5015,
+  "llm_tokens_out": 447,
+  "page_count": 16
+ },
+ {
+  "doc_id": 124,
+  "nhtsa_id": "11006888",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006888-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 879,
+  "llm_tokens_out": 195,
+  "page_count": 2
+ },
+ {
+  "doc_id": 125,
+  "nhtsa_id": "11011354",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011354-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 610,
+  "llm_tokens_out": 262,
+  "page_count": 2
+ },
+ {
+  "doc_id": 130,
+  "nhtsa_id": "11006059",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006059-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "BL",
+  "llm_tokens_in": 4155,
+  "llm_tokens_out": 202,
+  "page_count": 7
+ },
+ {
+  "doc_id": 134,
+  "nhtsa_id": "11011342",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011342-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 552,
+  "llm_tokens_out": 171,
+  "page_count": 1
+ },
+ {
+  "doc_id": 140,
+  "nhtsa_id": "11005397",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11005397-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SU",
+  "llm_tokens_in": 1835,
+  "llm_tokens_out": 211,
+  "page_count": 4
+ },
+ {
+  "doc_id": 148,
+  "nhtsa_id": "11017502",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017502-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1134,
+  "llm_tokens_out": 291,
+  "page_count": 2
+ },
+ {
+  "doc_id": 153,
+  "nhtsa_id": "11010683",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11010683-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "BL",
+  "llm_tokens_in": 2960,
+  "llm_tokens_out": 222,
+  "page_count": 12
+ },
+ {
+  "doc_id": 158,
+  "nhtsa_id": "10249968",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10249968-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 674,
+  "llm_tokens_out": 266,
+  "page_count": 1
+ },
+ {
+  "doc_id": 160,
+  "nhtsa_id": "10249965",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10249965-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 609,
+  "llm_tokens_out": 202,
+  "page_count": 1
+ },
+ {
+  "doc_id": 161,
+  "nhtsa_id": "11006511",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006511-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 690,
+  "llm_tokens_out": 177,
+  "page_count": 2
+ },
+ {
+  "doc_id": 162,
+  "nhtsa_id": "11017244",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017244-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2186,
+  "llm_tokens_out": 424,
+  "page_count": 6
+ },
+ {
+  "doc_id": 165,
+  "nhtsa_id": "11005327",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11005327-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "BL",
+  "llm_tokens_in": 3923,
+  "llm_tokens_out": 167,
+  "page_count": 7
+ },
+ {
+  "doc_id": 185,
+  "nhtsa_id": "11011709",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011709-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 5206,
+  "llm_tokens_out": 361,
+  "page_count": 6
+ },
+ {
+  "doc_id": 187,
+  "nhtsa_id": "11033554",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11033554-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "BL",
+  "llm_tokens_in": 3007,
+  "llm_tokens_out": 147,
+  "page_count": 12
+ },
+ {
+  "doc_id": 188,
+  "nhtsa_id": "11018659",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11018659-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1875,
+  "llm_tokens_out": 279,
+  "page_count": 6
+ },
+ {
+  "doc_id": 189,
+  "nhtsa_id": "11016160",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11016160-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1685,
+  "llm_tokens_out": 376,
+  "page_count": 3
+ },
+ {
+  "doc_id": 191,
+  "nhtsa_id": "10248728",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10248728-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 2919,
+  "llm_tokens_out": 221,
+  "page_count": 4
+ },
+ {
+  "doc_id": 192,
+  "nhtsa_id": "11006282",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006282-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2872,
+  "llm_tokens_out": 267,
+  "page_count": 4
+ },
+ {
+  "doc_id": 193,
+  "nhtsa_id": "11033726",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11033726-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 4552,
+  "llm_tokens_out": 378,
+  "page_count": 7
+ },
+ {
+  "doc_id": 198,
+  "nhtsa_id": "10248725",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10248725-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 3952,
+  "llm_tokens_out": 224,
+  "page_count": 4
+ },
+ {
+  "doc_id": 205,
+  "nhtsa_id": "11032960",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11032960-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 2112,
+  "llm_tokens_out": 383,
+  "page_count": 3
+ },
+ {
+  "doc_id": 207,
+  "nhtsa_id": "11017173",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017173-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 2784,
+  "llm_tokens_out": 298,
+  "page_count": 6
+ },
+ {
+  "doc_id": 213,
+  "nhtsa_id": "11017207",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017207-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2471,
+  "llm_tokens_out": 236,
+  "page_count": 4
+ },
+ {
+  "doc_id": 231,
+  "nhtsa_id": "11017016",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017016-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 2005,
+  "llm_tokens_out": 192,
+  "page_count": 4
+ },
+ {
+  "doc_id": 232,
+  "nhtsa_id": "11005256",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11005256-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 804,
+  "llm_tokens_out": 195,
+  "page_count": 2
+ },
+ {
+  "doc_id": 234,
+  "nhtsa_id": "10247192",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10247192-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 5329,
+  "llm_tokens_out": 280,
+  "page_count": 8
+ },
+ {
+  "doc_id": 235,
+  "nhtsa_id": "11024498",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024498-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 3078,
+  "llm_tokens_out": 420,
+  "page_count": 3
+ },
+ {
+  "doc_id": 239,
+  "nhtsa_id": "11005311",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11005311-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1181,
+  "llm_tokens_out": 302,
+  "page_count": 1
+ },
+ {
+  "doc_id": 249,
+  "nhtsa_id": "11015572",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015572-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 2025,
+  "llm_tokens_out": 293,
+  "page_count": 4
+ },
+ {
+  "doc_id": 254,
+  "nhtsa_id": "11032559",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11032559-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1182,
+  "llm_tokens_out": 238,
+  "page_count": 2
+ },
+ {
+  "doc_id": 257,
+  "nhtsa_id": "11004874",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11004874-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 1431,
+  "llm_tokens_out": 255,
+  "page_count": 2
+ },
+ {
+  "doc_id": 259,
+  "nhtsa_id": "11032560",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11032560-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1182,
+  "llm_tokens_out": 238,
+  "page_count": 2
+ },
+ {
+  "doc_id": 263,
+  "nhtsa_id": "11002308",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11002308-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "CSP",
+  "llm_tokens_in": 2972,
+  "llm_tokens_out": 200,
+  "page_count": 5
+ },
+ {
+  "doc_id": 265,
+  "nhtsa_id": "11031823",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11031823-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 380,
+  "llm_tokens_out": 246,
+  "page_count": 1
+ },
+ {
+  "doc_id": 269,
+  "nhtsa_id": "10246312",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10246312-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 1432,
+  "llm_tokens_out": 186,
+  "page_count": 2
+ },
+ {
+  "doc_id": 272,
+  "nhtsa_id": "11018471",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11018471-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 472,
+  "llm_tokens_out": 189,
+  "page_count": 2
+ },
+ {
+  "doc_id": 274,
+  "nhtsa_id": "11011461",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011461-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 914,
+  "llm_tokens_out": 276,
+  "page_count": 2
+ },
+ {
+  "doc_id": 276,
+  "nhtsa_id": "11031278",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11031278-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1375,
+  "llm_tokens_out": 397,
+  "page_count": 2
+ },
+ {
+  "doc_id": 277,
+  "nhtsa_id": "10247364",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10247364-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1884,
+  "llm_tokens_out": 517,
+  "page_count": 4
+ },
+ {
+  "doc_id": 279,
+  "nhtsa_id": "11015621",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015621-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 2320,
+  "llm_tokens_out": 223,
+  "page_count": 16
+ },
+ {
+  "doc_id": 280,
+  "nhtsa_id": "11009056",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009056-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 823,
+  "llm_tokens_out": 310,
+  "page_count": 3
+ },
+ {
+  "doc_id": 281,
+  "nhtsa_id": "10247363",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10247363-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 914,
+  "llm_tokens_out": 348,
+  "page_count": 3
+ },
+ {
+  "doc_id": 285,
+  "nhtsa_id": "11023266",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11023266-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 1541,
+  "llm_tokens_out": 298,
+  "page_count": 3
+ },
+ {
+  "doc_id": 288,
+  "nhtsa_id": "11002441",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11002441-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1334,
+  "llm_tokens_out": 157,
+  "page_count": 2
+ },
+ {
+  "doc_id": 289,
+  "nhtsa_id": "11030439",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11030439-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SU",
+  "llm_tokens_in": 3016,
+  "llm_tokens_out": 283,
+  "page_count": 6
+ },
+ {
+  "doc_id": 291,
+  "nhtsa_id": "11014633",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014633-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1920,
+  "llm_tokens_out": 362,
+  "page_count": 3
+ },
+ {
+  "doc_id": 294,
+  "nhtsa_id": "10246269",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10246269-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 2931,
+  "llm_tokens_out": 248,
+  "page_count": 3
+ },
+ {
+  "doc_id": 298,
+  "nhtsa_id": "11018432",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11018432-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1479,
+  "llm_tokens_out": 366,
+  "page_count": 3
+ },
+ {
+  "doc_id": 300,
+  "nhtsa_id": "10247359",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10247359-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 517,
+  "llm_tokens_out": 215,
+  "page_count": 1
+ },
+ {
+  "doc_id": 303,
+  "nhtsa_id": "11018430",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11018430-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1047,
+  "llm_tokens_out": 388,
+  "page_count": 2
+ },
+ {
+  "doc_id": 304,
+  "nhtsa_id": "11011453",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011453-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 995,
+  "llm_tokens_out": 358,
+  "page_count": 2
+ },
+ {
+  "doc_id": 307,
+  "nhtsa_id": "11030541",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11030541-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 468,
+  "llm_tokens_out": 240,
+  "page_count": 1
+ },
+ {
+  "doc_id": 309,
+  "nhtsa_id": "11017910",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017910-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 2196,
+  "llm_tokens_out": 283,
+  "page_count": 4
+ },
+ {
+  "doc_id": 316,
+  "nhtsa_id": "11010727",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11010727-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 3769,
+  "llm_tokens_out": 283,
+  "page_count": 7
+ },
+ {
+  "doc_id": 317,
+  "nhtsa_id": "10247340",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10247340-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 778,
+  "llm_tokens_out": 227,
+  "page_count": 2
+ },
+ {
+  "doc_id": 319,
+  "nhtsa_id": "11030201",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11030201-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1229,
+  "llm_tokens_out": 299,
+  "page_count": 3
+ },
+ {
+  "doc_id": 320,
+  "nhtsa_id": "11018426",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11018426-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 887,
+  "llm_tokens_out": 285,
+  "page_count": 2
+ },
+ {
+  "doc_id": 321,
+  "nhtsa_id": "11015214",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015214-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 3395,
+  "llm_tokens_out": 363,
+  "page_count": 11
+ },
+ {
+  "doc_id": 327,
+  "nhtsa_id": "11011452",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011452-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 2092,
+  "llm_tokens_out": 337,
+  "page_count": 2
+ },
+ {
+  "doc_id": 329,
+  "nhtsa_id": "11015213",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015213-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2384,
+  "llm_tokens_out": 370,
+  "page_count": 4
+ },
+ {
+  "doc_id": 333,
+  "nhtsa_id": "11030092",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11030092-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 996,
+  "llm_tokens_out": 175,
+  "page_count": 4
+ },
+ {
+  "doc_id": 334,
+  "nhtsa_id": "11010716",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11010716-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 1012,
+  "llm_tokens_out": 299,
+  "page_count": 2
+ },
+ {
+  "doc_id": 339,
+  "nhtsa_id": "11015223",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015223-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 2790,
+  "llm_tokens_out": 408,
+  "page_count": 3
+ },
+ {
+  "doc_id": 350,
+  "nhtsa_id": "11017276",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017276-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 785,
+  "llm_tokens_out": 275,
+  "page_count": 1
+ },
+ {
+  "doc_id": 352,
+  "nhtsa_id": "11010576",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11010576-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 4920,
+  "llm_tokens_out": 245,
+  "page_count": 15
+ },
+ {
+  "doc_id": 353,
+  "nhtsa_id": "10246012",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10246012-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 869,
+  "llm_tokens_out": 314,
+  "page_count": 2
+ },
+ {
+  "doc_id": 355,
+  "nhtsa_id": "11029949",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11029949-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 5363,
+  "llm_tokens_out": 510,
+  "page_count": 11
+ },
+ {
+  "doc_id": 356,
+  "nhtsa_id": "11017779",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017779-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 568,
+  "llm_tokens_out": 223,
+  "page_count": 1
+ },
+ {
+  "doc_id": 364,
+  "nhtsa_id": "11001472",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11001472-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 2744,
+  "llm_tokens_out": 321,
+  "page_count": 3
+ },
+ {
+  "doc_id": 366,
+  "nhtsa_id": "11029952",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11029952-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 619,
+  "llm_tokens_out": 211,
+  "page_count": 1
+ },
+ {
+  "doc_id": 367,
+  "nhtsa_id": "11000123",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11000123-0001.pdf",
+  "doc_kind": "recall",
+  "communication_type": "CSP",
+  "llm_tokens_in": 4944,
+  "llm_tokens_out": 192,
+  "page_count": 8
+ },
+ {
+  "doc_id": 369,
+  "nhtsa_id": "11015382",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015382-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 1191,
+  "llm_tokens_out": 226,
+  "page_count": 2
+ },
+ {
+  "doc_id": 371,
+  "nhtsa_id": "11014604",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014604-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 749,
+  "llm_tokens_out": 144,
+  "page_count": 1
+ },
+ {
+  "doc_id": 375,
+  "nhtsa_id": "11029268",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11029268-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1029,
+  "llm_tokens_out": 249,
+  "page_count": 2
+ },
+ {
+  "doc_id": 381,
+  "nhtsa_id": "11029265",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11029265-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 2050,
+  "llm_tokens_out": 355,
+  "page_count": 3
+ },
+ {
+  "doc_id": 389,
+  "nhtsa_id": "10244315",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10244315-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 16727,
+  "llm_tokens_out": 269,
+  "page_count": 25
+ },
+ {
+  "doc_id": 393,
+  "nhtsa_id": "11000550",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11000550-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 3066,
+  "llm_tokens_out": 246,
+  "page_count": 3
+ },
+ {
+  "doc_id": 396,
+  "nhtsa_id": "11028934",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11028934-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 926,
+  "llm_tokens_out": 208,
+  "page_count": 2
+ },
+ {
+  "doc_id": 398,
+  "nhtsa_id": "11000549",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11000549-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 6572,
+  "llm_tokens_out": 206,
+  "page_count": 11
+ },
+ {
+  "doc_id": 400,
+  "nhtsa_id": "11014566",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014566-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1140,
+  "llm_tokens_out": 166,
+  "page_count": 3
+ },
+ {
+  "doc_id": 402,
+  "nhtsa_id": "11000575",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11000575-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 8871,
+  "llm_tokens_out": 180,
+  "page_count": 9
+ },
+ {
+  "doc_id": 405,
+  "nhtsa_id": "11014307",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014307-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 503,
+  "llm_tokens_out": 214,
+  "page_count": 1
+ },
+ {
+  "doc_id": 408,
+  "nhtsa_id": "11027944",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11027944-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 905,
+  "llm_tokens_out": 262,
+  "page_count": 1
+ },
+ {
+  "doc_id": 412,
+  "nhtsa_id": "10242555",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10242555-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 807,
+  "llm_tokens_out": 294,
+  "page_count": 2
+ },
+ {
+  "doc_id": 414,
+  "nhtsa_id": "11014304",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014304-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 655,
+  "llm_tokens_out": 282,
+  "page_count": 2
+ },
+ {
+  "doc_id": 418,
+  "nhtsa_id": "11014563",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014563-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 5883,
+  "llm_tokens_out": 160,
+  "page_count": 9
+ },
+ {
+  "doc_id": 424,
+  "nhtsa_id": "11010420",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11010420-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 5450,
+  "llm_tokens_out": 612,
+  "page_count": 38
+ },
+ {
+  "doc_id": 432,
+  "nhtsa_id": "11014283",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014283-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 3089,
+  "llm_tokens_out": 575,
+  "page_count": 8
+ },
+ {
+  "doc_id": 433,
+  "nhtsa_id": "11000157",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11000157-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2903,
+  "llm_tokens_out": 252,
+  "page_count": 4
+ },
+ {
+  "doc_id": 436,
+  "nhtsa_id": "11014059",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014059-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1052,
+  "llm_tokens_out": 339,
+  "page_count": 2
+ },
+ {
+  "doc_id": 437,
+  "nhtsa_id": "11027701",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11027701-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 831,
+  "llm_tokens_out": 199,
+  "page_count": 1
+ },
+ {
+  "doc_id": 442,
+  "nhtsa_id": "10254396",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10254396-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 984,
+  "llm_tokens_out": 171,
+  "page_count": 2
+ },
+ {
+  "doc_id": 443,
+  "nhtsa_id": "11009467",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009467-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2259,
+  "llm_tokens_out": 328,
+  "page_count": 4
+ },
+ {
+  "doc_id": 449,
+  "nhtsa_id": "10242321",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10242321-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1171,
+  "llm_tokens_out": 177,
+  "page_count": 2
+ },
+ {
+  "doc_id": 450,
+  "nhtsa_id": "11027614",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11027614-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 2107,
+  "llm_tokens_out": 460,
+  "page_count": 4
+ },
+ {
+  "doc_id": 453,
+  "nhtsa_id": "11009760",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009760-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1962,
+  "llm_tokens_out": 279,
+  "page_count": 7
+ },
+ {
+  "doc_id": 459,
+  "nhtsa_id": "10253770",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253770-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 5156,
+  "llm_tokens_out": 236,
+  "page_count": 7
+ },
+ {
+  "doc_id": 460,
+  "nhtsa_id": "11026923",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11026923-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1225,
+  "llm_tokens_out": 248,
+  "page_count": 2
+ },
+ {
+  "doc_id": 461,
+  "nhtsa_id": "11014238",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014238-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 2956,
+  "llm_tokens_out": 278,
+  "page_count": 4
+ },
+ {
+  "doc_id": 462,
+  "nhtsa_id": "11009101",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009101-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 987,
+  "llm_tokens_out": 181,
+  "page_count": 3
+ },
+ {
+  "doc_id": 464,
+  "nhtsa_id": "10242304",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10242304-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1584,
+  "llm_tokens_out": 257,
+  "page_count": 3
+ },
+ {
+  "doc_id": 469,
+  "nhtsa_id": "10242305",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10242305-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 594,
+  "llm_tokens_out": 206,
+  "page_count": 1
+ },
+ {
+  "doc_id": 470,
+  "nhtsa_id": "11026600",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11026600-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 921,
+  "llm_tokens_out": 191,
+  "page_count": 2
+ },
+ {
+  "doc_id": 482,
+  "nhtsa_id": "11009039",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009039-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 2033,
+  "llm_tokens_out": 205,
+  "page_count": 4
+ },
+ {
+  "doc_id": 485,
+  "nhtsa_id": "11025755",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11025755-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1299,
+  "llm_tokens_out": 196,
+  "page_count": 2
+ },
+ {
+  "doc_id": 493,
+  "nhtsa_id": "10252977",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10252977-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "TSB",
+  "llm_tokens_in": 3460,
+  "llm_tokens_out": 432,
+  "page_count": 4
+ },
+ {
+  "doc_id": 504,
+  "nhtsa_id": "10253114",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253114-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1600,
+  "llm_tokens_out": 361,
+  "page_count": 3
+ },
+ {
+  "doc_id": 508,
+  "nhtsa_id": "10242291",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10242291-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1090,
+  "llm_tokens_out": 256,
+  "page_count": 2
+ },
+ {
+  "doc_id": 514,
+  "nhtsa_id": "11024768",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024768-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1179,
+  "llm_tokens_out": 434,
+  "page_count": 2
+ },
+ {
+  "doc_id": 515,
+  "nhtsa_id": "11013005",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11013005-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SU",
+  "llm_tokens_in": 2285,
+  "llm_tokens_out": 257,
+  "page_count": 4
+ },
+ {
+  "doc_id": 528,
+  "nhtsa_id": "10253095",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253095-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 691,
+  "llm_tokens_out": 219,
+  "page_count": 2
+ },
+ {
+  "doc_id": 529,
+  "nhtsa_id": "10240362",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10240362-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 3193,
+  "llm_tokens_out": 196,
+  "page_count": 4
+ },
+ {
+  "doc_id": 531,
+  "nhtsa_id": "11024455",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024455-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 866,
+  "llm_tokens_out": 224,
+  "page_count": 2
+ },
+ {
+  "doc_id": 534,
+  "nhtsa_id": "10239673",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10239673-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 1360,
+  "llm_tokens_out": 171,
+  "page_count": 2
+ },
+ {
+  "doc_id": 535,
+  "nhtsa_id": "11024337",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024337-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 3275,
+  "llm_tokens_out": 255,
+  "page_count": 6
+ },
+ {
+  "doc_id": 541,
+  "nhtsa_id": "11024458",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024458-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 589,
+  "llm_tokens_out": 169,
+  "page_count": 1
+ },
+ {
+  "doc_id": 542,
+  "nhtsa_id": "11007692",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007692-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 998,
+  "llm_tokens_out": 317,
+  "page_count": 4
+ },
+ {
+  "doc_id": 544,
+  "nhtsa_id": "10239755",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10239755-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 917,
+  "llm_tokens_out": 164,
+  "page_count": 1
+ },
+ {
+  "doc_id": 547,
+  "nhtsa_id": "11009037",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11009037-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 2671,
+  "llm_tokens_out": 131,
+  "page_count": 7
+ },
+ {
+  "doc_id": 550,
+  "nhtsa_id": "11024439",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024439-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 546,
+  "llm_tokens_out": 184,
+  "page_count": 1
+ },
+ {
+  "doc_id": 551,
+  "nhtsa_id": "11012952",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012952-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 671,
+  "llm_tokens_out": 196,
+  "page_count": 2
+ },
+ {
+  "doc_id": 552,
+  "nhtsa_id": "11007579",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007579-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1691,
+  "llm_tokens_out": 279,
+  "page_count": 2
+ },
+ {
+  "doc_id": 558,
+  "nhtsa_id": "10253070",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253070-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1573,
+  "llm_tokens_out": 383,
+  "page_count": 3
+ },
+ {
+  "doc_id": 560,
+  "nhtsa_id": "11025555",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11025555-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 1322,
+  "llm_tokens_out": 262,
+  "page_count": 3
+ },
+ {
+  "doc_id": 562,
+  "nhtsa_id": "11007565",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007565-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 656,
+  "llm_tokens_out": 244,
+  "page_count": 2
+ },
+ {
+  "doc_id": 567,
+  "nhtsa_id": "10253065",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253065-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 715,
+  "llm_tokens_out": 227,
+  "page_count": 2
+ },
+ {
+  "doc_id": 569,
+  "nhtsa_id": "10239113",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10239113-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 1596,
+  "llm_tokens_out": 257,
+  "page_count": 2
+ },
+ {
+  "doc_id": 573,
+  "nhtsa_id": "10253064",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10253064-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1629,
+  "llm_tokens_out": 359,
+  "page_count": 3
+ },
+ {
+  "doc_id": 574,
+  "nhtsa_id": "10239102",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10239102-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1926,
+  "llm_tokens_out": 438,
+  "page_count": 4
+ },
+ {
+  "doc_id": 577,
+  "nhtsa_id": "10251636",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10251636-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "IB",
+  "llm_tokens_in": 904,
+  "llm_tokens_out": 179,
+  "page_count": 4
+ },
+ {
+  "doc_id": 583,
+  "nhtsa_id": "10251635",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10251635-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 5099,
+  "llm_tokens_out": 249,
+  "page_count": 13
+ },
+ {
+  "doc_id": 586,
+  "nhtsa_id": "11008937",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11008937-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "IB",
+  "llm_tokens_in": 672,
+  "llm_tokens_out": 198,
+  "page_count": 1
+ },
+ {
+  "doc_id": 594,
+  "nhtsa_id": "10239039",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10239039-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1341,
+  "llm_tokens_out": 215,
+  "page_count": 3
+ },
+ {
+  "doc_id": 596,
+  "nhtsa_id": "11023091",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11023091-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 867,
+  "llm_tokens_out": 186,
+  "page_count": 2
+ },
+ {
+  "doc_id": 602,
+  "nhtsa_id": "11007938",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007938-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "SB",
+  "llm_tokens_in": 1692,
+  "llm_tokens_out": 311,
+  "page_count": 3
+ },
+ {
+  "doc_id": 607,
+  "nhtsa_id": "11007935",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007935-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1554,
+  "llm_tokens_out": 240,
+  "page_count": 4
+ },
+ {
+  "doc_id": 614,
+  "nhtsa_id": "11007936",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007936-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1554,
+  "llm_tokens_out": 240,
+  "page_count": 4
+ },
+ {
+  "doc_id": 615,
+  "nhtsa_id": "11024324",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024324-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 5077,
+  "llm_tokens_out": 226,
+  "page_count": 6
+ },
+ {
+  "doc_id": 618,
+  "nhtsa_id": "10251721",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10251721-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIP",
+  "llm_tokens_in": 458,
+  "llm_tokens_out": 207,
+  "page_count": 1
+ },
+ {
+  "doc_id": 621,
+  "nhtsa_id": "11011891",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011891-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 864,
+  "llm_tokens_out": 293,
+  "page_count": 4
+ },
+ {
+  "doc_id": 627,
+  "nhtsa_id": "11008893",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11008893-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 4735,
+  "llm_tokens_out": 230,
+  "page_count": 5
+ },
+ {
+  "doc_id": 629,
+  "nhtsa_id": "11022132",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11022132-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1987,
+  "llm_tokens_out": 365,
+  "page_count": 3
+ },
+ {
+  "doc_id": 636,
+  "nhtsa_id": "11012690",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012690-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 1459,
+  "llm_tokens_out": 149,
+  "page_count": 3
+ },
+ {
+  "doc_id": 641,
+  "nhtsa_id": "11012835",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012835-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1108,
+  "llm_tokens_out": 206,
+  "page_count": 3
+ },
+ {
+  "doc_id": 652,
+  "nhtsa_id": "10250564",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10250564-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "WA",
+  "llm_tokens_in": 4467,
+  "llm_tokens_out": 193,
+  "page_count": 5
+ },
+ {
+  "doc_id": 656,
+  "nhtsa_id": "11006482",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11006482-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 878,
+  "llm_tokens_out": 321,
+  "page_count": 2
+ },
+ {
+  "doc_id": 664,
+  "nhtsa_id": "10236070",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10236070-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 844,
+  "llm_tokens_out": 176,
+  "page_count": 2
+ },
+ {
+  "doc_id": 667,
+  "nhtsa_id": "10250753",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10250753-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 901,
+  "llm_tokens_out": 236,
+  "page_count": 1
+ },
+ {
+  "doc_id": 692,
+  "nhtsa_id": "11011481",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11011481-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 556,
+  "llm_tokens_out": 196,
+  "page_count": 2
+ },
+ {
+  "doc_id": 703,
+  "nhtsa_id": "11031777",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11031777-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 346,
+  "llm_tokens_out": 166,
+  "page_count": 1
+ },
+ {
+  "doc_id": 713,
+  "nhtsa_id": "11022782",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11022782-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1026,
+  "llm_tokens_out": 253,
+  "page_count": 2
+ },
+ {
+  "doc_id": 720,
+  "nhtsa_id": "11016950",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11016950-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1374,
+  "llm_tokens_out": 239,
+  "page_count": 4
+ },
+ {
+  "doc_id": 725,
+  "nhtsa_id": "11017004",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017004-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "SB",
+  "llm_tokens_in": 1054,
+  "llm_tokens_out": 292,
+  "page_count": 2
+ },
+ {
+  "doc_id": 727,
+  "nhtsa_id": "11022193",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11022193-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 2018,
+  "llm_tokens_out": 216,
+  "page_count": 3
+ },
+ {
+  "doc_id": 731,
+  "nhtsa_id": "11022874",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11022874-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 2296,
+  "llm_tokens_out": 252,
+  "page_count": 7
+ },
+ {
+  "doc_id": 734,
+  "nhtsa_id": "11028970",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11028970-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 562,
+  "llm_tokens_out": 279,
+  "page_count": 1
+ },
+ {
+  "doc_id": 745,
+  "nhtsa_id": "11019814",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11019814-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 974,
+  "llm_tokens_out": 221,
+  "page_count": 3
+ },
+ {
+  "doc_id": 749,
+  "nhtsa_id": "11031745",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11031745-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 5426,
+  "llm_tokens_out": 500,
+  "page_count": 11
+ },
+ {
+  "doc_id": 755,
+  "nhtsa_id": "11017775",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11017775-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1010,
+  "llm_tokens_out": 252,
+  "page_count": 2
+ },
+ {
+  "doc_id": 762,
+  "nhtsa_id": "11015050",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11015050-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 2483,
+  "llm_tokens_out": 227,
+  "page_count": 10
+ },
+ {
+  "doc_id": 765,
+  "nhtsa_id": "11014322",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014322-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 749,
+  "llm_tokens_out": 265,
+  "page_count": 2
+ },
+ {
+  "doc_id": 766,
+  "nhtsa_id": "11020715",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11020715-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "CSP",
+  "llm_tokens_in": 3570,
+  "llm_tokens_out": 207,
+  "page_count": 5
+ },
+ {
+  "doc_id": 771,
+  "nhtsa_id": "11014314",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014314-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 784,
+  "llm_tokens_out": 266,
+  "page_count": 1
+ },
+ {
+  "doc_id": 772,
+  "nhtsa_id": "11028969",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11028969-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 300,
+  "llm_tokens_out": 150,
+  "page_count": 1
+ },
+ {
+  "doc_id": 773,
+  "nhtsa_id": "11027825",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11027825-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "BL",
+  "llm_tokens_in": 3021,
+  "llm_tokens_out": 238,
+  "page_count": 10
+ },
+ {
+  "doc_id": 776,
+  "nhtsa_id": "11014352",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11014352-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "SB",
+  "llm_tokens_in": 1149,
+  "llm_tokens_out": 203,
+  "page_count": 3
+ },
+ {
+  "doc_id": 785,
+  "nhtsa_id": "11021058",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11021058-0001.pdf",
+  "doc_kind": "other",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 365,
+  "llm_tokens_out": 154,
+  "page_count": 1
+ },
+ {
+  "doc_id": 786,
+  "nhtsa_id": "11012957",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012957-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 550,
+  "llm_tokens_out": 258,
+  "page_count": 1
+ },
+ {
+  "doc_id": 792,
+  "nhtsa_id": "11025748",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11025748-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 669,
+  "llm_tokens_out": 177,
+  "page_count": 1
+ },
+ {
+  "doc_id": 796,
+  "nhtsa_id": "11024442",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024442-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIC",
+  "llm_tokens_in": 868,
+  "llm_tokens_out": 234,
+  "page_count": 2
+ },
+ {
+  "doc_id": 799,
+  "nhtsa_id": "11023413",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11023413-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 388,
+  "llm_tokens_out": 152,
+  "page_count": 1
+ },
+ {
+  "doc_id": 803,
+  "nhtsa_id": "11020681",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11020681-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 981,
+  "llm_tokens_out": 326,
+  "page_count": 2
+ },
+ {
+  "doc_id": 804,
+  "nhtsa_id": "11024773",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11024773-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "PIP",
+  "llm_tokens_in": 1926,
+  "llm_tokens_out": 322,
+  "page_count": 3
+ },
+ {
+  "doc_id": 811,
+  "nhtsa_id": "11020880",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11020880-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1025,
+  "llm_tokens_out": 340,
+  "page_count": 2
+ },
+ {
+  "doc_id": 825,
+  "nhtsa_id": "11029963",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11029963-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 3229,
+  "llm_tokens_out": 224,
+  "page_count": 6
+ },
+ {
+  "doc_id": 837,
+  "nhtsa_id": "11026727",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11026727-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 1213,
+  "llm_tokens_out": 294,
+  "page_count": 2
+ },
+ {
+  "doc_id": 839,
+  "nhtsa_id": "11027885",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11027885-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIT",
+  "llm_tokens_in": 827,
+  "llm_tokens_out": 223,
+  "page_count": 1
+ },
+ {
+  "doc_id": 843,
+  "nhtsa_id": "11023900",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11023900-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "PIC",
+  "llm_tokens_in": 1031,
+  "llm_tokens_out": 243,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1703,
+  "nhtsa_id": "10156537",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10156537-0001.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 23406,
+  "llm_tokens_out": 221,
+  "page_count": 76
+ },
+ {
+  "doc_id": 1707,
+  "nhtsa_id": "10156540",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10156540-0001.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 12688,
+  "llm_tokens_out": 262,
+  "page_count": 38
+ },
+ {
+  "doc_id": 1708,
+  "nhtsa_id": "10186621",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10186621-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 761,
+  "llm_tokens_out": 250,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1710,
+  "nhtsa_id": "10156509",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10156509-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 2151,
+  "llm_tokens_out": 224,
+  "page_count": 10
+ },
+ {
+  "doc_id": 1717,
+  "nhtsa_id": "10138524",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10138524-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 347,
+  "llm_tokens_out": 173,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1721,
+  "nhtsa_id": "10140323",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10140323-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 347,
+  "llm_tokens_out": 173,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1722,
+  "nhtsa_id": "10155573",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10155573-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 403,
+  "llm_tokens_out": 243,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1723,
+  "nhtsa_id": "10181931",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10181931-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 924,
+  "llm_tokens_out": 435,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1728,
+  "nhtsa_id": "10127423",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2017/MC-10127423-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 367,
+  "llm_tokens_out": 229,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1730,
+  "nhtsa_id": "10155581",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10155581-9999.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 23475,
+  "llm_tokens_out": 230,
+  "page_count": 76
+ },
+ {
+  "doc_id": 1731,
+  "nhtsa_id": "11013132",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11013132-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 438,
+  "llm_tokens_out": 302,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1733,
+  "nhtsa_id": "11012854",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11012854-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 463,
+  "llm_tokens_out": 284,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1734,
+  "nhtsa_id": "10181917",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10181917-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1392,
+  "llm_tokens_out": 269,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1735,
+  "nhtsa_id": "10156893",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10156893-9999.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 23475,
+  "llm_tokens_out": 230,
+  "page_count": 76
+ },
+ {
+  "doc_id": 1747,
+  "nhtsa_id": "11007943",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-11007943-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "BL",
+  "llm_tokens_in": 377,
+  "llm_tokens_out": 222,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1760,
+  "nhtsa_id": "10125078",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2017/MC-10125078-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 382,
+  "llm_tokens_out": 223,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1766,
+  "nhtsa_id": "10156863",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10156863-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1045,
+  "llm_tokens_out": 448,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1771,
+  "nhtsa_id": "10179149",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10179149-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 2455,
+  "llm_tokens_out": 268,
+  "page_count": 3
+ },
+ {
+  "doc_id": 1773,
+  "nhtsa_id": "10252674",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10252674-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 22512,
+  "llm_tokens_out": 170,
+  "page_count": 10
+ },
+ {
+  "doc_id": 1774,
+  "nhtsa_id": "10179325",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10179325-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 708,
+  "llm_tokens_out": 333,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1777,
+  "nhtsa_id": "10179136",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10179136-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 991,
+  "llm_tokens_out": 215,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1779,
+  "nhtsa_id": "10251469",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2024/MC-10251469-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 20645,
+  "llm_tokens_out": 176,
+  "page_count": 10
+ },
+ {
+  "doc_id": 1782,
+  "nhtsa_id": "10245418",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10245418-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 20637,
+  "llm_tokens_out": 167,
+  "page_count": 11
+ },
+ {
+  "doc_id": 1783,
+  "nhtsa_id": "10179117",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10179117-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1706,
+  "llm_tokens_out": 519,
+  "page_count": 3
+ },
+ {
+  "doc_id": 1784,
+  "nhtsa_id": "10155549",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10155549-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1027,
+  "llm_tokens_out": 230,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1786,
+  "nhtsa_id": "10244827",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10244827-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 524,
+  "llm_tokens_out": 148,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1788,
+  "nhtsa_id": "10243652",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10243652-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 447,
+  "llm_tokens_out": 248,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1793,
+  "nhtsa_id": "10153969",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10153969-9999.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 273,
+  "llm_tokens_out": 160,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1802,
+  "nhtsa_id": "10153986",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10153986-9999.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 3724,
+  "llm_tokens_out": 253,
+  "page_count": 7
+ },
+ {
+  "doc_id": 1807,
+  "nhtsa_id": "10176843",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10176843-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1069,
+  "llm_tokens_out": 231,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1808,
+  "nhtsa_id": "10153921",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10153921-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 396,
+  "llm_tokens_out": 243,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1810,
+  "nhtsa_id": "10177042",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10177042-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1827,
+  "llm_tokens_out": 280,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1812,
+  "nhtsa_id": "10234596",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10234596-0002.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 4453,
+  "llm_tokens_out": 286,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1814,
+  "nhtsa_id": "10153948",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10153948-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 308,
+  "llm_tokens_out": 197,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1815,
+  "nhtsa_id": "10235153",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2023/MC-10235153-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 371,
+  "llm_tokens_out": 164,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1819,
+  "nhtsa_id": "10176835",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10176835-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 4808,
+  "llm_tokens_out": 308,
+  "page_count": 9
+ },
+ {
+  "doc_id": 1823,
+  "nhtsa_id": "10153943",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10153943-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 384,
+  "llm_tokens_out": 234,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1832,
+  "nhtsa_id": "10226948",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2022/MC-10226948-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "CSP",
+  "llm_tokens_in": 23201,
+  "llm_tokens_out": 246,
+  "page_count": 71
+ },
+ {
+  "doc_id": 1834,
+  "nhtsa_id": "10175892",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2020/MC-10175892-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 2720,
+  "llm_tokens_out": 270,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1855,
+  "nhtsa_id": "10152466",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10152466-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 343,
+  "llm_tokens_out": 188,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1859,
+  "nhtsa_id": "10214752",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2022/MC-10214752-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 4661,
+  "llm_tokens_out": 170,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1869,
+  "nhtsa_id": "10214133",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2022/MC-10214133-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "MC",
+  "llm_tokens_in": 1546,
+  "llm_tokens_out": 164,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1871,
+  "nhtsa_id": "10148729",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10148729-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 309,
+  "llm_tokens_out": 197,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1874,
+  "nhtsa_id": "10148745",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10148745-9999.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 3000,
+  "llm_tokens_out": 242,
+  "page_count": 7
+ },
+ {
+  "doc_id": 1876,
+  "nhtsa_id": "10148744",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10148744-9999.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 3408,
+  "llm_tokens_out": 213,
+  "page_count": 6
+ },
+ {
+  "doc_id": 1878,
+  "nhtsa_id": "10212106",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2022/MC-10212106-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 6264,
+  "llm_tokens_out": 186,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1895,
+  "nhtsa_id": "10149786",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10149786-9999.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 3597,
+  "llm_tokens_out": 240,
+  "page_count": 7
+ },
+ {
+  "doc_id": 1896,
+  "nhtsa_id": "10210242",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2022/MC-10210242-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 775,
+  "llm_tokens_out": 341,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1905,
+  "nhtsa_id": "10149768",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10149768-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 338,
+  "llm_tokens_out": 210,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1917,
+  "nhtsa_id": "10169942",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10169942-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 452,
+  "llm_tokens_out": 270,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1921,
+  "nhtsa_id": "10169811",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10169811-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1481,
+  "llm_tokens_out": 252,
+  "page_count": 2
+ },
+ {
+  "doc_id": 1923,
+  "nhtsa_id": "10144926",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144926-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 1506,
+  "llm_tokens_out": 253,
+  "page_count": 3
+ },
+ {
+  "doc_id": 1925,
+  "nhtsa_id": "10144952",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144952-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 300,
+  "llm_tokens_out": 196,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1929,
+  "nhtsa_id": "10144948",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144948-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 318,
+  "llm_tokens_out": 199,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1934,
+  "nhtsa_id": "10168821",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10168821-0001.pdf",
+  "doc_kind": "customer_letter",
+  "communication_type": "CSP",
+  "llm_tokens_in": 25844,
+  "llm_tokens_out": 267,
+  "page_count": 81
+ },
+ {
+  "doc_id": 1936,
+  "nhtsa_id": "10205526",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10205526-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 10856,
+  "llm_tokens_out": 182,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1937,
+  "nhtsa_id": "10205482",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10205482-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 859,
+  "llm_tokens_out": 414,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1945,
+  "nhtsa_id": "10144916",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144916-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 3587,
+  "llm_tokens_out": 287,
+  "page_count": 4
+ },
+ {
+  "doc_id": 1946,
+  "nhtsa_id": "10168794",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10168794-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 426,
+  "llm_tokens_out": 234,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1947,
+  "nhtsa_id": "10204046",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10204046-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 15802,
+  "llm_tokens_out": 268,
+  "page_count": 25
+ },
+ {
+  "doc_id": 1954,
+  "nhtsa_id": "10144912",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144912-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 877,
+  "llm_tokens_out": 234,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1957,
+  "nhtsa_id": "10144938",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144938-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 312,
+  "llm_tokens_out": 219,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1966,
+  "nhtsa_id": "10144928",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144928-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 413,
+  "llm_tokens_out": 222,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1974,
+  "nhtsa_id": "10144932",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10144932-9999.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 396,
+  "llm_tokens_out": 213,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1977,
+  "nhtsa_id": "10164600",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10164600-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 350,
+  "llm_tokens_out": 181,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1989,
+  "nhtsa_id": "10164498",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10164498-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 429,
+  "llm_tokens_out": 221,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1991,
+  "nhtsa_id": "10201034",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10201034-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 912,
+  "llm_tokens_out": 256,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1995,
+  "nhtsa_id": "10164497",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10164497-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 393,
+  "llm_tokens_out": 205,
+  "page_count": 1
+ },
+ {
+  "doc_id": 1996,
+  "nhtsa_id": "10143100",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10143100-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 395,
+  "llm_tokens_out": 249,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2016,
+  "nhtsa_id": "10162087",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10162087-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1030,
+  "llm_tokens_out": 502,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2025,
+  "nhtsa_id": "10137149",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10137149-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1250,
+  "llm_tokens_out": 161,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2026,
+  "nhtsa_id": "10160818",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10160818-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "TSB",
+  "llm_tokens_in": 767,
+  "llm_tokens_out": 224,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2027,
+  "nhtsa_id": "10198638",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10198638-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 36957,
+  "llm_tokens_out": 171,
+  "page_count": 96
+ },
+ {
+  "doc_id": 2028,
+  "nhtsa_id": "10198687",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10198687-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 9895,
+  "llm_tokens_out": 174,
+  "page_count": 8
+ },
+ {
+  "doc_id": 2035,
+  "nhtsa_id": "10198582",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10198582-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "TSB",
+  "llm_tokens_in": 4385,
+  "llm_tokens_out": 196,
+  "page_count": 6
+ },
+ {
+  "doc_id": 2040,
+  "nhtsa_id": "10194524",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10194524-0001.pdf",
+  "doc_kind": "recall",
+  "communication_type": "MC",
+  "llm_tokens_in": 4421,
+  "llm_tokens_out": 210,
+  "page_count": 8
+ },
+ {
+  "doc_id": 2042,
+  "nhtsa_id": "10194425",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10194425-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "MC",
+  "llm_tokens_in": 1672,
+  "llm_tokens_out": 467,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2043,
+  "nhtsa_id": "10160810",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10160810-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "TSB",
+  "llm_tokens_in": 784,
+  "llm_tokens_out": 187,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2045,
+  "nhtsa_id": "10194428",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10194428-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 4257,
+  "llm_tokens_out": 175,
+  "page_count": 2
+ },
+ {
+  "doc_id": 2046,
+  "nhtsa_id": "10160931",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10160931-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1238,
+  "llm_tokens_out": 552,
+  "page_count": 2
+ },
+ {
+  "doc_id": 2052,
+  "nhtsa_id": "10160880",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10160880-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 430,
+  "llm_tokens_out": 230,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2057,
+  "nhtsa_id": "10194413",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10194413-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1711,
+  "llm_tokens_out": 234,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2065,
+  "nhtsa_id": "10136608",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10136608-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 382,
+  "llm_tokens_out": 298,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2066,
+  "nhtsa_id": "10191176",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10191176-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 7228,
+  "llm_tokens_out": 190,
+  "page_count": 4
+ },
+ {
+  "doc_id": 2067,
+  "nhtsa_id": "10159511",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10159511-0001.pdf",
+  "doc_kind": "warranty_admin",
+  "communication_type": "MC",
+  "llm_tokens_in": 24609,
+  "llm_tokens_out": 272,
+  "page_count": 79
+ },
+ {
+  "doc_id": 2069,
+  "nhtsa_id": "10191519",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10191519-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 892,
+  "llm_tokens_out": 277,
+  "page_count": 2
+ },
+ {
+  "doc_id": 2070,
+  "nhtsa_id": "10159507",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10159507-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 485,
+  "llm_tokens_out": 198,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2077,
+  "nhtsa_id": "10159512",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2019/MC-10159512-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 1115,
+  "llm_tokens_out": 196,
+  "page_count": 2
+ },
+ {
+  "doc_id": 2081,
+  "nhtsa_id": "10189782",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10189782-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "TSB",
+  "llm_tokens_in": 980,
+  "llm_tokens_out": 195,
+  "page_count": 2
+ },
+ {
+  "doc_id": 2086,
+  "nhtsa_id": "10136592",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2018/MC-10136592-9999.pdf",
+  "doc_kind": "informational",
+  "communication_type": "MC",
+  "llm_tokens_in": 373,
+  "llm_tokens_out": 224,
+  "page_count": 1
+ },
+ {
+  "doc_id": 2087,
+  "nhtsa_id": "10189762",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2021/MC-10189762-0001.pdf",
+  "doc_kind": "other",
+  "communication_type": "MC",
+  "llm_tokens_in": 5044,
+  "llm_tokens_out": 217,
+  "page_count": 10
+ },
+ {
+  "doc_id": 2443,
+  "nhtsa_id": "11026964",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11026964-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 3075,
+  "llm_tokens_out": 321,
+  "page_count": 5
+ },
+ {
+  "doc_id": 2446,
+  "nhtsa_id": "11026960",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11026960-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 2706,
+  "llm_tokens_out": 234,
+  "page_count": 5
+ },
+ {
+  "doc_id": 2448,
+  "nhtsa_id": "11031600",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11031600-0001.pdf",
+  "doc_kind": "informational",
+  "communication_type": "OTHER",
+  "llm_tokens_in": 938,
+  "llm_tokens_out": 193,
+  "page_count": 3
+ },
+ {
+  "doc_id": 2449,
+  "nhtsa_id": "11026963",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2026/MC-11026963-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 3104,
+  "llm_tokens_out": 353,
+  "page_count": 5
+ },
+ {
+  "doc_id": 2450,
+  "nhtsa_id": "11025841",
+  "url": "https://static.nhtsa.gov/odi/tsbs/2025/MC-11025841-0001.pdf",
+  "doc_kind": "service_procedure",
+  "communication_type": "BL",
+  "llm_tokens_in": 2896,
+  "llm_tokens_out": 356,
+  "page_count": 5
+ },
+ {
+  "doc_id": 2833,
+  "nhtsa_id": "TESTPRUNE-b3ac3f02",
+  "url": "https://static.nhtsa.gov/TESTPRUNE-b3ac3f02-pending.pdf",
+  "doc_kind": null,
+  "communication_type": "TSB",
+  "llm_tokens_in": null,
+  "llm_tokens_out": null,
+  "page_count": null
+ }
+]

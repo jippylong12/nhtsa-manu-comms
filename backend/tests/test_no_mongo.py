@@ -153,6 +153,7 @@ def test_the_pipeline_jobs_import_without_the_mongo_drivers():
             "src.migrations",
             "src.communications.flatfile",
             "src.db.migrate",
+            "src.anthropic_client",
         ):
             importlib.import_module(module)
         print("imported")
