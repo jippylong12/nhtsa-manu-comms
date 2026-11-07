@@ -89,7 +89,31 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
                 "SELECT nhtsa_id FROM vehicle_bulletins WHERE vehicle_id = $1", vehicle_id
             )
         ]
-        scanned = await flatfile.vehicle_is_scanned(conn, vehicle_id)
+        if listed:
+            scan_incomplete = False
+        else:
+            # No bulletins yet: either the vehicle has none, or the windows that hold
+            # them are still unscanned (a scan on add writes one window at a time).
+            ingested = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
+            if ingested:
+                scan_incomplete = bool(
+                    await conn.fetchval(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM flatfile_ingests i
+                          WHERE NOT EXISTS (
+                            SELECT 1 FROM vehicle_scans s
+                            WHERE s.vehicle_id = $1
+                              AND s.source_window = i.source_window
+                              AND s.etag = i.etag
+                          )
+                        )
+                        """,
+                        vehicle_id,
+                    )
+                )
+            else:
+                scan_incomplete = not await flatfile.vehicle_is_scanned(conn, vehicle_id)
         known = await repo.existing_nhtsa_ids(conn, listed)
         unfinished = await conn.fetchval(
             f"""
@@ -103,7 +127,7 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
             vehicle_id,
         )
 
-    scan_pending = not scanned and listed == []
+    scan_pending = scan_incomplete
     if scan_pending:
         per_document = await estimate.cost_per_document()
         return {

@@ -108,6 +108,17 @@ async def test_a_previously_scanned_vehicle_continues_to_sync_and_the_warning_na
     )
 
 
+async def _scan_every_ingested_window(conn, vehicle_id, *, skip=0):
+    """A matching-etag scan row for every ingested window (all but `skip` of them)."""
+    await conn.execute(
+        "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
+        "SELECT $1, source_window, etag FROM flatfile_ingests "
+        "ORDER BY source_window OFFSET $2",
+        vehicle_id,
+        skip,
+    )
+
+
 # --- D2: preview with nothing in the index ------------------------------------------
 
 
@@ -157,10 +168,7 @@ async def test_preview_of_a_scanned_vehicle_with_no_bulletins_is_up_to_date(
     monkeypatch.setattr(service, "NHTSAClient", _NeverConstructed)
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        await conn.execute(
-            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, 'W-OLD', 'e')",
-            untracked_in_index,
-        )
+        await _scan_every_ingested_window(conn, untracked_in_index)
     finally:
         await conn.close()
 
@@ -168,6 +176,39 @@ async def test_preview_of_a_scanned_vehicle_with_no_bulletins_is_up_to_date(
 
     assert result["scan_pending"] is False
     assert result["up_to_date"] is True
+
+
+@pytest.mark.asyncio
+async def test_preview_of_a_vehicle_scanned_against_only_some_windows_is_still_scan_pending(
+    untracked_in_index, monkeypatch
+):
+    monkeypatch.setattr(service, "NHTSAClient", _NeverConstructed)
+    conn = await asyncpg.connect(get_settings().database_url)
+    try:
+        windows = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
+        if windows < 2:
+            await conn.execute(
+                "INSERT INTO flatfile_ingests (source_window, etag, row_count) "
+                "VALUES ('TESTPEND-A', 'a', 1), ('TESTPEND-B', 'b', 1) "
+                "ON CONFLICT DO NOTHING"
+            )
+        # Scanned at every ingested window but the last: its bulletins may be there.
+        await conn.execute(
+            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
+            "SELECT $1, source_window, etag FROM flatfile_ingests "
+            "ORDER BY source_window LIMIT (SELECT count(*) - 1 FROM flatfile_ingests)",
+            untracked_in_index,
+        )
+        try:
+            result = await service.preview(untracked_in_index)
+        finally:
+            await conn.execute("DELETE FROM flatfile_ingests WHERE source_window LIKE 'TESTPEND-%'")
+    finally:
+        await conn.close()
+
+    assert result["scan_pending"] is True
+    assert result["listed_by_nhtsa"] == 0
+    assert result["up_to_date"] is False
 
 
 # --- D4: one window fails, another succeeds -----------------------------------------
