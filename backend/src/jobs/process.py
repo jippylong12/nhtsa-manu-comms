@@ -78,11 +78,11 @@ async def status() -> dict[str, Any]:
 
 
 async def run_extract(
-    limit: int | None, nhtsa_vehicle_id: int | None = None
+    limit: int | None, vehicle_id: int | None = None
 ) -> "extract_stage.ExtractStats":
-    """Extract stage. `nhtsa_vehicle_id` restricts it to one tracked vehicle."""
-    await extract_stage.mark_documentless_communications(nhtsa_vehicle_id)
-    stats = await extract_stage.extract_pending(limit=limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+    """Extract stage. `vehicle_id` restricts it to one tracked vehicle."""
+    await extract_stage.mark_documentless_communications(vehicle_id)
+    stats = await extract_stage.extract_pending(limit=limit, vehicle_id=vehicle_id)
     await record_run(
         "extract",
         {
@@ -91,7 +91,7 @@ async def run_extract(
             "extracted": stats.extracted,
             "flagged_vision": stats.flagged_vision,
             "failed": stats.failed,
-            "vehicle": nhtsa_vehicle_id,
+            "vehicle": vehicle_id,
         },
         ok=stats.failed == 0,
         error="; ".join(stats.errors[:5]) or None,
@@ -99,9 +99,9 @@ async def run_extract(
     return stats
 
 
-async def run_llm(limit: int | None, sync: bool, nhtsa_vehicle_id: int | None = None) -> None:
+async def run_llm(limit: int | None, sync: bool, vehicle_id: int | None = None) -> None:
     if sync:
-        stats = await llm_stage.run_sync(limit=limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        stats = await llm_stage.run_sync(limit=limit, vehicle_id=vehicle_id)
         await record_run(
             "llm",
             {
@@ -118,7 +118,7 @@ async def run_llm(limit: int | None, sync: bool, nhtsa_vehicle_id: int | None = 
         )
         return
 
-    names = await llm_stage.submit_batch(limit=limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+    names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
     if names:
         log.info("submitted %d batch job(s); collecting", len(names))
         stats = await llm_stage.collect_batch(names)
@@ -135,7 +135,7 @@ async def run_llm(limit: int | None, sync: bool, nhtsa_vehicle_id: int | None = 
     # The Batch API path excludes vision-fallback documents; process them
     # synchronously so their communications are not stranded in `pending`.
     vision = await llm_stage.run_sync(
-        limit=limit, vision_only=True, nhtsa_vehicle_id=nhtsa_vehicle_id
+        limit=limit, vision_only=True, vehicle_id=vehicle_id
     )
     if vision.processed or vision.failed:
         await record_run(
@@ -149,11 +149,11 @@ async def run_llm(limit: int | None, sync: bool, nhtsa_vehicle_id: int | None = 
         )
 
 
-async def run_embed(limit: int | None, nhtsa_vehicle_id: int | None = None) -> None:
-    stats = await embed_stage.embed_pending(limit=limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+async def run_embed(limit: int | None, vehicle_id: int | None = None) -> None:
+    stats = await embed_stage.embed_pending(limit=limit, vehicle_id=vehicle_id)
     await record_run(
         "embed",
-        {"embedded": stats.embedded, "failed": stats.failed, "vehicle": nhtsa_vehicle_id},
+        {"embedded": stats.embedded, "failed": stats.failed, "vehicle": vehicle_id},
         stats.tokens_in,
         0,
         stats.cost_usd,

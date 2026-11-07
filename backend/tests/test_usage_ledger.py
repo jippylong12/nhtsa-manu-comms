@@ -127,6 +127,26 @@ async def test_summarise_totals_reconcile_with_the_breakdown():
         await _cleanup(qid)
 
 
+async def _silverado_24() -> int:
+    """Row id of the tracked 2024 Silverado with the biggest corpus (the API's vehicleId)."""
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row_id = await conn.fetchval(
+            """
+            SELECT v.id FROM vehicles v
+            WHERE v.active AND v.year = 2024 AND v.model ILIKE 'SILVERADO%'
+            ORDER BY (SELECT count(*) FROM communication_vehicles cv WHERE cv.vehicle_id = v.id)
+                     DESC, v.id
+            LIMIT 1
+            """
+        )
+    if row_id is None:
+        pytest.skip("no tracked 2024 Silverado in this database")
+    return row_id
+
+
 # --------------------------------------------------------------------------- #
 # End to end: a real search must land in the ledger (JIP-409 acceptance)
 # --------------------------------------------------------------------------- #
@@ -139,7 +159,7 @@ async def test_a_symptom_search_records_its_spend():
     from src.symptom_search import service
 
     before = await summarise()
-    result = await service.search(218944, "the tailgate will not open")
+    result = await service.search(await _silverado_24(), "the tailgate will not open")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -226,7 +246,7 @@ async def test_a_billed_composition_that_fails_to_parse_is_still_metered(monkeyp
             "SELECT count(*) FROM usage_events WHERE kind = 'answer_compose'"
         )
 
-    result = await service.search(218944, "the tailgate will not open")
+    result = await service.search(await _silverado_24(), "the tailgate will not open")
     # The request degrades rather than failing outright...
     assert result["answer_generated"] is False
 

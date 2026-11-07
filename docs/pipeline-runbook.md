@@ -19,7 +19,7 @@ python -m src.jobs.run_pipeline --send-digest   # ... and actually send the emai
 
 This runs, in order:
 
-1. **sync** — poll NHTSA per tracked vehicle, insert new communications as `pending`.
+1. **sync** — look up each tracked vehicle's communications in the flat-file index, fetch the new ones from NHTSA by ID, insert them as `pending`.
 2. **process** — extract PDF text, run Gemini structured extraction, embed.
 3. **digest** — email a summary of newly processed items (dry-run unless `--send-digest`).
 
@@ -40,6 +40,53 @@ python -m src.jobs.process --all           # or --stage extract|llm|embed
 python -m src.jobs.digest                  # dry run; --send to send
 python -m src.jobs.process --status        # counts only, no work
 ```
+
+## Flat-file index
+
+Add-vehicle discovery and sync read `comm_products`, the index built from NHTSA's
+daily manufacturer-communications flat files; `flatfile_ingests` records each
+window's ETag. From `backend/`:
+
+```bash
+python -m src.communications.flatfile --bootstrap   # ingest every window (ignores ETags)
+python -m src.communications.flatfile --refresh     # re-ingest only windows whose ETag changed
+python -m src.communications.flatfile --status      # per-window ingest state, no work
+```
+
+`--bootstrap` and `--refresh` take `--window 2020-2024` to restrict to one window.
+You rarely need `--refresh` by hand: an in-app refresh runs the same ETag check at
+the start of the run, and a failed check leaves the previous index in place
+rather than failing the run.
+
+### One-time backfill to the plain nameplate
+
+Existing tracked vehicles keep their old model strings until the backfill maps
+them to the plain nameplate (and merges any that collide). It needs a populated
+index, so bootstrap first; `--apply` refuses to run when `comm_products` is empty.
+
+```bash
+python -m src.scripts.backfill_plain_nameplate --dry-run   # report only (the default)
+python -m src.scripts.backfill_plain_nameplate --apply     # write, in one transaction
+```
+
+Add `--json` to either to emit the report as JSON. Read the dry-run report before
+applying.
+
+### Identity check
+
+After the backfill (and a sync for any vehicle that was missing bulletins), prove
+nothing was lost:
+
+```bash
+python -m src.scripts.identity_check --baseline tests/fixtures/identity_baseline_2026-07-24.json
+```
+
+It prints, per active vehicle, the linked communications, the communications the
+index lists for that identity, and the delta against the baseline. It exits 1 if
+any join row is orphaned, any active identity is duplicated, any vehicle has
+fewer linked communications than its baseline, or any vehicle in the baseline is
+no longer active; `--baseline` is optional and
+`--json` emits the report as JSON.
 
 ## Checking the last run
 

@@ -1,13 +1,12 @@
-/* Add Vehicle Modal Component - Full Discovery Flow */
+/* Add Vehicle Modal Component - year / make / model nameplate picker */
 
 import { useState, useEffect } from 'react';
-import { X, Plus, Car, Check, Loader2, AlertCircle } from 'lucide-react';
-import type { VehicleCreate, VehicleVariant } from '@/client';
+import { X, Plus, Car, Check, AlertCircle } from 'lucide-react';
+import type { VehicleCreate } from '@/client';
 import {
     useDiscoveryYears,
     useDiscoveryMakes,
     useDiscoveryModels,
-    useDiscoveryVariants,
 } from '../../communications/hooks/useDiscovery';
 import styles from './AddVehicleModal.module.css';
 
@@ -22,36 +21,19 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
     const [selectedYear, setSelectedYear] = useState<number | null>(null);
     const [selectedMake, setSelectedMake] = useState<string>('');
     const [selectedModel, setSelectedModel] = useState<string>('');
-    const [selectedVariant, setSelectedVariant] = useState<VehicleVariant | null>(null);
     const [keywords, setKeywords] = useState('');
 
-    const { data: years, isLoading: loadingYears } = useDiscoveryYears();
-    const { data: makes, isLoading: loadingMakes } = useDiscoveryMakes(selectedYear);
-    const { data: models, isLoading: loadingModels } = useDiscoveryModels(selectedYear, selectedMake);
-    const {
-        data: variants,
-        isLoading: loadingVariants,
-        isError,
-        isPaused,
-    } = useDiscoveryVariants(selectedYear, selectedMake, selectedModel);
+    const yearsQuery = useDiscoveryYears();
+    const makesQuery = useDiscoveryMakes(selectedYear);
+    const modelsQuery = useDiscoveryModels(selectedYear, selectedMake);
+    const { data: years, isLoading: loadingYears } = yearsQuery;
+    const { data: makes, isLoading: loadingMakes } = makesQuery;
+    const { data: models, isLoading: loadingModels } = modelsQuery;
 
-    // A failed lookup does not always land in `isError`. When React Query decides
-    // the browser is offline it parks the query at fetchStatus "paused" with
-    // status still "pending", so isError and isLoading are both false and the
-    // modal would render nothing at all. Treat both as "could not resolve".
-    const variantsFailed = isError || isPaused;
-
-    useEffect(() => {
-        // Sync the selection to freshly loaded variant data. Manufacturer
-        // communications are identical across every variant of a year/make/model
-        // (verified against the NHTSA API), so the first one is always taken and
-        // the user is never asked to pick a trim. This is a legitimate "sync to
-        // async query result" effect; the set-state-in-effect rule is a false
-        // positive here.
-        if (!variants) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedVariant(variants.length > 0 ? variants[0] : null);
-    }, [variants]);
+    const ready = !!selectedYear && !!selectedMake && !!selectedModel;
+    const failedQuery = [yearsQuery, makesQuery, modelsQuery].find((q) => q.isError);
+    const noModels =
+        !!selectedMake && !loadingModels && !modelsQuery.isError && models?.length === 0;
 
     useEffect(() => {
         // Clear the form whenever the modal closes. A successful add closes it by
@@ -64,7 +46,6 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
         setSelectedYear(null);
         setSelectedMake('');
         setSelectedModel('');
-        setSelectedVariant(null);
         setKeywords('');
         /* eslint-enable react-hooks/set-state-in-effect */
     }, [isOpen]);
@@ -73,7 +54,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedVariant) return;
+        if (!ready) return;
 
         const keywordList = keywords
             .split(',')
@@ -81,11 +62,9 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
             .filter(Boolean);
 
         onSubmit({
-            vehicleId: selectedVariant.vehicleId,
-            year: String(selectedVariant.modelYear),
-            model: selectedVariant.model,
-            make: selectedVariant.make,
-            trim: selectedVariant.trim,
+            year: String(selectedYear),
+            make: selectedMake,
+            model: selectedModel,
             keywords: keywordList,
         });
     };
@@ -119,11 +98,12 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                     setSelectedYear(Number(e.target.value));
                                     setSelectedMake('');
                                     setSelectedModel('');
-                                    setSelectedVariant(null);
-                                }}
+                                                            }}
                                 disabled={loadingYears}
                             >
-                                <option value="">Select Year</option>
+                                <option value="">
+                                    {loadingYears ? 'Loading years...' : 'Select Year'}
+                                </option>
                                 {years?.map((y) => (
                                     <option key={y} value={y}>{y}</option>
                                 ))}
@@ -139,8 +119,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 onChange={(e) => {
                                     setSelectedMake(e.target.value);
                                     setSelectedModel('');
-                                    setSelectedVariant(null);
-                                }}
+                                                            }}
                                 disabled={!selectedYear || loadingMakes}
                             >
                                 <option value="">
@@ -160,8 +139,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 value={selectedModel}
                                 onChange={(e) => {
                                     setSelectedModel(e.target.value);
-                                    setSelectedVariant(null);
-                                }}
+                                                            }}
                                 disabled={!selectedMake || loadingModels}
                             >
                                 <option value="">
@@ -173,59 +151,58 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                             </select>
                         </div>
 
-                        {/* Resolving the NHTSA vehicleId for the chosen year/make/model */}
-                        {selectedModel && loadingVariants && (
-                            <div className={styles.loadingVariants} role="status">
-                                <Loader2 size={20} className={styles.spinner} />
-                                <span>Finding this vehicle...</span>
-                            </div>
-                        )}
-
-                        {/* The lookup itself failed. Without this the modal would
-                            sit blank, since there is no picker left to fall back on. */}
-                        {selectedModel && !loadingVariants && variantsFailed && (
+                        {/* A discovery request failed (our API, not NHTSA) */}
+                        {failedQuery && (
                             <div className={styles.vehicleNotFound} role="alert">
                                 <AlertCircle size={18} />
                                 <div>
-                                    <strong>NHTSA's lookup timed out</strong>
+                                    <strong>Couldn't load the picker</strong>
                                     <span className={styles.variantDetails}>
-                                        This happens for high-volume models when NHTSA is slow.
-                                        Reselect the model to try again.
+                                        Check your connection and try again.
                                     </span>
+                                    <button
+                                        type="button"
+                                        className={`btn btn-secondary ${styles.retryButton}`}
+                                        onClick={() => void failedQuery.refetch()}
+                                    >
+                                        Retry
+                                    </button>
                                 </div>
                             </div>
                         )}
 
-                        {/* No NHTSA record for this combination */}
-                        {selectedModel && !loadingVariants && !variantsFailed && variants?.length === 0 && (
+                        {/* No bulletins for this make in this year */}
+                        {noModels && (
                             <div className={styles.vehicleNotFound} role="alert">
                                 <AlertCircle size={18} />
                                 <div>
-                                    <strong>No NHTSA record for this vehicle</strong>
+                                    <strong>
+                                        No models with bulletins for {selectedMake} in {selectedYear}
+                                    </strong>
                                     <span className={styles.variantDetails}>
-                                        Try a different model or year.
+                                        Pick another make or year.
                                     </span>
                                 </div>
                             </div>
                         )}
 
                         {/* Success confirmation */}
-                        {selectedVariant && (
+                        {ready && (
                             <div className={styles.vehicleConfirmed}>
                                 <Check size={18} />
                                 <div>
                                     <strong>
-                                        {selectedVariant.modelYear} {selectedVariant.make} {selectedVariant.model}
+                                        {selectedYear} {selectedMake} {selectedModel}
                                     </strong>
                                     <span className={styles.variantDetails}>
-                                        ID: {selectedVariant.vehicleId}
+                                        Tracks every bulletin NHTSA files under this nameplate
                                     </span>
                                 </div>
                             </div>
                         )}
 
                         {/* Keywords */}
-                        <div className={`input-group ${!selectedVariant ? styles.disabled : ''}`}>
+                        <div className={`input-group ${!selectedModel ? styles.disabled : ''}`}>
                             <label className="input-label">Filter Keywords (optional)</label>
                             <input
                                 type="text"
@@ -233,7 +210,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 placeholder="software, update, recall (comma-separated)"
                                 value={keywords}
                                 onChange={(e) => setKeywords(e.target.value)}
-                                disabled={!selectedVariant}
+                                disabled={!selectedModel}
                             />
                             <span className={styles.inputHint}>
                                 Only show communications containing these keywords
@@ -248,7 +225,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         <button
                             type="submit"
                             className="btn btn-primary"
-                            disabled={isLoading || !selectedVariant}
+                            disabled={isLoading || !ready}
                         >
                             <Plus size={18} />
                             {isLoading ? 'Adding...' : 'Add Vehicle'}

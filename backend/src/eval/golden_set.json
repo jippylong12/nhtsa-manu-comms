@@ -1,163 +1,163 @@
 {
-  "_about": "Golden set for symptom-search retrieval eval (JIP-379 baseline, expanded in JIP-381). Each query is written in realistic owner/technician language, deliberately paraphrased away from the document's own tag words so retrieval is exercised, not echoed. `expected` lists every nhtsa_id that is an acceptable top hit (equivalent bulletin revisions count as one correct answer). `vehicle_id` is the NHTSA vehicleId the query is scoped to; every expected id is verified at load time to be linked to that vehicle. `no_match: true` marks adversarial queries that SHOULD retrieve nothing relevant (used for refusal precision, not hit@k).",
+  "_about": "Golden set for symptom-search retrieval eval (JIP-379 baseline, expanded in JIP-381). Each query is written in realistic owner/technician language, deliberately paraphrased away from the document's own tag words so retrieval is exercised, not echoed. `expected` lists every nhtsa_id that is an acceptable top hit (equivalent bulletin revisions count as one correct answer). `vehicle_id` is the tracked vehicle's row id (`vehicles.id`) the query is scoped to; every expected id is verified at load time to be linked to that vehicle. `no_match: true` marks adversarial queries that SHOULD retrieve nothing relevant (used for refusal precision, not hit@k).",
   "queries": [
     {
       "id": "abs_stability_light",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the anti-lock brake light comes on and I get a service stability warning",
       "expected": ["11005256", "11006888"],
       "note": "24-NA-125 ABS harness rubbing rear drive unit"
     },
     {
       "id": "glass_spots_polarized",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "there are little spots on my back and side windows that look worse through polarized sunglasses",
       "expected": ["11006511"],
       "note": "PI0754G quench marks are normal"
     },
     {
       "id": "power_hood_wont_latch",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the power hood will not latch closed and I keep getting a hood ajar message",
       "expected": ["11023058"],
       "note": "PIE0834"
     },
     {
       "id": "rear_drive_fluid_leak",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "there is fluid leaking onto the ground under the back of the truck",
       "expected": ["11024499"],
       "note": "25-NA-108 output shaft disengaging from drive unit"
     },
     {
       "id": "rear_door_ajar",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the rear door ajar indicator is not working properly",
       "expected": ["11016936"],
       "note": "N242484500 rear door wiring"
     },
     {
       "id": "brake_creak_stationary",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "creaking and popping sound when I am stopped with my foot on the brake and turning the wheel",
       "expected": ["10251640"],
       "note": "24-NA-045 normal characteristic"
     },
     {
       "id": "hv_battery_no_start",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "truck lost propulsion while driving, now it will not start and the battery made strange noises",
       "expected": ["10249773", "10251908"],
       "note": "23-NA-151 high voltage battery"
     },
     {
       "id": "ipc_radio_blank_after_update",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "after a software update my instrument cluster and radio screen are blank and there is no sound",
       "expected": ["10242304"],
       "note": "PIT6018F"
     },
     {
       "id": "hud_blank_slow",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the head up display is blank and takes several key cycles before it turns on",
       "expected": ["11018655"],
       "note": "PIT6355"
     },
     {
       "id": "air_leveling_suspension_dead",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the air leveling suspension stopped working and there is a service leveling system message",
       "expected": ["11016150"],
       "note": "PIT6304B DTC C1197"
     },
     {
       "id": "dtc_p30bf",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "check engine light is on and the stored code is P30BF",
       "expected": ["10253065"],
       "note": "PIP5865B"
     },
     {
       "id": "lost_google_services",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "after a factory reset I lost all the Google apps and connected services",
       "expected": ["10247380"],
       "note": "PIT6092"
     },
     {
       "id": "tpms_light_no_read",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "the tire pressure light stays on and one sensor never shows a psi value",
       "expected": ["11016964"],
       "note": "25-NA-051 TPMS sensor quality"
     },
     {
       "id": "footwell_water_leak",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "water is getting into the passenger footwell, the carpet is soaked and it smells musty",
       "expected": ["11030274"],
       "note": "N252528650-01 A/C drain hose"
     },
     {
       "id": "service_hv_no_heat",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "a service high voltage warning is on and the cabin blows no heat",
       "expected": ["11017177"],
       "note": "25-NA-067 P1C01"
     },
     {
       "id": "super_cruise_unavailable",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "super cruise and adaptive cruise both say unavailable on the driver display",
       "expected": ["11014322"],
       "note": "PIC6557D image processing module"
     },
     {
       "id": "all_safety_features_dead",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "all of the active safety and driver assist features quit working at once",
       "expected": ["11017775"],
       "note": "PIC6587A"
     },
     {
       "id": "weak_low_speed_abs",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "braking feels weak during low speed anti-lock stops",
       "expected": ["11032066"],
       "note": "N252528241 brake control module reprogram"
     },
     {
       "id": "radio_stays_on_after_exit",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "the radio keeps running for a few minutes after I get out and lock up",
       "expected": ["11021060"],
       "note": "V652.40 release notes"
     },
     {
       "id": "phantom_hard_braking",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the truck suddenly slams on the brakes hard by itself for no reason",
       "expected": ["11028675", "11028731", "11029963"],
       "note": "N252521591 unexpected hard braking"
     },
     {
       "id": "garage_door_wont_program",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "I cannot get the built in garage door opener to program and it sets code U118B",
       "expected": ["11017773"],
       "note": "PIT6368A"
     },
     {
       "id": "turn_signal_camera_dead",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the camera view that is supposed to come on with the turn signal does not work",
       "expected": ["11024451", "11027885", "11032954"],
       "note": "PIT6366 turn signal camera"
     },
     {
       "id": "no_key_fob_detected",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "I keep getting a no key fob detected message even though the fob is in the truck",
       "expected": ["11027936"],
       "note": "PIT6478"
@@ -165,42 +165,42 @@
 
     {
       "id": "screen_bricks_black_colloquial",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "my whole dash bricks itself, goes totally black and reboots while I am driving",
       "expected": ["11019013"],
       "note": "colloquial + multi-system; SB 24-NA-193 black screen / cluster reset while driving"
     },
     {
       "id": "ghost_braking_colloquial",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the truck ghost-brakes on me and jerks to a stop for no reason",
       "expected": ["11028675", "11028731", "11029963"],
       "note": "colloquial for unexpected hard braking (N252521591)"
     },
     {
       "id": "damp_floor_vague",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "there is a musty damp smell inside and the floor feels wet on one side",
       "expected": ["11030274"],
       "note": "vague phrasing of footwell water intrusion"
     },
     {
       "id": "garage_remote_wont_learn_colloquial",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the built-in universal garage remote just will not learn my door",
       "expected": ["11017773"],
       "note": "colloquial for garage door opener programming (PIT6368A U118B)"
     },
     {
       "id": "handsfree_cruise_flaky_colloquial",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "my hands-free highway cruise keeps dropping out and saying it is not available",
       "expected": ["11014322"],
       "note": "colloquial for Super Cruise unavailable (PIC6557D)"
     },
     {
       "id": "hv_warning_charge_capped",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "service high voltage warning is on and it will not charge past about a quarter full",
       "expected": ["11019066"],
       "note": "PIC6609 service high voltage + charge limited to 26% (distinct from no-heat variant)"
@@ -208,7 +208,7 @@
 
     {
       "id": "nm_espresso",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "what is the best recipe for a good espresso",
       "expected": [],
       "no_match": true,
@@ -216,7 +216,7 @@
     },
     {
       "id": "nm_diesel_timing_belt",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the diesel engine timing belt is squealing loudly",
       "expected": [],
       "no_match": true,
@@ -224,7 +224,7 @@
     },
     {
       "id": "nm_manual_transmission",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "the manual transmission grinds every time I shift into third gear",
       "expected": [],
       "no_match": true,
@@ -232,7 +232,7 @@
     },
     {
       "id": "nm_carburetor",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the carburetor is flooding and the choke sticks closed",
       "expected": [],
       "no_match": true,
@@ -240,7 +240,7 @@
     },
     {
       "id": "nm_convertible_top",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "the convertible soft top will not retract or fold down",
       "expected": [],
       "no_match": true,
@@ -248,7 +248,7 @@
     },
     {
       "id": "nm_exhaust_muffler",
-      "vehicle_id": 715144,
+      "vehicle_id": 8,
       "query": "the exhaust is really loud and there is a hole rusted through the muffler",
       "expected": [],
       "no_match": true,
@@ -256,7 +256,7 @@
     },
     {
       "id": "nm_clutch_pedal",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "the clutch pedal goes straight to the floor and will not disengage",
       "expected": [],
       "no_match": true,
@@ -264,7 +264,7 @@
     },
     {
       "id": "nm_spark_plugs",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "how do I change the spark plugs and set the gap",
       "expected": [],
       "no_match": true,
@@ -272,7 +272,7 @@
     },
     {
       "id": "nm_death_wobble",
-      "vehicle_id": 685101,
+      "vehicle_id": 7,
       "query": "bad death wobble in the front end shaking the whole truck at highway speed",
       "expected": [],
       "no_match": true,
@@ -280,7 +280,7 @@
     },
     {
       "id": "nm_gas_mileage",
-      "vehicle_id": 218944,
+      "vehicle_id": 6,
       "query": "my gas mileage dropped a lot and the fuel gauge is stuck on empty",
       "expected": [],
       "no_match": true,

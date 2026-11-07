@@ -78,7 +78,7 @@ def to_pgvector(vector: list[float]) -> str:
 async def embed_pending(
     limit: int | None = None,
     force: bool = False,
-    nhtsa_vehicle_id: int | None = None,
+    vehicle_id: int | None = None,
 ) -> EmbedStats:
     from src.db import get_pool
     from src.jobs.repository import vehicle_scope
@@ -99,7 +99,7 @@ async def embed_pending(
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
         )
 
     if not rows:

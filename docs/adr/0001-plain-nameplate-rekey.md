@@ -1,6 +1,6 @@
 # ADR 0001 — Re-key vehicle discovery and comms fetching on the plain nameplate
 
-- **Status:** Accepted (M2 of Linear project "NHTSA Comms — Plain-Nameplate Re-Key")
+- **Status:** Implemented (M3–M5, Nov 2026)
 - **Date:** 2026-07-24
 - **Evidence:** Linear JIP-427 (endpoint inventory), JIP-428 (vocabulary), JIP-429 (superset/de-dup)
 
@@ -182,6 +182,10 @@ Order matters; each step is transactional:
 migration report of every mutation, so restoring the old constraints + git-reverting the
 code returns the system to the pre-migration state. Absorbed-vehicle rows (none expected
 today) are the only destructive change; the report captures them.
+
+As built: the migration was split into `0008` (relaxing, with the partial unique index)
+and `0009` (drops `trim` and `vehicle_catalog`), and the vehicle backfill is a script
+(`backend/src/scripts/backfill_plain_nameplate.py`) rather than part of the SQL.
 
 ### 8. Test plan sketch
 

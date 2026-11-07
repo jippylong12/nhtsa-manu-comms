@@ -222,3 +222,63 @@ async def test_reingest_replaces_rather_than_duplicates(conn, monkeypatch):
     assert (
         await conn.fetchval("SELECT count(*) FROM comm_products WHERE source_window=$1", _WIN) == 3
     )
+
+
+# --------------------------------------------------------------------------
+# Name aliasing: one resolver for the picker AND for matching (resolve_models)
+# --------------------------------------------------------------------------
+
+
+def test_spacing_variants_resolve_to_the_spelling_with_more_bulletins():
+    resolved = flatfile.resolve_models({"F 53": 41, "F53": 2, "E350": 9, "E 350": 3})
+    assert resolved == {"F 53": "F 53", "F53": "F 53", "E350": "E350", "E 350": "E350"}
+
+
+def test_a_spacing_tie_keeps_the_spelling_with_more_spaces():
+    resolved = flatfile.resolve_models({"GT40": 5, "GT 40": 5})
+    assert resolved == {"GT40": "GT 40", "GT 40": "GT 40"}
+
+
+def test_a_junk_name_resolves_to_the_real_spelling_with_the_same_key():
+    resolved = flatfile.resolve_models(
+        {"ESCAPE": 200, "REDUNDANT ESCAPE": 2, "EDGE": 9, "DUPLICATE EDGE": 1, "RANGER": 4}
+    )
+    assert resolved["REDUNDANT ESCAPE"] == "ESCAPE"
+    assert resolved["DUPLICATE EDGE"] == "EDGE"
+    assert resolved["RANGER"] == "RANGER"
+
+
+def test_a_junk_name_follows_a_folded_spacing_variant_to_the_preferred_spelling():
+    resolved = flatfile.resolve_models({"F 53": 41, "F53": 2, "REDUNDANT F53": 1})
+    assert resolved["REDUNDANT F53"] == "F 53"
+
+
+def test_a_junk_name_with_no_same_key_sibling_resolves_to_the_unique_prefix_or_suffix_match():
+    resolved = flatfile.resolve_models(
+        {
+            "F 150": 600,
+            "F 250 SD": 240,
+            "F 350 SD": 240,
+            "REDUNDANT F 250": 5,
+            "MUSTANG MACH E": 330,
+            "MUSTANG": 150,
+            "REDUNDANT MACH E": 5,
+        }
+    )
+    assert resolved["REDUNDANT F 250"] == "F 250 SD", "key F250 starts F250SD, and only that"
+    assert resolved["REDUNDANT MACH E"] == "MUSTANG MACH E", "key MACHE ends MUSTANGMACHE"
+
+
+def test_a_junk_name_with_two_candidates_stays_unresolved_and_visible():
+    resolved = flatfile.resolve_models(
+        {"ROGUE SPORT": 30, "ROGUE HYBRID": 10, "REDUNDANT ROGUE": 4}
+    )
+    assert resolved["REDUNDANT ROGUE"] == "REDUNDANT ROGUE"
+
+
+def test_a_junk_name_with_a_too_short_key_stays_unresolved():
+    resolved = flatfile.resolve_models(
+        {"Z4": 9, "REDUNDANT Z": 2, "86 SPORT": 4, "REDUNDANT 86": 3}
+    )
+    assert resolved["REDUNDANT Z"] == "REDUNDANT Z", "one-character key is never extended"
+    assert resolved["REDUNDANT 86"] == "REDUNDANT 86", "two-character key is never extended"

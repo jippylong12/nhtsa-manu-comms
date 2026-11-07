@@ -217,11 +217,11 @@ def extract_text(path: pathlib.Path) -> ExtractionResult:
 async def extract_pending(
     limit: int | None = None,
     force: bool = False,
-    nhtsa_vehicle_id: int | None = None,
+    vehicle_id: int | None = None,
 ) -> ExtractStats:
     """Download and extract every document that does not yet have text.
 
-    `nhtsa_vehicle_id` restricts the pass to one tracked vehicle, which is what
+    `vehicle_id` restricts the pass to one tracked vehicle, which is what
     an in-app refresh needs so its bill matches the estimate it quoted. None
     means every vehicle, which is what the CLI passes.
     """
@@ -249,7 +249,7 @@ async def extract_pending(
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
         )
 
     if not rows:
@@ -367,7 +367,7 @@ async def _record_failure(pool, row, reason: str) -> None:
         )
 
 
-async def mark_documentless_communications(nhtsa_vehicle_id: int | None = None) -> int:
+async def mark_documentless_communications(vehicle_id: int | None = None) -> int:
     """Flag pending communications that have no attached PDF at all.
 
     NHTSA lists some communications without publishing a document. They can
@@ -387,7 +387,7 @@ async def mark_documentless_communications(nhtsa_vehicle_id: int | None = None) 
               AND NOT EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id = c.id)
               AND {vehicle_scope('$1')}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
         )
     n = int(result.split()[-1]) if result else 0
     if n:

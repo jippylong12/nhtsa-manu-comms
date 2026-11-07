@@ -26,13 +26,15 @@ class CamelModel(BaseModel):
 
 
 class VehicleCreate(CamelModel):
-    """Schema for creating a vehicle to track."""
+    """Schema for creating a vehicle to track.
 
-    vehicle_id: int = Field(..., description="NHTSA Vehicle ID")
+    Identity is (year, make, model). Unknown fields (a legacy `vehicleId`, or any
+    other extra key) are ignored.
+    """
+
     year: str = Field(..., description="Model year (e.g., '2024')")
-    model: str = Field(..., description="Model name (e.g., 'SILVERADO EV')")
-    make: Optional[str] = Field(None, description="Make, from the NHTSA byYmmt variant")
-    trim: Optional[str] = Field(None, description="Trim, from the NHTSA byYmmt variant")
+    make: str = Field(..., description="Make (e.g., 'Ford'); stored uppercase")
+    model: str = Field(..., description="Model nameplate (e.g., 'F-150'); stored canonical ('F 150')")
     keywords: list[str] = Field(
         default_factory=list, description="Keywords to filter communications"
     )
@@ -41,15 +43,10 @@ class VehicleCreate(CamelModel):
 class VehicleUpdate(CamelModel):
     """Schema for updating a vehicle.
 
-    make and trim are settable: the router has always forwarded them, so
-    without the fields every PATCH raised AttributeError before it reached the
-    service.
+    Only keywords are editable. Year, make and model are the vehicle's identity;
+    changing them means deleting and re-adding.
     """
 
-    year: Optional[str] = None
-    model: Optional[str] = None
-    make: Optional[str] = None
-    trim: Optional[str] = None
     keywords: Optional[list[str]] = None
 
 
@@ -60,11 +57,10 @@ class VehicleResponse(CamelModel):
     """Schema for vehicle response."""
 
     id: str = Field(..., description="Row ID in the canonical store")
-    vehicle_id: int = Field(..., description="NHTSA Vehicle ID")
+    vehicle_id: int = Field(..., description="Vehicle id (the row id; same value as `id`)")
     year: str = Field(..., description="Model year")
     model: str = Field(..., description="Model name")
     make: Optional[str] = Field(None, description="Make, as recorded by the pipeline")
-    trim: Optional[str] = Field(None, description="Trim, from the NHTSA byYmmt variant")
     keywords: list[str] = Field(default_factory=list, description="Filter keywords")
     last_fetched: Optional[datetime] = Field(None, description="Last time NHTSA was queried")
     comm_count: int = Field(

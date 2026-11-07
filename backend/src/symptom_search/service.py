@@ -21,12 +21,12 @@ log = logging.getLogger("symptom_search.service")
 
 
 async def vehicle_exists(vehicle_id: int) -> bool:
-    """Whether a vehicle with this NHTSA vehicleId is in the corpus."""
+    """Whether a vehicle with this vehicle id is in the corpus."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         return bool(
             await conn.fetchval(
-                "SELECT EXISTS (SELECT 1 FROM vehicles WHERE nhtsa_vehicle_id = $1)",
+                "SELECT EXISTS (SELECT 1 FROM vehicles WHERE id = $1)",
                 vehicle_id,
             )
         )

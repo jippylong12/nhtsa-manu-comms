@@ -114,8 +114,8 @@ async def test_shared_comm_is_one_row_and_two_links(conn, vehicle):
     """The core reason the schema was redesigned."""
     second = await conn.fetchrow(
         """
-        INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model)
-        VALUES (999002, 2024, 'CHEVROLET', 'OTHER TRUCK') RETURNING id
+        INSERT INTO vehicles (year, make, model)
+        VALUES (2024, 'CHEVROLET', 'OTHER TRUCK') RETURNING id
         """
     )
 
@@ -235,13 +235,13 @@ async def test_search_vector_populates_from_llm_arrays(conn):
 
 async def test_vehicle_upsert_is_idempotent(conn):
     first_id, inserted = await repo.upsert_vehicle(
-        conn, nhtsa_vehicle_id=999003, year=2025, make="GMC", model="SIERRA EV"
+        conn, year=2025, make="GMC", model="SIERRA EV", keywords=["battery"]
     )
     second_id, reinserted = await repo.upsert_vehicle(
-        conn, nhtsa_vehicle_id=999003, year=2025, make="GMC", model="SIERRA EV DENALI"
+        conn, year=2025, make="GMC", model="SIERRA EV"
     )
     assert inserted is True and reinserted is False
     assert first_id == second_id
 
-    model = await conn.fetchval("SELECT model FROM vehicles WHERE nhtsa_vehicle_id=999003")
-    assert model == "SIERRA EV DENALI"
+    keywords = await conn.fetchval("SELECT keywords FROM vehicles WHERE id = $1", first_id)
+    assert list(keywords) == ["battery"], "an add with no keywords keeps the configured ones"

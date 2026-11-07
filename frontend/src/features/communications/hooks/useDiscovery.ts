@@ -29,20 +29,3 @@ export function useDiscoveryModels(year: number | null, make: string) {
         staleTime: 1000 * 60 * 60, // 1 hour
     });
 }
-
-export function useDiscoveryVariants(year: number | null, make: string, model: string) {
-    return useQuery({
-        queryKey: ['discovery', 'variants', year, make, model],
-        queryFn: () =>
-            year && make && model
-                ? communicationApi.getVariants(year, make, model)
-                : Promise.resolve([]),
-        enabled: !!year && !!make && !!model,
-        staleTime: 1000 * 60 * 60, // 1 hour
-        // NHTSA's byYmmt lookup runs right at their 30s gateway timeout, so a
-        // failure is a full 30s wait. Retrying (the global default is 1) would
-        // make the user watch the spinner for a minute before the error. Fail
-        // after the single attempt instead; reselecting the model retries.
-        retry: 0,
-    });
-}

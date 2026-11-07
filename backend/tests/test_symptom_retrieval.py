@@ -21,10 +21,10 @@ from src.symptom_search.retrieval import (
     revision_stem,
 )
 
-# NHTSA vehicleIds present in the corpus.
-VEH_SILVERADO_24 = 218944
-VEH_EQUINOX_25 = 685101
-VEH_SILVERADO_26 = 715144
+# The corpus vehicles these tests probe, by identity. The row id (the API's
+# vehicleId) is looked up at run time because it is assigned by the database.
+SILVERADO_24 = (2024, "SILVERADO")
+EQUINOX_25 = (2025, "EQUINOX")
 
 # A valid 1536-d unit vector, so no embeddings API call is needed.
 DUMMY_EMBEDDING = [1.0] + [0.0] * 1535
@@ -202,6 +202,30 @@ def _needs_db():
         pytest.skip("DATABASE_URL not configured")
 
 
+async def _vehicle_id(identity: tuple[int, str]) -> int:
+    """The row id of the tracked vehicle with the most bulletins matching this year and
+    nameplate prefix; skips the test when the corpus does not hold it."""
+    from src.db import get_pool
+
+    year, prefix = identity
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row_id = await conn.fetchval(
+            """
+            SELECT v.id FROM vehicles v
+            WHERE v.active AND v.year = $1 AND v.model ILIKE $2
+            ORDER BY (SELECT count(*) FROM communication_vehicles cv WHERE cv.vehicle_id = v.id)
+                     DESC, v.id
+            LIMIT 1
+            """,
+            year,
+            prefix + "%",
+        )
+    if row_id is None:
+        pytest.skip(f"no tracked {year} {prefix} in this database")
+    return row_id
+
+
 async def _linked_vehicles(nhtsa_id: str) -> set[int]:
     from src.db import get_pool
 
@@ -209,7 +233,7 @@ async def _linked_vehicles(nhtsa_id: str) -> set[int]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT v.nhtsa_vehicle_id
+            SELECT v.id
             FROM communications c
             JOIN communication_vehicles cv ON cv.communication_id = c.id
             JOIN vehicles v ON v.id = cv.vehicle_id
@@ -217,14 +241,15 @@ async def _linked_vehicles(nhtsa_id: str) -> set[int]:
             """,
             nhtsa_id,
         )
-    return {r["nhtsa_vehicle_id"] for r in rows}
+    return {r["id"] for r in rows}
 
 
 async def test_every_result_is_linked_to_the_scoped_vehicle():
     """The core scoping guarantee: nothing outside the target vehicle comes back."""
     _needs_db()
+    equinox = await _vehicle_id(EQUINOX_25)
     result = await retrieve(
-        VEH_EQUINOX_25,
+        equinox,
         "service high voltage warning and no heat",
         k=10,
         embedding=DUMMY_EMBEDDING,
@@ -232,18 +257,20 @@ async def test_every_result_is_linked_to_the_scoped_vehicle():
     assert result.matches, "expected some matches for a populated vehicle"
     for m in result.matches:
         linked = await _linked_vehicles(m.nhtsa_id)
-        assert VEH_EQUINOX_25 in linked, f"{m.nhtsa_id} surfaced but is not on the Equinox"
+        assert equinox in linked, f"{m.nhtsa_id} surfaced but is not on the Equinox"
 
 
 async def test_single_vehicle_document_never_leaks_across_vehicles():
     """A glass-spot bulletin that exists only for the 2024 Silverado must not be
     retrievable when the query is scoped to the Equinox."""
     _needs_db()
-    only_silverado = "11006511"  # PI0754G, linked solely to 218944
-    assert await _linked_vehicles(only_silverado) == {VEH_SILVERADO_24}
+    silverado = await _vehicle_id(SILVERADO_24)
+    equinox = await _vehicle_id(EQUINOX_25)
+    only_silverado = "11006511"  # PI0754G, linked solely to the 2024 Silverado
+    assert await _linked_vehicles(only_silverado) == {silverado}
 
     scoped_other = await retrieve(
-        VEH_EQUINOX_25, "spots on my windows", k=10, embedding=DUMMY_EMBEDDING
+        equinox, "spots on my windows", k=10, embedding=DUMMY_EMBEDDING
     )
     assert only_silverado not in {m.nhtsa_id for m in scoped_other.matches}
 
@@ -278,8 +305,9 @@ async def test_revision_count_matches_the_full_family_in_the_database():
     _needs_db()
     from src.db import get_pool
 
+    silverado = await _vehicle_id(SILVERADO_24)
     result = await retrieve(
-        VEH_SILVERADO_24, "hood ajar message on the dash", k=6, embedding=DUMMY_EMBEDDING
+        silverado, "hood ajar message on the dash", k=6, embedding=DUMMY_EMBEDDING
     )
     families = [m for m in result.matches if m.superseded_count]
     if not families:
@@ -295,9 +323,9 @@ async def test_revision_count_matches_the_full_family_in_the_database():
                 FROM communications c
                 JOIN communication_vehicles cv ON cv.communication_id = c.id
                 JOIN vehicles v ON v.id = cv.vehicle_id
-                WHERE v.nhtsa_vehicle_id = $1 AND c.communication_number ILIKE $2
+                WHERE v.id = $1 AND c.communication_number ILIKE $2
                 """,
-                VEH_SILVERADO_24,
+                silverado,
                 stem + "%",
             )
             family = [r for r in rows if revision_stem(r["communication_number"]) == stem]

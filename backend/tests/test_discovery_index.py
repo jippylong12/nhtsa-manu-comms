@@ -98,3 +98,151 @@ async def test_model_lookup_is_case_insensitive_on_make(seeded):
 @pytest.mark.asyncio
 async def test_a_make_with_no_comms_that_year_returns_no_models(seeded):
     assert await CommunicationService.get_discovery_models(_YEAR, "TESLA") == []
+
+
+# --------------------------------------------------------------------------
+# Junk and duplicate names (JIP re-key follow-up): the picker lists each real
+# nameplate once. Names that fold away are not lost -- sync, preview and
+# identity_check match every spelling that resolves to the vehicle's model (see
+# flatfile.resolve_models and tests/test_alias_matching.py), so no bulletin
+# becomes unreachable.
+# --------------------------------------------------------------------------
+
+_DIRTY_TAG = "TESTDISC_DIRTY"
+_DIRTY_YEAR = 2098
+
+
+async def _seed_dirty(rows: list[tuple[str, str, str]]):
+    """Insert (nhtsa_id, make, model) rows for _DIRTY_YEAR; return a cleanup coroutine fn."""
+    settings = get_settings()
+    if not settings.database_url:
+        pytest.skip("DATABASE_URL not configured")
+
+    async def wipe():
+        conn = await asyncpg.connect(settings.database_url)
+        try:
+            await conn.execute("DELETE FROM comm_products WHERE source_window = $1", _DIRTY_TAG)
+        finally:
+            await conn.close()
+
+    await wipe()
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+        await conn.executemany(
+            "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
+            "VALUES ($1, $2, $3, $4, 'x', $5)",
+            [(nid, mk, md, _DIRTY_YEAR, _DIRTY_TAG) for nid, mk, md in rows],
+        )
+    finally:
+        await conn.close()
+    return wipe
+
+
+@pytest_asyncio.fixture
+async def dirty_ford():
+    wipe = await _seed_dirty(
+        [
+            # Real nameplates, untouched.
+            ("900001", "FORD", "F 150"),
+            ("900002", "FORD", "RANGER"),
+            # REDUNDANT twin whose every bulletin is also under the real nameplate.
+            ("900003", "FORD", "ESCAPE"),
+            ("900004", "FORD", "ESCAPE"),
+            ("900003", "FORD", "REDUNDANT ESCAPE"),
+        ]
+    )
+    yield
+    await wipe()
+
+
+@pytest.mark.asyncio
+async def test_a_redundant_twin_fully_covered_by_its_real_nameplate_is_hidden(dirty_ford):
+    models = await CommunicationService.get_discovery_models(_DIRTY_YEAR, "FORD")
+    assert models == ["ESCAPE", "F 150", "RANGER"]
+
+
+@pytest_asyncio.fixture
+async def aliased_junk_ford():
+    wipe = await _seed_dirty(
+        [
+            # REDUNDANT MACH E has no same-key sibling, but exactly one real name
+            # ends with its key, so it folds into MUSTANG MACH E.
+            ("900101", "FORD", "MUSTANG MACH E"),
+            ("900102", "FORD", "REDUNDANT MACH E"),
+            # A same-key sibling that lacks one of the junk bulletins still absorbs it:
+            # matching follows the alias, so 900104 stays reachable.
+            ("900103", "FORD", "BRONCO"),
+            ("900103", "FORD", "REDUNDANT BRONCO"),
+            ("900104", "FORD", "REDUNDANT BRONCO"),
+            # DUPLICATE is treated like REDUNDANT.
+            ("900105", "FORD", "EDGE"),
+            ("900105", "FORD", "DUPLICATE EDGE"),
+            # No real name resembles this one, so it is never guessed at.
+            ("900106", "FORD", "REDUNDANT WIDGETZ"),
+        ]
+    )
+    yield
+    await wipe()
+
+
+@pytest.mark.asyncio
+async def test_junk_names_that_resolve_to_a_real_nameplate_disappear_the_rest_stay(
+    aliased_junk_ford,
+):
+    models = await CommunicationService.get_discovery_models(_DIRTY_YEAR, "FORD")
+    assert models == ["BRONCO", "EDGE", "MUSTANG MACH E", "REDUNDANT WIDGETZ"]
+
+
+@pytest_asyncio.fixture
+async def spaced_ford():
+    wipe = await _seed_dirty(
+        [
+            # F53 is a subset of F 53, and F 53 carries more bulletins: one entry, "F 53".
+            ("900201", "FORD", "F 53"),
+            ("900202", "FORD", "F 53"),
+            ("900203", "FORD", "F 53"),
+            ("900201", "FORD", "F53"),
+            # The unspaced spelling carries more bulletins, so it is the one listed.
+            ("900211", "FORD", "E350"),
+            ("900212", "FORD", "E350"),
+            ("900211", "FORD", "E 350"),
+            # Tie on bulletins and the same set: the spaced spelling wins.
+            ("900221", "FORD", "GT 40"),
+            ("900221", "FORD", "GT40"),
+            # Not a collision: different nameplates.
+            ("900231", "FORD", "F 59"),
+        ]
+    )
+    yield
+    await wipe()
+
+
+@pytest.mark.asyncio
+async def test_spelling_variants_that_lose_nothing_fold_into_one_entry(spaced_ford):
+    models = await CommunicationService.get_discovery_models(_DIRTY_YEAR, "FORD")
+    assert models == ["E350", "F 53", "F 59", "GT 40"]
+
+
+@pytest_asyncio.fixture
+async def split_spelling_nissan():
+    wipe = await _seed_dirty(
+        [
+            # Each spelling holds a bulletin the other lacks (like RS 5 / RS5 in the
+            # real index). They still fold: matching reads both spellings.
+            ("900301", "NISSAN", "NV 200"),
+            ("900302", "NISSAN", "NV 200"),
+            ("900302", "NISSAN", "NV200"),
+            ("900303", "NISSAN", "NV200"),
+            ("900303", "NISSAN", "REDUNDANT NV200"),
+        ]
+    )
+    yield
+    await wipe()
+
+
+@pytest.mark.asyncio
+async def test_spellings_that_each_hold_unique_bulletins_still_fold_to_one_entry(
+    split_spelling_nissan,
+):
+    models = await CommunicationService.get_discovery_models(_DIRTY_YEAR, "NISSAN")
+    assert models == ["NV 200"]

@@ -121,7 +121,7 @@ async def _preflight(conn, queries: list[dict]) -> list[str]:
                     SELECT 1 FROM communications c
                     JOIN communication_vehicles cv ON cv.communication_id = c.id
                     JOIN vehicles v ON v.id = cv.vehicle_id
-                    WHERE c.nhtsa_id = $1 AND v.nhtsa_vehicle_id = $2
+                    WHERE c.nhtsa_id = $1 AND v.id = $2
                 )
                 """,
                 nid,

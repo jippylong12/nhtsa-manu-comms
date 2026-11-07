@@ -33,11 +33,10 @@ class CorpusDocument(CamelModel):
 class CorpusVehicle(CamelModel):
     """A vehicle a communication is linked to."""
 
-    nhtsa_vehicle_id: int
+    vehicle_id: int
     year: int
     make: str
     model: str
-    trim: Optional[str] = None
 
 
 class CommunicationSummary(CamelModel):
