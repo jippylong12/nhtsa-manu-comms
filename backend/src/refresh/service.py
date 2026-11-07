@@ -81,14 +81,19 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Every spelling the picker folds into this vehicle's model (see
+        # flatfile.resolve_models); a bulletin under two spellings counts once.
+        aliases = await flatfile.model_aliases(
+            conn, int(vehicle["year"]), str(vehicle["make"]), vehicle["model"]
+        )
         listed = [
             r["nhtsa_id"]
             for r in await conn.fetch(
-                "SELECT nhtsa_id FROM comm_products "
-                "WHERE model_year = $1 AND make = $2 AND model = $3",
+                "SELECT DISTINCT nhtsa_id FROM comm_products "
+                "WHERE model_year = $1 AND make = $2 AND model = ANY($3::text[])",
                 int(vehicle["year"]),
                 str(vehicle["make"]).upper(),
-                flatfile.normalize_model(vehicle["model"]),
+                aliases,
             )
         ]
         known = await repo.existing_nhtsa_ids(conn, listed)

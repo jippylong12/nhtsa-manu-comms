@@ -17,6 +17,7 @@ nameplate at fetch time (see ``src/jobs/sync.py``).
 
 import logging
 
+from src.communications.flatfile import model_name_counts, resolve_models
 from src.db import get_pool
 
 log = logging.getLogger("discovery")
@@ -95,20 +96,15 @@ class CommunicationService:
 
         Returns the canonical (normalized) nameplates NHTSA files bulletins under
         -- ``F 150``, ``SILVERADO 1500``, ``MUSTANG MACH E`` -- alphabetically.
+        Spacing variants (``F53``/``F 53``) and NHTSA's ``REDUNDANT``/``DUPLICATE``
+        copies are listed once, as the name ``flatfile.resolve_models`` folds them
+        into; the same resolver drives matching, so a folded name's bulletins stay
+        reachable. A junk name with no unambiguous real counterpart stays listed.
         Powertrain/trim variants NHTSA keys separately (``ACCORD HYBRID``,
         ``CIVIC TYPE R``) appear as their own entries, which is correct: they are
         distinct, separately-keyed nameplates.
         """
         pool = await get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT DISTINCT model
-                FROM comm_products
-                WHERE model_year = $1 AND make = $2
-                ORDER BY model
-                """,
-                int(year),
-                make.upper(),
-            )
-        return [r["model"] for r in rows]
+            counts = await model_name_counts(conn, int(year), make)
+        return sorted(set(resolve_models(counts).values()))

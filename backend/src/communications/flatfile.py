@@ -113,6 +113,88 @@ def compact_model(raw: Optional[str]) -> str:
     return raw.upper().replace("-", "").replace(" ", "")
 
 
+# NHTSA's own duplicate markers: a product row filed as ``REDUNDANT F 250`` or
+# ``DUPLICATE RA1250`` is a second copy of a nameplate it also files elsewhere.
+JUNK_PREFIX = re.compile(r"^(?:REDUNDANT|DUPLICATE)\s+")
+
+
+# A junk name's key must be at least this long before a prefix/suffix match may
+# resolve it: "Z" or "86" would otherwise attach to unrelated nameplates.
+_MIN_ALIAS_KEY = 3
+
+
+def resolve_models(counts: dict[str, int]) -> dict[str, str]:
+    """Map every indexed name for one (model_year, make) to the name it is listed as.
+
+    ``counts`` is each distinct ``comm_products.model`` with its distinct bulletin
+    count. The picker lists the distinct values of the result, and matching takes
+    every name that resolves to a vehicle's model, so the two cannot disagree: a
+    bulletin filed under a name that is folded away stays reachable through the name
+    it folds into.
+
+    * Real names with the same compact key (``F53`` / ``F 53``) fold into the
+      spelling with more bulletins; a tie keeps the one with more spaces.
+    * A ``REDUNDANT``/``DUPLICATE`` name resolves to the listed real name with the
+      same key; failing that, to the one listed real name whose key starts or ends
+      with its key (``REDUNDANT F 250`` -> ``F 250 SD``,
+      ``REDUNDANT MACH E`` -> ``MUSTANG MACH E``), provided the key is at least 3
+      characters and exactly one name qualifies. Otherwise it resolves to itself:
+      never guess.
+    """
+    by_key: dict[str, list[str]] = {}
+    for name in counts:
+        if not JUNK_PREFIX.match(name):
+            by_key.setdefault(compact_model(name), []).append(name)
+
+    resolved: dict[str, str] = {}
+    listed: dict[str, str] = {}  # compact key -> the listed spelling
+    for key, names in by_key.items():
+        preferred = min(names, key=lambda n: (-counts[n], -n.count(" "), n))
+        listed[key] = preferred
+        for name in names:
+            resolved[name] = preferred
+
+    for name in counts:
+        if name in resolved:
+            continue
+        key = compact_model(JUNK_PREFIX.sub("", name))
+        if key in listed:
+            resolved[name] = listed[key]
+            continue
+        candidates = (
+            [v for k, v in listed.items() if k.startswith(key) or k.endswith(key)]
+            if len(key) >= _MIN_ALIAS_KEY
+            else []
+        )
+        resolved[name] = candidates[0] if len(candidates) == 1 else name
+    return resolved
+
+
+async def model_name_counts(conn: Any, year: int, make: str) -> dict[str, int]:
+    """Each distinct indexed model for (year, make), with its distinct bulletin count."""
+    rows = await conn.fetch(
+        "SELECT model, count(DISTINCT nhtsa_id) AS n FROM comm_products "
+        "WHERE model_year = $1 AND make = $2 GROUP BY model",
+        int(year),
+        str(make).upper(),
+    )
+    return {r["model"]: r["n"] for r in rows}
+
+
+async def model_aliases(conn: Any, year: int, make: str, model: str) -> list[str]:
+    """Every indexed name that belongs to a vehicle keyed ``model``.
+
+    The names ``resolve_models`` folds into the vehicle's listed name, including
+    the model itself. A vehicle whose model resolves to nothing else is matched
+    exactly as before: ``[model]``. Sync, preview and the identity check all match
+    ``model = ANY(aliases)`` so they agree with the picker.
+    """
+    model = normalize_model(model)
+    resolved = resolve_models(await model_name_counts(conn, year, make))
+    target = resolved.get(model, model)
+    return sorted({n for n, canonical in resolved.items() if canonical == target} | {model})
+
+
 # --------------------------------------------------------------------------
 # Parsing
 # --------------------------------------------------------------------------

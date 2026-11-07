@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 import asyncpg
 
-from src.communications.flatfile import normalize_model
+from src.communications.flatfile import model_aliases
 from src.db import close_pool, get_pool
 
 log = logging.getLogger("identity_check")
@@ -105,12 +105,15 @@ async def collect(conn: asyncpg.Connection) -> tuple[list[dict[str, Any]], int]:
     )
     out = []
     for v in vehicles:
+        # Same alias set sync and preview use (flatfile.model_aliases), so the
+        # index count is what a sync of this vehicle would actually link.
+        aliases = await model_aliases(conn, v["year"], str(v["make"]), v["model"])
         index = await conn.fetchval(
             "SELECT count(DISTINCT nhtsa_id) FROM comm_products "
-            "WHERE model_year = $1 AND make = $2 AND model = $3",
+            "WHERE model_year = $1 AND make = $2 AND model = ANY($3::text[])",
             v["year"],
             str(v["make"]).upper(),
-            normalize_model(v["model"]),
+            aliases,
         )
         out.append({**dict(v), "index": index})
     orphans = await conn.fetchval(

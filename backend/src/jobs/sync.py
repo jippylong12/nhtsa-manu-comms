@@ -31,7 +31,7 @@ from typing import Any, Optional
 
 from dateutil import parser as dateutil_parser
 
-from src.communications.flatfile import normalize_model
+from src.communications.flatfile import model_aliases, normalize_model
 from src.communications.nhtsa_client import NHTSAClient
 from src.communications.schemas import get_comm_type
 from src.db import close_pool, get_pool
@@ -95,20 +95,28 @@ async def sync_vehicle(
     label = f"{vehicle['year']} {vehicle['make']} {vehicle['model']}".strip()
 
     # Which communications belong to this vehicle, straight from the local index:
-    # exact match on the plain nameplate NHTSA files bulletins under. `make` is
-    # already uppercase; `model` is normalized the same way the index is, so a
-    # vehicle keyed `CIVIC` meets `comm_products.model = 'CIVIC'`. (A vehicle still
-    # keyed to a granular body style -- `F-150 REGULAR CAB` -- matches nothing
+    # every name the picker folds into the vehicle's model (`F53` and `REDUNDANT F 250`
+    # for a vehicle keyed `F 250 SD`, see flatfile.resolve_models), so a bulletin
+    # NHTSA filed under a folded spelling is not stranded. `make` is already
+    # uppercase; a model nothing folds into matches exactly, as before. (A vehicle
+    # still keyed to a granular body style -- `F-150 REGULAR CAB` -- matches nothing
     # until the M4 backfill re-keys it to the plain nameplate; that is expected.)
     try:
+        aliases = await model_aliases(
+            conn, int(vehicle["year"]), str(vehicle["make"]), vehicle["model"]
+        )
         products = await conn.fetch(
             """
-            SELECT nhtsa_id, summary
+            -- a bulletin filed under two spellings is one bulletin; keep the row
+            -- under the vehicle's own spelling when there is one
+            SELECT DISTINCT ON (nhtsa_id) nhtsa_id, summary
             FROM comm_products
-            WHERE model_year = $1 AND make = $2 AND model = $3
+            WHERE model_year = $1 AND make = $2 AND model = ANY($3::text[])
+            ORDER BY nhtsa_id, model = $4 DESC, model
             """,
             int(vehicle["year"]),
             str(vehicle["make"]).upper(),
+            aliases,
             normalize_model(vehicle["model"]),
         )
     except Exception as e:  # noqa: BLE001 - one vehicle failing is not fatal
