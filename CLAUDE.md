@@ -49,6 +49,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 | pydantic | >=2.5.0 | Request/response schema validation |
 | pydantic-settings | >=2.1.0 | Environment-based configuration (`backend/src/config.py`) |
 | python-dotenv | >=1.0.0 | `.env` file loading |
+| anthropic | >=1.0,<2 | Claude API client for document extraction |
 | Package | Version | Purpose |
 |---------|---------|---------|
 | @tanstack/react-query | ^5.90.16 | Server state management, caching, SSE handling |
@@ -58,7 +59,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Configuration
 - Backend uses `pydantic-settings` with `.env` file support (`backend/src/config.py`)
 - Settings loaded via `get_settings()` with `@lru_cache` singleton pattern
-- Key settings: `database_url`, `postgres_pool_max`, `nhtsa_api_base_url`, `cors_origins`, `api_host`, `api_port`, `gemini_api_key`
+- Key settings: `database_url`, `postgres_pool_max`, `nhtsa_api_base_url`, `cors_origins`, `api_host`, `api_port`, `gemini_api_key`, `claude_api_key` (extraction)
 - Defaults are development-friendly (port 8000, Vite CORS origin). `database_url` has no default and must be set
 - `backend/pyproject.toml` - Python project metadata, build config, tool settings
 - `frontend/vite.config.ts` - Vite config with React plugin, `@` path alias to `./src`, API proxy to `:8000`

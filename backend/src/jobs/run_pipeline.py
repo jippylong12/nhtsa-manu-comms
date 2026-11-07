@@ -191,7 +191,7 @@ def main() -> int:
     parser.add_argument(
         "--send-digest", action="store_true", help="send the digest (default: dry run)"
     )
-    parser.add_argument("--sync-llm", action="store_true", help="use the synchronous LLM API")
+    parser.add_argument("--sync-llm", action="store_true", help="use the synchronous Messages API instead of the Batch API")
     args = parser.parse_args()
 
     now = datetime.now(timezone.utc)

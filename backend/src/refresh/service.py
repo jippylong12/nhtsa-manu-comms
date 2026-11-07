@@ -408,12 +408,12 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         await _progress(
             run_id,
             stage="analyse",
-            note="Analysing documents. This is the long part and is queued with the model provider",
+            note="Reading each document with the model. This is the long part",
             done=0,
         )
 
         # ---- llm -------------------------------------------------------
-        await processor.run_llm(None, sync=False, vehicle_id=vehicle_id)
+        await processor.run_llm(None, sync=True, vehicle_id=vehicle_id)
         await llm_stage.promote_completed_communications()
         await _progress(run_id, stage="index", note="Indexing for search")
 

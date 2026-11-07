@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     )
     # Per-request ceiling for every Anthropic call (see src/anthropic_client.py).
     anthropic_timeout_seconds: int = Field(default=300, gt=0)
+    # The model the LLM extraction stage calls (src/jobs/llm.py). gemini_model stays for
+    # symptom-search compose.
+    extraction_model: str = "claude-haiku-5-5"
+    # Live extraction calls in flight at once.
+    anthropic_extraction_concurrency: int = Field(default=6, gt=0)
     # 1536, not the model's native 3072: pgvector cannot build an hnsw or
     # ivfflat index above 2000 dimensions. See migrations/0001.
     embedding_dimensions: int = 1536

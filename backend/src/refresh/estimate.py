@@ -5,8 +5,7 @@ self-correct as the model, the prompt, or the pricing changes. The cost basis is
 the `usage_events` ledger; the duration basis is the observed NHTSA fetch rate.
 
 Everything here is presented as a range. A single number implies a precision
-neither estimate has, and the Gemini batch queue in particular is server-side
-and genuinely unpredictable.
+neither estimate has.
 """
 
 from dataclasses import dataclass
@@ -23,16 +22,13 @@ FALLBACK_COST_PER_DOCUMENT = 0.0006
 # measured out at 309s for 389 bulletins.
 SYNC_SECONDS_PER_BULLETIN = 0.8
 
-# The Batch API is queued server-side. This is a floor, not an average: a batch
-# has never come back faster, and it can take considerably longer.
-BATCH_FLOOR_SECONDS = 120.0
-# Marginal wall-clock per document once a batch is running, covering the PDF
-# download and extraction that precede it.
-SECONDS_PER_DOCUMENT = 0.9
+# Live Messages API calls: 300 documents in 3m17s at concurrency 6 in the
+# bake-off, rounded up. Covers the PDF download and extraction as well.
+LIVE_SECONDS_PER_DOCUMENT = 0.7
 
 # How wide to draw the range around the central estimate. Spend has been stable
-# per document, so the cost band is tight; wall-clock is dominated by a queue we
-# do not control, so its band is deliberately loose.
+# per document, so the cost band is tight; wall-clock depends on NHTSA and the model's
+# latency, so its band is deliberately loose.
 COST_SPREAD = 0.25
 DURATION_SPREAD = 0.6
 
@@ -103,11 +99,7 @@ def cost_range(documents: int, per_document: float) -> Range:
 
 
 def duration_range(new_bulletins: int, documents: int) -> Range:
-    mid = (
-        new_bulletins * SYNC_SECONDS_PER_BULLETIN
-        + documents * SECONDS_PER_DOCUMENT
-        + (BATCH_FLOOR_SECONDS if documents else 0.0)
-    )
+    mid = new_bulletins * SYNC_SECONDS_PER_BULLETIN + documents * LIVE_SECONDS_PER_DOCUMENT
     return Range(low=mid * (1 - DURATION_SPREAD), high=mid * (1 + DURATION_SPREAD))
 
 

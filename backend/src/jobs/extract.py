@@ -1,10 +1,7 @@
 """Job 2, first half: download PDFs and extract text locally.
 
-Extracting locally with PyMuPDF is what keeps the pipeline cheap. Sending PDFs
-straight to Gemini bills at image-token rates; the A1 spike measured that path
-at 2.0x the input tokens and, on a table-dense document, slightly *less*
-faithful (it invented a model-year range for a cell that was empty). So text
-first, vision only for documents that fail the yield heuristic.
+Text is still extracted locally for full-text search, the page count and the
+yield flag. The model reads the PDF itself (see docs/adr/0002).
 """
 
 import asyncio
@@ -80,8 +77,8 @@ async def prune_archive(dry_run: bool = False) -> tuple[int, int]:
     grows without bound: one file per communication, a few hundred KB each.
 
     A PDF stops being needed once its document has an ``llm_summary``. Before
-    that it is still live input, because a low-yield scan is flagged for the
-    vision fallback and ``llm._vision_parts`` reopens the file from here. Rows
+    that it is still live input, because the LLM stage reads the PDF itself
+    from here (``pdf_input.ensure_archived``). Rows
     without a summary are therefore left alone, which also means an interrupted
     run loses nothing.
 

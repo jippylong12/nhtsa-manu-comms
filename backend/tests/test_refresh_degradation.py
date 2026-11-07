@@ -141,3 +141,66 @@ async def test_one_failing_window_does_not_stop_or_touch_the_others(conn, monkey
         "SELECT etag, row_count FROM flatfile_ingests WHERE source_window = 'TESTD4-BAD'"
     )
     assert (bad["etag"], bad["row_count"]) == ("old-etag", 7)
+
+
+# --- The analyse stage waits on live calls (JIP-1572) -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_analyse_stage_reads_documents_live_not_through_a_batch_queue(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.jobs import extract as extract_stage
+    from src.jobs import llm as llm_stage
+    from src.jobs import process as processor
+    from src.jobs import sync as sync_job
+    from src.vehicles.service import VehicleService
+
+    progress: list[tuple[str, str]] = []
+    llm_calls: list[tuple] = []
+
+    async def record_progress(run_id, **kw):
+        progress.append((kw.get("stage"), kw.get("note")))
+
+    async def noop(*a, **kw):
+        return None
+
+    async def a_vehicle(conn):
+        return [{"id": 1}]
+
+    async def synced(conn, client, vehicle):
+        return SimpleNamespace(new_comms=40, new_docs=40, skipped_known=0, fetch_failures=0)
+
+    async def extracted(limit, vehicle_id=None):
+        return SimpleNamespace(extracted=40)
+
+    async def record_llm(limit, sync, vehicle_id=None):
+        llm_calls.append((limit, sync, vehicle_id))
+
+    async def state(vehicle_id):
+        return dict(analysed=40, still_working=0, gave_up=0, unavailable=0, total=40)
+
+    async def pruned():
+        return 0, 0
+
+    monkeypatch.setattr(service, "_progress", record_progress)
+    monkeypatch.setattr(service, "_finish", noop)
+    monkeypatch.setattr(service, "_freshen_index", noop)
+    monkeypatch.setattr(service, "_vehicle_state", state)
+    monkeypatch.setattr(service, "NHTSAClient", lambda: object())
+    monkeypatch.setattr(service.repo, "tracked_vehicles", a_vehicle)
+    monkeypatch.setattr(sync_job, "sync_vehicle", synced)
+    monkeypatch.setattr(VehicleService, "touch_fetched_at", noop)
+    monkeypatch.setattr(processor, "run_extract", extracted)
+    monkeypatch.setattr(processor, "run_llm", record_llm)
+    monkeypatch.setattr(processor, "run_embed", noop)
+    monkeypatch.setattr(llm_stage, "promote_completed_communications", noop)
+    monkeypatch.setattr(extract_stage, "prune_archive", pruned)
+
+    await service._execute(1, 1)
+
+    assert llm_calls == [(None, True, 1)]
+    assert (
+        "analyse",
+        "Reading each document with the model. This is the long part",
+    ) in progress

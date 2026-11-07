@@ -22,11 +22,15 @@ lost. Backfilled rows carry `meta->>'backfilled_from_pipeline_run'`.
 
 | kind | written by | when |
 |---|---|---|
-| `llm_extract` | `jobs/llm.py` | each document extraction (sync and batch) |
+| `llm_extract` | `jobs/llm.py` | each document extraction (live and batch), model `claude-haiku-5-5` |
 | `embed` | `jobs/embed.py` | each corpus embedding batch |
 | `search_embed` | `symptom_search/service.py` | embedding one user query |
 | `answer_compose` | `symptom_search/service.py` | the grounded-answer LLM call |
 | `extract`, `digest` | reserved / backfill | PDF text extraction, digest sends |
+
+An `llm_extract` row carries two `meta` keys besides `project`: `path` (`live` or
+`batch`) and `input` (`pdf`, `text` or `chunks`, the plan the document was read
+under; a chunked document writes one row per call).
 
 A gated refusal never calls the model, so it produces a `search_embed` row and
 no `answer_compose` row. The two rows of one search share a `query_id`.

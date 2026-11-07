@@ -7,7 +7,7 @@ launchd plist is provided for reference if unattended runs are ever wanted (see
 [Optional scheduling](#optional-scheduling)).
 
 All commands run from `backend/` with `DATABASE_URL` (and, for the digest,
-Gemini + Resend keys) in `backend/.env`.
+Claude, Gemini and Resend keys) in `backend/.env`.
 
 ## The one command
 
@@ -20,7 +20,7 @@ python -m src.jobs.run_pipeline --send-digest   # ... and actually send the emai
 This runs, in order:
 
 1. **sync** — look up each tracked vehicle's communications in the flat-file index, fetch the new ones from NHTSA by ID, insert them as `pending`.
-2. **process** — extract PDF text, run Gemini structured extraction, embed.
+2. **process** — extract PDF text locally, read each PDF with Claude Haiku 5.5 (structured extraction), embed.
 3. **digest** — email a summary of newly processed items (dry-run unless `--send-digest`).
 
 Useful flags:
@@ -30,7 +30,7 @@ Useful flags:
 | `--sync-only` | discovery only, no processing |
 | `--skip-sync` | process + digest only (drain an existing backlog) |
 | `--send-digest` | actually send the digest (default is a dry-run render) |
-| `--sync-llm` | use the synchronous LLM API instead of the Batch API |
+| `--sync-llm` | read documents live (synchronous Messages API, full price) instead of through the Batch API (half price, but a batch can take 25+ minutes) |
 
 Individual stages can also be run alone:
 
@@ -40,6 +40,15 @@ python -m src.jobs.process --all           # or --stage extract|llm|embed
 python -m src.jobs.digest                  # dry run; --send to send
 python -m src.jobs.process --status        # counts only, no work
 ```
+
+## Model and keys
+
+Extraction uses `CLAUDE_API_KEY` (or `ANTHROPIC_API_KEY`). `GEMINI_API_KEY` is still
+needed for embeddings and for the symptom-search answers. The in-app refresh reads
+documents live; `process --all` and `run_pipeline` use the Batch API unless
+`--sync-llm` is passed. A missing, revoked or out-of-credit Claude key stops the
+run without marking any communication failed. Why the model reads the PDF itself,
+and how long documents are handled: [ADR 0002](adr/0002-haiku-pdf-direct-extraction.md).
 
 ## Flat-file index
 

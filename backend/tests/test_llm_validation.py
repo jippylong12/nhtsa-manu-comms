@@ -100,9 +100,9 @@ def test_batch_pricing_is_half_of_sync():
 
 
 def test_cost_matches_published_rates():
-    # 1M input tokens at $0.30, 1M output at $2.50.
-    assert cost_of(1_000_000, 0, batch=False) == pytest.approx(0.30)
-    assert cost_of(0, 1_000_000, batch=False) == pytest.approx(2.50)
+    # Claude Haiku 5.5: 1M input tokens at $0.10, 1M output at $0.50.
+    assert cost_of(1_000_000, 0, batch=False) == pytest.approx(0.10)
+    assert cost_of(0, 1_000_000, batch=False) == pytest.approx(0.50)
 
 
 def test_zero_tokens_costs_nothing():

@@ -25,7 +25,12 @@ def test_haiku_batch_cost_is_half_the_list_price():
     assert cost_of("claude-haiku-5-5", 2188, 270, batch=True) == pytest.approx(expected)
 
 
-def test_the_default_extraction_model_is_gemini_3_5_flash_lite(monkeypatch):
+def test_the_default_extraction_model_is_claude_haiku_5_5(monkeypatch):
+    monkeypatch.delenv("EXTRACTION_MODEL", raising=False)
+    assert Settings(_env_file=None).extraction_model == "claude-haiku-5-5"
+
+
+def test_the_gemini_model_stays_for_symptom_search_compose(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     assert Settings(_env_file=None).gemini_model == "gemini-3.5-flash-lite"
 

@@ -3,7 +3,7 @@
 Runs the three stages in order and records the run in `pipeline_runs`:
 
     extract  download PDFs, extract text locally, flag low-yield documents
-    llm      structured extraction (Batch API by default, --sync for full price)
+    llm      structured extraction with Claude Haiku 5.5 reading the PDF (Batch API by default, --sync for the Messages API at full price)
     embed    embeddings for semantic retrieval
 
 Usage:
@@ -130,22 +130,6 @@ async def run_llm(limit: int | None, sync: bool, vehicle_id: int | None = None) 
             stats.cost_usd,
             ok=stats.failed == 0,
             error="; ".join(stats.errors[:5]) or None,
-        )
-
-    # The Batch API path excludes vision-fallback documents; process them
-    # synchronously so their communications are not stranded in `pending`.
-    vision = await llm_stage.run_sync(
-        limit=limit, vision_only=True, vehicle_id=vehicle_id
-    )
-    if vision.processed or vision.failed:
-        await record_run(
-            "llm",
-            {"processed": vision.processed, "failed": vision.failed, "mode": "vision-sync"},
-            vision.tokens_in,
-            vision.tokens_out,
-            vision.cost_usd,
-            ok=vision.failed == 0,
-            error="; ".join(vision.errors[:5]) or None,
         )
 
 

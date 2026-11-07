@@ -1,27 +1,29 @@
-"""Job 2, second half: structured extraction with Gemini.
+"""Job 2, second half: structured extraction with Claude Haiku.
 
-Uses the Batch API by default (50% discount, and this pipeline has zero latency
-sensitivity). Batch jobs are asynchronous and may take anywhere from seconds to
-24 hours, so submission and collection are separate steps: submit, walk away,
-collect later. A `--sync` mode exists for small or urgent runs at full price.
+The PDF itself (or the form ``pdf_input`` chose for it) goes to the Messages API when
+someone is waiting (the in-app refresh) and to the Message Batches API when nobody is
+(the CLI). Batch jobs are asynchronous and may take up to 24 hours, so submission and
+collection are separate steps: submit, walk away, collect later.
 
-The prompt and schema are the ones validated in the A1 spike, which produced
-24/24 valid parses at temperature 0 with no retries.
+The request shape and the error handling are the extraction bake-off's
+(``src/eval/extraction_bakeoff.py``), copied rather than imported: that module is frozen
+evidence.
 """
 
 import asyncio
+import base64
+import copy
 import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import fitz
-from google import genai
-from google.genai import types
+import anthropic
+import httpx
 
+from src.anthropic_client import client as anthropic_client
 from src.config import get_settings
-from src.gemini import client as gemini_client
-from src.jobs.extract import archive_path
+from src.jobs import pdf_input
 from src.usage import pricing
 from src.usage.ledger import record_usage
 
@@ -33,18 +35,19 @@ log = logging.getLogger("llm")
 # transient and deserve another pass.
 MAX_LLM_ATTEMPTS = 3
 
-# Retries deliberately leave temperature 0. See _generation_config.
-RETRY_TEMPERATURE = 0.3
-
-# Pricing lives in src/usage/pricing.py so the ledger and the jobs can never
-# disagree about what a call cost.
-PRICE_IN = pricing.rate_for("gemini-3.5-flash-lite").input_per_token
-PRICE_OUT = pricing.rate_for("gemini-3.5-flash-lite").output_per_token
 BATCH_DISCOUNT = pricing.BATCH_DISCOUNT
 
-# Inlined batch payloads are chunked so a single request stays a reasonable
-# size; the corpus is ~1700 input tokens per document.
+# Message Batches limits: requests per batch and bytes per batch.
+BATCH_MAX_REQUESTS = 100_000
+BATCH_MAX_BYTES = 200 * 1024 * 1024
+
+# Kept only so the frozen bake-off module still imports; nothing in the stage uses it.
 CHUNK_SIZE = 100
+
+MAX_TOKENS = 8192
+CALL_ATTEMPTS = 4  # tries per call, on top of the SDK's own retries
+BACKOFF_SECONDS = 2.0  # doubled after each failed try
+PROJECT = "schema-v2"
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -114,9 +117,17 @@ TEXT_PROMPT = (
     + "\n\n--- DOCUMENT TEXT ---\n{text}\n--- END DOCUMENT TEXT ---"
 )
 
-VISION_PROMPT = (
-    "You are analysing a manufacturer communication issued for a motor vehicle. The pages are "
-    "provided as images because local text extraction produced unusable output.\n\n" + _RULES
+PDF_PROMPT = (
+    "You are analysing a manufacturer communication issued for a motor vehicle. "
+    "The communication is attached to this message as a PDF.\n\n" + _RULES
+)
+
+MERGE_PROMPT = (
+    "Below are {n} partial extractions of consecutive page ranges of one manufacturer "
+    "communication, as JSON. Merge them into one record of the same shape: union the arrays "
+    "without duplicates, keep every stated model year and model, write one summary and one "
+    "remedy covering the whole document, choose the doc_kind the majority of parts chose. "
+    "Use only what the parts contain.\n\n"
 )
 
 
@@ -184,22 +195,56 @@ def validate(payload: Any) -> tuple[Optional[dict], Optional[str]]:
 
 
 def cost_of(tokens_in: int, tokens_out: int, batch: bool) -> float:
-    return pricing.cost_of(get_settings().gemini_model, tokens_in, tokens_out, batch=batch)
+    return pricing.cost_of(get_settings().extraction_model, tokens_in, tokens_out, batch=batch)
 
 
-def _client() -> genai.Client:
-    return gemini_client()
+def anthropic_schema() -> dict[str, Any]:
+    """RESPONSE_SCHEMA in the form Anthropic's structured outputs take.
 
-
-def _generation_config(temperature: float = 0.0) -> types.GenerateContentConfig:
-    """Generation settings. Temperature 0 by default, for reproducible extraction.
-
-    Retries raise it deliberately. At temperature 0 the model is effectively
-    deterministic, so re-asking after a malformed response returns the same
-    malformed response and the retry buys nothing. The failure this guards
-    against is a degenerate repetition loop that runs until the output cap and
-    truncates mid-token, which a different sampling path escapes.
+    The API requires ``additionalProperties: false`` on every object. A copy is made so
+    RESPONSE_SCHEMA, which ``validate()`` shares, is never altered.
     """
+    schema = copy.deepcopy(RESPONSE_SCHEMA)
+    schema["additionalProperties"] = False
+    return schema
+
+
+def _params(content: Any) -> dict[str, Any]:
+    """One request. No temperature and no thinking: low effort, structured output."""
+    return {
+        "model": get_settings().extraction_model,
+        "max_tokens": MAX_TOKENS,
+        "output_config": {
+            "effort": "low",
+            "format": {"type": "json_schema", "schema": anthropic_schema()},
+        },
+        "messages": [{"role": "user", "content": content}],
+    }
+
+
+def _pdf_content(pdf_bytes: bytes) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": base64.b64encode(pdf_bytes).decode("ascii"),
+            },
+        },
+        {"type": "text", "text": PDF_PROMPT},
+    ]
+
+
+def _text_content(text: str) -> str:
+    return TEXT_PROMPT.format(text=text)
+
+
+def _generation_config(temperature: float = 0.0):
+    """Gemini generation settings. Only the frozen bake-off's Gemini arms still call this;
+    the stage itself does not."""
+    from google.genai import types
+
     return types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=RESPONSE_SCHEMA,
@@ -207,46 +252,144 @@ def _generation_config(temperature: float = 0.0) -> types.GenerateContentConfig:
     )
 
 
-def _vision_parts(url: str) -> list[types.Part]:
-    """Render a PDF's pages as images for the fallback path."""
-    doc = fitz.open(archive_path(url))
-    parts: list[types.Part] = [types.Part.from_text(text=VISION_PROMPT)]
-    try:
-        for page in doc:
-            pix = page.get_pixmap(dpi=150)
-            parts.append(types.Part.from_bytes(data=pix.tobytes("png"), mime_type="image/png"))
-    finally:
-        doc.close()
-    return parts
+def _client() -> anthropic.Anthropic:
+    return anthropic_client()
 
 
-async def _pending_documents(
-    limit: int | None,
-    vision_only: bool = False,
-    vehicle_id: int | None = None,
-) -> list[dict]:
+async def _sleep(seconds: float) -> None:
+    """Isolated so tests do not wait out a backoff."""
+    await asyncio.sleep(seconds)
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Rate limits, overload (529), other 5xx, timeouts and dropped connections, including an
+    ``api_error`` or ``overloaded_error`` event in the middle of a stream."""
+    if isinstance(
+        error,
+        (
+            anthropic.RateLimitError,
+            anthropic.APIConnectionError,
+            anthropic.InternalServerError,
+            httpx.TransportError,
+        ),
+    ):
+        return True
+    if isinstance(error, anthropic.APIStatusError):
+        body = error.body if isinstance(error.body, dict) else {}
+        inner = body.get("error") if isinstance(body.get("error"), dict) else {}
+        return (
+            error.status_code in (408, 409, 429)
+            or error.status_code >= 500
+            or "overloaded" in str(error).lower()
+            or inner.get("type") in ("api_error", "overloaded_error")
+        )
+    return False
+
+
+def _is_fatal(error: Exception) -> bool:
+    """An API error about the account, not the document: bad key, no access, unknown model,
+    no credit. Marking documents failed for it would burn their retry budget."""
+    if isinstance(
+        error,
+        (anthropic.AuthenticationError, anthropic.PermissionDeniedError, anthropic.NotFoundError),
+    ):
+        return True
+    status = getattr(error, "status_code", None)
+    return status in (401, 403, 404) or "credit balance" in str(error).lower()
+
+
+class ExtractionFatal(RuntimeError):
+    """The run cannot continue (see _is_fatal); nothing is marked failed."""
+
+
+async def _call(client, params: dict) -> tuple[Optional[str], int, int, Optional[str]]:
+    """One Messages call: ``(text, tokens_in, tokens_out, stop_reason)``.
+
+    Retryable errors are retried with a doubling backoff; a fatal one raises
+    ExtractionFatal. Any other API error, or running out of tries, comes back as
+    ``(None, 0, 0, "api_error: ...")`` so the caller can fail that one document.
+    """
+    for attempt in range(CALL_ATTEMPTS):
+        try:
+            message = await asyncio.to_thread(lambda: client.messages.create(**params))
+        except (anthropic.APIError, httpx.TransportError, TimeoutError) as e:
+            if _is_fatal(e):
+                raise ExtractionFatal(str(e)) from e
+            if not _is_retryable(e):
+                return None, 0, 0, f"api_error: {e}"
+            if attempt == CALL_ATTEMPTS - 1:
+                log.warning("still failing after %d tries: %s", CALL_ATTEMPTS, e)
+                return None, 0, 0, f"api_error: {e}"
+            await _sleep(BACKOFF_SECONDS * 2**attempt)
+            continue
+        text = next((b.text for b in message.content if b.type == "text"), None)
+        return text, message.usage.input_tokens, message.usage.output_tokens, message.stop_reason
+    return None, 0, 0, "api_error: no attempt made"  # unreachable
+
+
+async def _meter(
+    doc: dict,
+    stats: "LLMStats",
+    tokens_in: int,
+    tokens_out: int,
+    *,
+    batch: bool,
+    path: str,
+    input_kind: str,
+) -> None:
+    """Ledger row and run totals for one response. Done before validation: a response that
+    fails validation was still billed."""
+    model = get_settings().extraction_model
+    stats.tokens_in += tokens_in
+    stats.tokens_out += tokens_out
+    stats.cost_usd += pricing.cost_of(model, tokens_in, tokens_out, batch=batch)
+    await record_usage(
+        "llm_extract",
+        model,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        batch=batch,
+        communication_id=doc["communication_id"],
+        document_id=doc["id"],
+        meta={"path": path, "input": input_kind, "project": PROJECT},
+    )
+
+
+async def _pending_documents(limit: int | None, vehicle_id: int | None = None) -> list[dict]:
     from src.db import get_pool
     from src.jobs.repository import vehicle_scope
 
-    vision_filter = "AND d.extraction_method = 'vision-fallback'" if vision_only else ""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT d.id, d.url, d.extracted_text, d.extraction_method, d.communication_id
+            SELECT d.id, d.url, d.extracted_text, d.extraction_method, d.page_count,
+                   d.communication_id
             FROM comm_documents d
             JOIN communications c ON c.id = d.communication_id
             WHERE d.llm_summary IS NULL
               AND c.status = 'pending'
-              AND (d.extracted_text IS NOT NULL OR d.extraction_method = 'vision-fallback')
+              AND d.extracted_at IS NOT NULL
               AND {vehicle_scope('$1')}
-              {vision_filter}
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """,
             vehicle_id,
         )
     return [dict(r) for r in rows]
+
+
+async def _plan_for(doc: dict) -> pdf_input.InputPlan:
+    """How this document is presented to the model. Raises RuntimeError when its PDF cannot
+    be had (archive pruned and the download failed)."""
+    path = await pdf_input.ensure_archived(doc["url"])
+    return await asyncio.to_thread(
+        pdf_input.plan,
+        path,
+        doc["page_count"] or 1,
+        doc["extraction_method"],
+        bool(doc["extracted_text"]),
+    )
 
 
 async def _store(doc: dict, clean: dict, tokens_in: int, tokens_out: int, batch: bool) -> None:
@@ -271,7 +414,7 @@ async def _store(doc: dict, clean: dict, tokens_in: int, tokens_out: int, batch:
             clean["components"],
             clean["remedy"],
             clean["applicability"],
-            settings.gemini_model,
+            settings.extraction_model,
             tokens_in,
             tokens_out,
             cost_of(tokens_in, tokens_out, batch),
@@ -341,212 +484,262 @@ async def promote_completed_communications() -> int:
     return n
 
 
+async def _validated_call(
+    client, doc: dict, stats: LLMStats, content: Any, input_kind: str
+) -> Optional[tuple[dict, int, int]]:
+    """One extraction call, validated; a failure is retried once with identical parameters.
+
+    Returns ``(clean, tokens_in, tokens_out)``, or None after marking the communication
+    failed. A response cut off at max_tokens counts as a validation failure.
+    """
+    params = _params(content)
+    err = "no attempt made"
+    for attempt in (1, 2):
+        text, ti, to, stop = await _call(client, params)
+        if text is None and (stop or "").startswith("api_error"):
+            stats.failed += 1
+            stats.errors.append(f"doc {doc['id']}: {stop}")
+            await _mark_failed(doc["communication_id"], f"LLM call failed: {stop}")
+            return None
+        await _meter(doc, stats, ti, to, batch=False, path="live", input_kind=input_kind)
+        if stop == "max_tokens":
+            clean, err = None, "response hit max_tokens"
+        else:
+            clean, err = validate(text)
+        if err is None:
+            return clean, ti, to
+        if attempt == 1:
+            stats.retried += 1
+            log.warning("doc %s: %s -> retrying", doc["id"], err)
+    stats.failed += 1
+    stats.errors.append(f"doc {doc['id']}: {err}")
+    await _mark_failed(doc["communication_id"], f"LLM schema violation: {err}")
+    return None
+
+
+async def _extract_one(
+    client,
+    doc: dict,
+    stats: LLMStats,
+    *,
+    batch: bool = False,
+    plan: pdf_input.InputPlan | None = None,
+) -> None:
+    """Extract one document through the Messages API and store it."""
+    if plan is None:
+        try:
+            plan = await _plan_for(doc)
+        except RuntimeError as e:
+            stats.failed += 1
+            stats.errors.append(f"doc {doc['id']}: {e}")
+            await _mark_failed(doc["communication_id"], f"pdf unavailable: {e}"[:500], retryable=False)
+            return
+
+    if plan.kind == "pdf":
+        result = await _validated_call(client, doc, stats, _pdf_content(plan.payloads[0]), "pdf")
+    elif plan.kind == "text":
+        result = await _validated_call(
+            client, doc, stats, _text_content(doc["extracted_text"]), "text"
+        )
+    else:
+        parts: list[dict] = []
+        ti = to = 0
+        for payload in plan.payloads:
+            part = await _validated_call(client, doc, stats, _pdf_content(payload), "chunks")
+            if part is None:
+                return
+            parts.append(part[0])
+            ti += part[1]
+            to += part[2]
+        merge = MERGE_PROMPT.format(n=len(parts)) + "\n\n".join(
+            f"Part {i}:\n{json.dumps(p)}" for i, p in enumerate(parts, 1)
+        )
+        merged = await _validated_call(client, doc, stats, merge, "chunks")
+        result = None if merged is None else (merged[0], ti + merged[1], to + merged[2])
+    if result is None:
+        return
+    clean, ti, to = result
+    await _store(doc, clean, ti, to, batch=batch)
+    stats.processed += 1
+
+
 async def run_sync(
     limit: int | None = None,
-    concurrency: int = 4,
-    vision_only: bool = False,
+    concurrency: int | None = None,
     vehicle_id: int | None = None,
 ) -> LLMStats:
-    """Process documents with the standard API. Full price, immediate results.
+    """Process documents through the Messages API. Full price, immediate results.
 
-    `vision_only` restricts the pass to vision-fallback documents, which the
-    Batch API path excludes; the batch runner calls this to mop them up so they
-    are never stranded in `pending`.
+    An ExtractionFatal (bad key, no credit) stops the run: the rest are cancelled and
+    nothing is marked failed.
     """
     settings = get_settings()
     client = _client()
     stats = LLMStats()
-    docs = await _pending_documents(
-        limit, vision_only=vision_only, vehicle_id=vehicle_id
-    )
+    docs = await _pending_documents(limit, vehicle_id=vehicle_id)
     if not docs:
         log.info("no documents awaiting LLM extraction")
         return stats
 
-    log.info("running sync extraction over %d document(s)", len(docs))
-    semaphore = asyncio.Semaphore(concurrency)
+    log.info("running live extraction over %d document(s)", len(docs))
+    semaphore = asyncio.Semaphore(concurrency or settings.anthropic_extraction_concurrency)
 
     async def handle(doc: dict) -> None:
         async with semaphore:
-            for attempt in (1, 2):
-                try:
-                    if doc["extraction_method"] == "vision-fallback":
-                        # Rasterizing pages is CPU-bound; keep it off the event
-                        # loop so it doesn't stall the other concurrent handlers.
-                        parts = await asyncio.to_thread(_vision_parts, doc["url"])
-                        contents = [types.Content(role="user", parts=parts)]
-                    else:
-                        contents = TEXT_PROMPT.format(text=doc["extracted_text"])
+            await _extract_one(client, doc, stats)
 
-                    resp = await asyncio.to_thread(
-                        client.models.generate_content,
-                        model=settings.gemini_model,
-                        contents=contents,
-                        config=_generation_config(
-                            temperature=0.0 if attempt == 1 else RETRY_TEMPERATURE
-                        ),
-                    )
-                    # usage_metadata can be absent on a truncated/blocked
-                    # response; treat it as zero rather than raising.
-                    usage = resp.usage_metadata
-                    ti = (usage.prompt_token_count or 0) if usage else 0
-                    to = (usage.candidates_token_count or 0) if usage else 0
-                    stats.tokens_in += ti
-                    stats.tokens_out += to
-                    stats.cost_usd += cost_of(ti, to, batch=False)
-                    # Metered here rather than after a successful store: a
-                    # response that fails validation was still paid for.
-                    await record_usage(
-                        "llm_extract",
-                        settings.gemini_model,
-                        tokens_in=ti,
-                        tokens_out=to,
-                        communication_id=doc["communication_id"],
-                        document_id=doc["id"],
-                        meta={"path": "sync", "attempt": attempt},
-                    )
-
-                    clean, err = validate(resp.text)
-                    if err:
-                        if attempt == 1:
-                            stats.retried += 1
-                            log.warning("doc %s: %s -> retrying", doc["id"], err)
-                            continue
-                        stats.failed += 1
-                        stats.errors.append(f"doc {doc['id']}: {err}")
-                        await _mark_failed(doc["communication_id"], f"LLM schema violation: {err}")
-                        return
-
-                    await _store(doc, clean, ti, to, batch=False)
-                    stats.processed += 1
-                    return
-                except Exception as e:  # noqa: BLE001
-                    if attempt == 1:
-                        stats.retried += 1
-                        await asyncio.sleep(2)
-                        continue
-                    stats.failed += 1
-                    stats.errors.append(f"doc {doc['id']}: {type(e).__name__}: {e}")
-                    await _mark_failed(doc["communication_id"], f"LLM call failed: {e}")
-
-    await asyncio.gather(*(handle(d) for d in docs))
+    tasks = [asyncio.create_task(handle(d)) for d in docs]
+    try:
+        await asyncio.gather(*tasks)
+    except ExtractionFatal:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     await promote_completed_communications()
-    log.info("sync extraction complete :: %s", stats.summary())
+    log.info("live extraction complete :: %s", stats.summary())
     return stats
 
 
-async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) -> list[str]:
-    """Submit pending documents as Batch API jobs. Returns job names.
+def _batch_chunks(requests: list[tuple[dict, int]]) -> list[list[dict]]:
+    """Greedy split under both the request-count and the byte limit. A single request over
+    the byte limit still gets a batch of its own; the API rejects it with a clear error."""
+    out: list[list[dict]] = []
+    current: list[dict] = []
+    size = 0
+    for request, nbytes in requests:
+        if current and (len(current) >= BATCH_MAX_REQUESTS or size + nbytes > BATCH_MAX_BYTES):
+            out.append(current)
+            current, size = [], 0
+        current.append(request)
+        size += nbytes
+    if current:
+        out.append(current)
+    return out
 
-    Vision-fallback documents are excluded: they are a rare path and are
-    cheaper to run synchronously than to shuttle images through batch.
+
+async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) -> list[str]:
+    """Submit pending pdf and text documents as Message Batches. Returns batch ids.
+
+    Documents whose plan is ``chunks`` run live right here (they are several calls and a
+    merge, which a batch cannot express).
     """
-    settings = get_settings()
+    from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
+    from anthropic.types.messages.batch_create_params import Request
+
     client = _client()
-    docs = [
-        d
-        for d in await _pending_documents(limit, vehicle_id=vehicle_id)
-        if d["extraction_method"] != "vision-fallback"
-    ]
+    docs = await _pending_documents(limit, vehicle_id=vehicle_id)
     if not docs:
         log.info("nothing to submit")
         return []
 
-    job_names: list[str] = []
-    for start in range(0, len(docs), CHUNK_SIZE):
-        chunk = docs[start : start + CHUNK_SIZE]
-        requests = [
-            types.InlinedRequest(
-                model=settings.gemini_model,
-                contents=TEXT_PROMPT.format(text=d["extracted_text"]),
-                config=_generation_config(),
-                # Carries the document id through to the response so results
-                # can be matched back without relying on ordering.
-                metadata={"doc_id": str(d["id"])},
-            )
-            for d in chunk
-        ]
-        job = await asyncio.to_thread(
-            client.batches.create,
-            model=settings.gemini_model,
-            src=requests,
-            config=types.CreateBatchJobConfig(display_name=f"nhtsa-extract-{start // CHUNK_SIZE}"),
+    stats = LLMStats()
+    requests: list[tuple[dict, int]] = []
+    live: list[tuple[dict, pdf_input.InputPlan]] = []
+    for doc in docs:
+        try:
+            plan = await _plan_for(doc)
+        except RuntimeError as e:
+            stats.failed += 1
+            stats.errors.append(f"doc {doc['id']}: {e}")
+            await _mark_failed(doc["communication_id"], f"pdf unavailable: {e}"[:500], retryable=False)
+            continue
+        if plan.kind == "chunks":
+            live.append((doc, plan))
+            continue
+        content = (
+            _pdf_content(plan.payloads[0])
+            if plan.kind == "pdf"
+            else _text_content(doc["extracted_text"])
         )
-        job_names.append(job.name)
-        log.info("submitted batch %s with %d document(s) [%s]", job.name, len(chunk), job.state)
+        params = _params(content)
+        requests.append(
+            (
+                Request(
+                    custom_id=str(doc["id"]), params=MessageCreateParamsNonStreaming(**params)
+                ),
+                len(json.dumps(params)),
+            )
+        )
 
-    return job_names
+    batch_ids: list[str] = []
+    for chunk in _batch_chunks(requests):
+        batch = await asyncio.to_thread(lambda c=chunk: client.messages.batches.create(requests=c))
+        batch_ids.append(batch.id)
+        log.info("submitted batch %s with %d document(s)", batch.id, len(chunk))
+
+    for doc, plan in live:
+        await _extract_one(client, doc, stats, plan=plan)
+    if live:
+        log.info("chunked documents run live during submit :: %s", stats.summary())
+    return batch_ids
+
+
+def _batch_failure_detail(result: Any) -> str:
+    """The reason on an errored result: its ErrorResponse's own type is always "error"; the
+    reason is the inner error object."""
+    err = getattr(result, "error", None)
+    inner = getattr(err, "error", None)
+    detail = getattr(inner, "type", None) or getattr(err, "type", None)
+    if getattr(inner, "message", None):
+        detail = f"{detail} ({inner.message})"
+    return f": {detail}" if detail else ""
 
 
 async def collect_batch(
-    job_names: list[str], poll_seconds: int = 30, max_wait: int = 3600
+    batch_ids: list[str], poll_seconds: int = 30, max_wait: int = 3600
 ) -> LLMStats:
-    """Poll batch jobs and persist their results."""
+    """Poll batches and persist their results."""
     client = _client()
     stats = LLMStats()
     docs_by_id = {str(d["id"]): d for d in await _pending_documents(None)}
 
-    for name in job_names:
+    for batch_id in batch_ids:
         waited = 0
-        job = await asyncio.to_thread(client.batches.get, name=name)
-        while str(job.state) in (
-            "JobState.JOB_STATE_PENDING",
-            "JobState.JOB_STATE_QUEUED",
-            "JobState.JOB_STATE_RUNNING",
-        ):
+        status = (await asyncio.to_thread(client.messages.batches.retrieve, batch_id)).processing_status
+        while status != "ended":
             if waited >= max_wait:
                 log.warning(
-                    "batch %s still %s after %ds; leaving it running", name, job.state, waited
+                    "batch %s still %s after %ds; leaving it running", batch_id, status, waited
                 )
                 break
             await asyncio.sleep(poll_seconds)
             waited += poll_seconds
-            job = await asyncio.to_thread(client.batches.get, name=name)
-
-        if not job.dest or not job.dest.inlined_responses:
-            log.warning("batch %s produced no inlined responses (state=%s)", name, job.state)
+            status = (
+                await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
+            ).processing_status
+        if status != "ended":
             continue
 
+        results = await asyncio.to_thread(lambda b=batch_id: list(client.messages.batches.results(b)))
         dropped = 0
-        for item in job.dest.inlined_responses:
-            doc_id = (item.metadata or {}).get("doc_id")
-            doc = docs_by_id.get(str(doc_id))
+        for item in results:
+            doc = docs_by_id.get(str(item.custom_id))
             if doc is None:
-                # A paid result we can't match back to a pending document: the
-                # metadata round-trip failed, or the doc's comm changed state
-                # between submit and collect. Count and log it loudly rather
-                # than silently discarding results the run paid for.
+                # A paid result we cannot match to a pending document: count and log it
+                # loudly rather than silently discarding what the run paid for.
                 dropped += 1
                 continue
-            if item.error or item.response is None:
+            result = item.result
+            if result.type != "succeeded":
                 stats.failed += 1
-                stats.errors.append(f"doc {doc_id}: batch error {item.error}")
-                await _mark_failed(doc["communication_id"], f"batch error: {item.error}")
+                reason = f"batch {result.type}{_batch_failure_detail(result)}"
+                stats.errors.append(f"doc {doc['id']}: {reason}")
+                await _mark_failed(doc["communication_id"], reason)
                 continue
 
-            usage = item.response.usage_metadata
-            ti = (usage.prompt_token_count or 0) if usage else 0
-            to = (usage.candidates_token_count or 0) if usage else 0
-            stats.tokens_in += ti
-            stats.tokens_out += to
-            stats.cost_usd += cost_of(ti, to, batch=True)
-            # Metered before validation: a batch response that fails the schema
-            # was still billed.
-            await record_usage(
-                "llm_extract",
-                get_settings().gemini_model,
-                tokens_in=ti,
-                tokens_out=to,
-                batch=True,
-                communication_id=doc["communication_id"],
-                document_id=doc["id"],
-                meta={"path": "batch", "job": name},
-            )
-
-            clean, err = validate(item.response.text)
+            message = result.message
+            ti, to = message.usage.input_tokens, message.usage.output_tokens
+            input_kind = "pdf" if (doc["page_count"] or 1) <= pdf_input.MAX_DIRECT_PAGES else "text"
+            await _meter(doc, stats, ti, to, batch=True, path="batch", input_kind=input_kind)
+            text = next((b.text for b in message.content if b.type == "text"), None)
+            if message.stop_reason == "max_tokens":
+                clean, err = None, "response hit max_tokens"
+            else:
+                clean, err = validate(text)
             if err:
                 stats.failed += 1
-                stats.errors.append(f"doc {doc_id}: {err}")
+                stats.errors.append(f"doc {doc['id']}: {err}")
                 await _mark_failed(doc["communication_id"], f"LLM schema violation: {err}")
                 continue
 
@@ -555,7 +748,7 @@ async def collect_batch(
 
         if dropped:
             msg = (
-                f"batch {name}: {dropped} response(s) could not be matched to a "
+                f"batch {batch_id}: {dropped} response(s) could not be matched to a "
                 f"pending document and were dropped"
             )
             log.warning(msg)
