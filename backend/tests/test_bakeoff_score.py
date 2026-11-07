@@ -149,7 +149,7 @@ def _write_arm(run_dir: pathlib.Path, arm, lines):
     d = run_dir / arm
     d.mkdir(parents=True, exist_ok=True)
     (d / "results.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
-    if arm in eb.LIVE_ARMS:
+    if eb.arm_mode(arm) == "live":
         (d / "live.json").write_text(
             json.dumps(
                 {
@@ -606,7 +606,7 @@ async def test_run_judge_stops_before_a_call_whose_worst_case_could_pass_the_cap
 
 async def test_run_judge_counts_spend_from_another_run_of_the_bakeoff(judge_env, monkeypatch):
     other = bs.eb.BAKEOFF_ROOT / "20261101-0900"
-    _write_arm(other, "G", [_line("G", 1, _out(), cost=19.99)])
+    _write_arm(other, "G", [_line("G", 1, _out(), cost=bs.eb.CAP_USD - 0.01)])
 
     with pytest.raises(bs.eb.SpendCapExceeded, match="cap"):
         await bs.run_judge(judge_env.run_dir, n_hard=4, n_random=2)
@@ -701,7 +701,7 @@ def test_the_judge_estimate_is_shown_before_anything_is_sent(tmp_path, monkeypat
     out = capsys.readouterr().out
     assert code == 0
     assert "judge: 6 call(s)" in out and "estimate $" in out and "worst case $" in out
-    assert "cap $20.00" in out
+    assert f"cap ${bs.eb.CAP_USD:.2f}" in out
     assert not (tmp_path / "judge.jsonl").exists()
 
 
@@ -715,3 +715,434 @@ def test_the_scorer_and_report_commands_take_an_arms_option(tmp_path, capsys):
 
     assert report.main(["--run-dir", str(tmp_path), "--arms", "G", "S-text"]) == 0
     assert "S-pdf" not in (tmp_path / "report.md").read_text().split("## Judge")[0]
+
+
+# --------------------------------------------------------------------------- six-way PDF judge
+
+import base64  # noqa: E402
+import re  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+SIX = bs.PDF6_ARMS
+NAMED = tuple(a for a in SIX if a != "G")  # "G" is a letter that appears in any prompt
+PDF = base64.standard_b64encode(b"%PDF-1.4 judge me").decode()
+
+
+def _verdict6(labels):
+    order = sorted(labels)
+    status = {lab: "partial" for lab in order}
+    status[order[0]] = "correct"
+    status[order[-1]] = "unsupported"
+    return {
+        "fields": {f: {"best": order[0], "status": dict(status)} for f in bs.PDF6_FIELDS},
+        "ranking": order,
+        "unsupported_claims": [
+            {"label": lab, "claims": (["invented a torque value"] if lab == order[-1] else [])}
+            for lab in order
+        ],
+        "reasoning": "A states the fix directly.",
+    }
+
+
+def _labels_in(content):
+    text = content if isinstance(content, str) else content[-1]["text"]
+    return sorted(set(re.findall(r"^=== OUTPUT ([A-F]) ===$", text, flags=re.M)))
+
+
+@pytest.fixture
+def pdf6_env(tmp_path, monkeypatch):
+    """Six arms over 20 documents, a sample file with urls and pages, a faked judge and PDFs."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _three_arm_run(run, n=20, arms=SIX)
+    sample = tmp_path / "sample.json"
+    sample.write_text(
+        json.dumps(
+            [
+                {"doc_id": i, "url": f"https://static.nhtsa.gov/{i}.pdf", "page_count": 3}
+                for i in range(1, 21)
+            ]
+        )
+    )
+    monkeypatch.setattr(bs.eb, "SAMPLE_PATH", sample)
+    calls, usage = [], []
+
+    def fake_generate(content, schema):
+        calls.append({"content": content, "schema": schema})
+        return {"verdict": _verdict6(_labels_in(content)), "tokens_in": 9000, "tokens_out": 3000}
+
+    async def fake_record_usage(kind, model, **kw):
+        usage.append({"kind": kind, "model": model, **kw})
+        return 0.0
+
+    async def fake_pdfs(entries):
+        return {e["doc_id"]: (PDF, None) for e in entries}
+
+    monkeypatch.setattr(bs, "_generate_pdf6", fake_generate)
+    monkeypatch.setattr(bs, "record_usage", fake_record_usage)
+    monkeypatch.setattr(bs.eb, "_fetch_pdfs", fake_pdfs)
+    return SimpleNamespace(
+        run_dir=run, calls=calls, usage=usage, sample=sample, monkeypatch=monkeypatch
+    )
+
+
+def _lines(path):
+    return [json.loads(x) for x in path.read_text().split("\n") if x.strip()]
+
+
+def test_six_arms_get_six_shuffled_labels_and_the_mapping_restores_every_arm_name():
+    mapping = bs.label_arms(7, list(SIX), labels=bs.LABELS6)
+
+    assert sorted(mapping) == list("ABCDEF") and sorted(mapping.values()) == sorted(SIX)
+    assert mapping == bs.label_arms(7, list(reversed(SIX)), labels=bs.LABELS6)
+    ranking = list("FEDCBA")
+    assert [mapping[x] for x in ranking] == [mapping[x] for x in reversed("ABCDEF")]
+    assert (
+        len({tuple(bs.label_arms(d, list(SIX), labels=bs.LABELS6).values()) for d in range(40)})
+        > 20
+    )
+    with pytest.raises(ValueError, match="labels"):
+        bs.label_arms(1, list(SIX))  # the five-way alphabet cannot name six arms
+
+
+def test_the_six_way_prompt_blinds_the_arms_and_says_which_source_it_has():
+    mapping = bs.label_arms(3, list(SIX), labels=bs.LABELS6)
+    outputs = {arm: _out(summary=f"summary from {i}") for i, arm in enumerate(SIX)}
+
+    pdf = bs.build_pdf6_prompt(mapping, outputs)
+    text = bs.build_pdf6_prompt(mapping, outputs, excerpt="the bulletin says x")
+
+    for prompt in (pdf, text):
+        assert "=== OUTPUT F ===" in prompt
+        assert not any(arm in prompt for arm in NAMED)
+    assert "attached" in pdf and "=== SOURCE ===" not in pdf
+    assert "=== SOURCE ===" in text and "the bulletin says x" in text
+
+
+def test_the_six_way_schema_asks_a_best_label_and_a_status_per_arm_for_every_field():
+    schema = bs.pdf6_schema("ABCD")
+
+    assert schema["additionalProperties"] is False
+    assert list(schema["properties"]["fields"]["properties"]) == list(bs.PDF6_FIELDS)
+    field = schema["properties"]["fields"]["properties"]["remedy"]
+    assert field["properties"]["best"]["enum"] == ["A", "B", "C", "D", "tie"]
+    assert sorted(field["properties"]["status"]["properties"]) == list("ABCD")
+    assert field["properties"]["status"]["properties"]["A"]["enum"] == [
+        "correct",
+        "partial",
+        "missing_but_in_source",
+        "correctly_empty",
+        "unsupported",
+    ]
+    assert {"ranking", "unsupported_claims", "reasoning"} <= set(schema["properties"])
+
+    def objects(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                yield node
+            for v in node.values():
+                yield from objects(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from objects(v)
+
+    assert all(o["additionalProperties"] is False for o in objects(schema))
+
+
+def test_only_documents_with_four_valid_arms_are_judged_and_the_split_is_hard_plus_random(
+    pdf6_env,
+):
+    # Documents 1-4 are valid in only three arms.
+    for arm in SIX[:3]:
+        rows = _lines(pdf6_env.run_dir / arm / "results.jsonl")
+        for r in rows:
+            if r["doc_id"] <= 4:
+                r.update(output=None, valid=False, error="pdf unavailable")
+        _write_arm(pdf6_env.run_dir, arm, rows)
+
+    plan = bs.plan_pdf6(pdf6_env.run_dir, n_hard=6, n_random=4)
+
+    ids = [j.doc_id for j in plan.jobs]
+    assert len(ids) == 10 and all(i > 4 for i in ids)
+    assert sorted(j.stratum for j in plan.jobs).count("hard") == 6
+    assert all(len(j.labels) == 6 for j in plan.jobs)
+    assert plan.out_dir == pdf6_env.run_dir / "judge-pdf6"
+
+
+async def test_the_judge_reads_the_pdf_blind_and_writes_only_into_its_own_folder(pdf6_env):
+    run = pdf6_env.run_dir
+    # The five-way judge already covered every document the six-way judge will pick.
+    picked = [j.doc_id for j in bs.plan_pdf6(run, n_hard=6, n_random=4).jobs]
+    five = "".join(
+        json.dumps({"doc_id": d, "verdict": None, "error": "x", "cost_usd": 0.1}) + "\n"
+        for d in picked
+    )
+    (run / "judge.jsonl").write_text(five)
+    (run / "judge_labels.json").write_text('{"5": {"A": "G"}}')
+
+    out = await bs.run_judge_pdf6(run, n_hard=6, n_random=4)
+
+    assert out["judged"] == 10 and out["skipped"] == 0, "five-way docs are judged again"
+    assert (run / "judge.jsonl").read_text() == five, "the five-way files are untouched"
+    assert (run / "judge_labels.json").read_text() == '{"5": {"A": "G"}}'
+    folder = run / "judge-pdf6"
+    lines = _lines(folder / "judge.jsonl")
+    assert len(lines) == 10 and all(x["error"] is None and x["source"] == "pdf" for x in lines)
+    assert {x["doc_id"] for x in lines} == set(picked)
+    labels = json.loads((folder / "judge_labels.json").read_text())
+    assert len(labels) == 10
+    assert all(sorted(m) == list("ABCDEF") for m in labels.values())
+    for call in pdf6_env.calls:
+        block, text = call["content"]
+        assert block["type"] == "document" and block["source"]["data"] == PDF
+        assert block["source"]["media_type"] == "application/pdf"
+        assert not any(arm in text["text"] for arm in NAMED)
+        assert sorted(call["schema"]["properties"]["fields"]["properties"]) == sorted(
+            bs.PDF6_FIELDS
+        )
+    [first, *_] = pdf6_env.usage
+    assert first["model"] == "claude-opus-5-5" and first["batch"] is False
+    assert first["meta"]["bakeoff"] == "judge-pdf6" and len(pdf6_env.usage) == 10
+
+
+async def test_a_rerun_skips_documents_already_in_the_six_way_file_only(pdf6_env):
+    await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=3, n_random=3)
+    before = len(pdf6_env.calls)
+
+    again = await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=3, n_random=3)
+
+    assert again["judged"] == 0 and again["skipped"] == 6 and len(pdf6_env.calls) == before
+
+
+async def test_the_excerpt_is_the_fallback_and_each_line_says_which_source_was_used(pdf6_env):
+    async def pdfs(entries):
+        out = {}
+        for e in entries:
+            out[e["doc_id"]] = (
+                (None, "pdf too large (30000000 bytes > 24117248)")
+                if e["doc_id"] % 2
+                else (PDF, None)
+            )
+        return out
+
+    pdf6_env.monkeypatch.setattr(bs.eb, "_fetch_pdfs", pdfs)
+    pdf6_env.sample.write_text(
+        json.dumps(
+            [
+                {"doc_id": i, "url": f"u{i}", "page_count": 601 if i == 20 else 3}
+                for i in range(1, 21)
+            ]
+        )
+    )
+
+    await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=20, n_random=0)
+
+    lines = {x["doc_id"]: x for x in _lines(pdf6_env.run_dir / "judge-pdf6" / "judge.jsonl")}
+    assert lines[3]["source"] == "excerpt" and "too large" in lines[3]["source_reason"]
+    assert lines[4]["source"] == "pdf" and lines[4]["source_reason"] is None
+    assert lines[20]["source"] == "excerpt" and "too many pages" in lines[20]["source_reason"]
+    excerpt_call = next(c for c in pdf6_env.calls if isinstance(c["content"], str))
+    assert (
+        "=== SOURCE ===" in excerpt_call["content"]
+        and "Source text for document" in excerpt_call["content"]
+    )
+    summary = bs.summarize_pdf6(pdf6_env.run_dir / "judge-pdf6")
+    assert summary["sources"] == {"pdf": 9, "excerpt": 11}
+
+
+async def test_a_pdf_the_api_rejects_is_retried_once_on_the_excerpt(pdf6_env):
+    import httpx
+
+    def reject_pdfs(content, schema):
+        if not isinstance(content, str):
+            raise anthropic.BadRequestError(
+                "document too long",
+                response=httpx.Response(400, request=httpx.Request("POST", "https://x.test")),
+                body=None,
+            )
+        return {"verdict": _verdict6(_labels_in(content)), "tokens_in": 100, "tokens_out": 50}
+
+    pdf6_env.monkeypatch.setattr(bs, "_generate_pdf6", reject_pdfs)
+
+    await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=2, n_random=0)
+
+    lines = _lines(pdf6_env.run_dir / "judge-pdf6" / "judge.jsonl")
+    assert all(x["source"] == "excerpt" and "pdf rejected" in x["source_reason"] for x in lines)
+    assert all(x["error"] is None for x in lines)
+    assert len(pdf6_env.usage) == 2, "only the call that was answered is metered"
+
+
+def test_the_judge_call_uses_the_existing_judge_model_and_settings_with_a_document_block(
+    monkeypatch,
+):
+    seen = {}
+
+    def create(**kw):
+        seen.update(kw)
+        return SimpleNamespace(
+            usage=SimpleNamespace(input_tokens=11, output_tokens=7),
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=json.dumps({"ranking": ["A"]}))],
+        )
+
+    import src.anthropic_client as ac
+
+    monkeypatch.setattr(
+        ac, "client", lambda: SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+    schema = bs.pdf6_schema("ABCD")
+    content = [bs._pdf_block(PDF), {"type": "text", "text": "judge"}]
+
+    got = bs._generate_pdf6(content, schema)
+
+    assert seen["model"] == bs.JUDGE_MODEL == "claude-opus-5-5"
+    assert seen["max_tokens"] == 16_000 and seen["thinking"] == {"type": "adaptive"}
+    assert seen["output_config"]["effort"] == "high"
+    assert seen["output_config"]["format"] == {"type": "json_schema", "schema": schema}
+    assert seen["messages"][0]["content"][0]["type"] == "document"
+    assert got["verdict"] == {"ranking": ["A"]} and (got["tokens_in"], got["tokens_out"]) == (11, 7)
+
+
+async def test_the_judge_refuses_when_pairwise_and_probe_spend_leave_no_room(pdf6_env):
+    run = bs.eb.BAKEOFF_ROOT / "20261106-2117"
+    (run / "pairwise-G-vs-Hpdf").mkdir(parents=True)
+    (run / "pairwise-G-vs-Hpdf" / "verdicts.jsonl").write_text(
+        json.dumps({"doc_id": 1, "cost_usd": bs.eb.CAP_USD - 0.01}) + "\n"
+    )
+    (run / "probe-2027").mkdir()
+    (run / "probe-2027" / "results.json").write_text(json.dumps({"A": {"cost_true": 0.009}}))
+
+    with pytest.raises(bs.eb.SpendCapExceeded, match="cap"):
+        await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=2, n_random=2)
+
+    assert pdf6_env.calls == [] and not (pdf6_env.run_dir / "judge-pdf6" / "judge.jsonl").exists()
+
+
+async def test_the_six_way_judge_stops_before_a_call_whose_worst_case_would_pass_the_cap(pdf6_env):
+    plan = bs.plan_pdf6(pdf6_env.run_dir, n_hard=3, n_random=0)
+    assert plan.worst_case > plan.estimate > 0
+    # Room for the estimate and the first worst case, not for a second one after the first
+    # call has been paid for.
+    pdf6_env.monkeypatch.setattr(bs.eb, "CAP_USD", plan.spent + plan.estimate + 0.001)
+
+    out = await bs.run_judge_pdf6(pdf6_env.run_dir, n_hard=3, n_random=0)
+
+    assert out["stopped_at_cap"] is True and len(pdf6_env.calls) == 1, "the second would not fit"
+
+
+def test_a_verdict_that_misses_a_label_or_a_field_is_unusable_not_a_crash():
+    labels = {"A": "G", "B": "S-pdf", "C": "H-pdf-live", "D": "GL-pdf-high"}
+    good = _verdict6(list(labels))
+
+    assert bs._check_pdf6_verdict(good, labels) is None
+    short = {**good, "ranking": ["A", "B", "C"]}
+    assert "not a ranking" in bs._check_pdf6_verdict(short, labels)
+    no_field = {**good, "fields": {k: v for k, v in good["fields"].items() if k != "remedy"}}
+    assert "remedy" in bs._check_pdf6_verdict(no_field, labels)
+    bad_status = json.loads(json.dumps(good))
+    bad_status["fields"]["summary"]["status"]["A"] = "perfect"
+    assert "unknown status" in bs._check_pdf6_verdict(bad_status, labels)
+    assert bs._check_pdf6_verdict(None, labels) == "no verdict"
+
+
+def test_the_summary_counts_wins_ranks_best_status_and_claims_and_survives_a_ragged_verdict(
+    tmp_path,
+):
+    folder = tmp_path / "judge-pdf6"
+    folder.mkdir()
+    labels = {"1": {"A": "G", "B": "S-pdf", "C": "H-pdf-live", "D": "GL-pdf-high"}}
+    labels["2"] = {"A": "S-pdf", "B": "G", "C": "GL-pdf-high", "D": "H-pdf-live"}
+    labels["3"] = {"A": "G", "B": "S-pdf", "C": "H-pdf-live", "D": "GL-pdf-high"}
+    (folder / "judge_labels.json").write_text(json.dumps(labels))
+    ragged = {
+        "ranking": ["Z", "B"],
+        "fields": {"remedy": {"best": "tie", "status": {"Q": "correct"}}},
+    }
+    rows = [
+        {"doc_id": 1, "verdict": _verdict6("ABCD"), "source": "pdf", "cost_usd": 1.0},
+        {"doc_id": 2, "verdict": _verdict6("ABCD"), "source": "excerpt", "cost_usd": 0.5},
+        {"doc_id": 3, "verdict": ragged, "source": "pdf", "cost_usd": 0.25},
+        {"doc_id": 4, "verdict": None, "error": "boom", "source": "pdf", "cost_usd": 0.0},
+    ]
+    (folder / "judge.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    s = bs.summarize_pdf6(folder)
+
+    assert s["judged"] == 3 and s["errors"] == 1 and s["sources"] == {"pdf": 3, "excerpt": 1}
+    assert s["wins"]["G"] == 1 and s["wins"]["S-pdf"] == 2, "the ragged verdict still ranks B"
+    assert s["mean_rank"]["G"] == pytest.approx((1 + 2) / 2)
+    assert s["mean_rank"]["S-pdf"] == pytest.approx((2 + 1 + 1) / 3)
+    assert s["field_best"]["remedy"]["G"] == 1 and s["field_best"]["remedy"]["S-pdf"] == 1
+    assert s["field_best"]["remedy"]["tie"] == 1
+    assert s["field_status"]["remedy"]["G"] == {"correct": 1, "partial": 1}
+    assert s["field_status"]["remedy"]["GL-pdf-high"] == {"partial": 1, "unsupported": 1}
+    assert (
+        s["unsupported_claims"]["GL-pdf-high"] == 1 and s["unsupported_claims"]["H-pdf-live"] == 1
+    )
+    assert s["unsupported_claims"]["G"] == 0
+    assert s["usd"] == pytest.approx(1.75)
+
+
+def test_the_estimate_command_prints_the_plan_and_the_cap_and_calls_nothing(pdf6_env, capsys):
+    code = bs.main(
+        [
+            "--run-dir",
+            str(pdf6_env.run_dir),
+            "--judge-pdf",
+            "--estimate",
+            "--n-hard",
+            "3",
+            "--n-random",
+            "3",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0 and "judge-pdf6: 6 call(s)" in out and "reading the PDF" in out
+    assert "estimate $" in out and f"${bs.eb.CAP_USD:.2f} cap" in out and "fits under" in out
+    assert pdf6_env.calls == [] and not (pdf6_env.run_dir / "judge-pdf6").exists()
+
+
+def test_the_judge_command_writes_score_json_into_the_chosen_folder(pdf6_env, capsys):
+    code = bs.main(
+        [
+            "--run-dir",
+            str(pdf6_env.run_dir),
+            "--judge-pdf",
+            "--judge-dir",
+            "judge-elsewhere",
+            "--n-hard",
+            "3",
+            "--n-random",
+            "2",
+        ]
+    )
+
+    folder = pdf6_env.run_dir / "judge-elsewhere"
+    assert code == 0
+    assert {p.name for p in folder.iterdir()} == {"judge.jsonl", "judge_labels.json", "score.json"}
+    assert json.loads((folder / "score.json").read_text())["judged"] == 5
+    assert not (pdf6_env.run_dir / "judge-pdf6").exists()
+    assert bs.main(["--run-dir", str(pdf6_env.run_dir), "--judge-dir", "x"]) == 2
+
+
+async def test_the_summary_is_plain_text_tables_with_both_gemini_prices_and_no_html(pdf6_env):
+    run = pdf6_env.run_dir
+    await bs.run_judge_pdf6(run, n_hard=4, n_random=2)
+    for arm in SIX:  # give every arm the live/batch bookkeeping a real run has
+        rows = _lines(run / arm / "results.jsonl")
+        _write_arm(run, arm, rows)
+
+    path = report.write_pdf6_summary(run)
+
+    text = path.read_text()
+    assert path == run / "judge-pdf6" / "summary.md"
+    assert "ARMS: validity and cost" in text and "EMPTY RATE per field" in text
+    assert "APPLICABILITY recall" in text and "Best per field" in text
+    assert "Status per field and arm" in text and "EXAMPLES where the arms differ most" in text
+    assert "2026 (to 2026-12-31)" in text and "\n2027" in text
+    assert "|" not in text.split("EXAMPLES")[0], "plain aligned columns, not markdown pipes"
+    assert "Source per document: pdf 6" in text
+    assert "(the judge's letters: A=" in text.split("EXAMPLES")[1], "judge text maps back to arms"
+    assert not (run / "report.html").exists() and not (run / "report.md").exists()
+    assert report.main(["--run-dir", str(run), "--pdf6"]) == 0

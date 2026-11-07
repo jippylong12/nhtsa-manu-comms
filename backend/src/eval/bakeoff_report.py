@@ -12,6 +12,10 @@ Sonnet subset (the documents every arm ran) so each shows all five outputs. The 
 one file with inline CSS and no script, readable in light and dark; its column grid
 wraps to fewer columns on narrow screens. Arms with no results yet are named in a
 "Missing arms" line, and the canceled batch arms in a "Superseded arms" line.
+
+``--pdf6`` writes only ``<run>/judge-pdf6/summary.md``: the six-way PDF judge's results as
+plain-text tables next to the per-arm objective scores, all over the Sonnet subset so every
+arm is measured on the same documents. ``report.html`` is not touched.
 """
 
 import argparse
@@ -454,6 +458,289 @@ def render_html(data: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+# --------------------------------------------------------------------------- six-way summary
+
+SUMMARY_NAME = "summary.md"
+EXAMPLE_VALUE_CHARS = 90
+EXAMPLE_REASON_CHARS = 300
+_STATUS_ORDER = ("correct", "partial", "missing_but_in_source", "correctly_empty", "unsupported")
+_STATUS_SHORT = {
+    "correct": "ok",
+    "partial": "part",
+    "missing_but_in_source": "miss",
+    "correctly_empty": "empty",
+    "unsupported": "unsup",
+}
+
+
+def _text_table(head: tuple[str, ...], rows: list[list[str]]) -> str:
+    """Aligned plain-text columns: first column left, the rest right."""
+    grid = [list(head), *[[str(c) for c in r] for r in rows]]
+    widths = [max(len(r[i]) for r in grid) for i in range(len(head))]
+
+    def fmt(r: list[str]) -> str:
+        cells = [r[0].ljust(widths[0])] + [r[i].rjust(widths[i]) for i in range(1, len(r))]
+        return "  ".join(cells).rstrip()
+
+    return "\n".join([fmt(grid[0]), "  ".join("-" * w for w in widths), *map(fmt, grid[1:])])
+
+
+def _live_and_batch_per_1000(
+    arm: str, a: dict[str, Any]
+) -> tuple[Optional[float], Optional[float]]:
+    """``(live $/1k, batch-equivalent $/1k)``: a live arm's recorded cost is the live one and
+    half of it is the batch one; a batch arm's recorded cost is the batch one and double it
+    is what the same calls cost live."""
+    per = a["cost"]["usd_per_1000"]
+    if per is None:
+        return None, None
+    if a["mode"] == "live":
+        return per, per * eb.pricing.BATCH_DISCOUNT
+    return per / eb.pricing.BATCH_DISCOUNT, per
+
+
+def _error_reasons(rows: list[dict]) -> str:
+    counts: dict[str, int] = {}
+    for r in rows:
+        if r.get("error"):
+            key = str(r["error"]).split(":")[0].split("(")[0].strip()[:40]
+            counts[key] = counts.get(key, 0) + 1
+    return "; ".join(f"{n} x {k}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])) or "-"
+
+
+def _pick_examples(
+    run_dir: pathlib.Path, out_dir: pathlib.Path, arms: list[str], count: int = 3
+) -> list[str]:
+    """Up to ``count`` documents where the arms differ most, each as a few short lines:
+    the document and field, each arm's status and value, and the judge's reason."""
+    lines, labels = bs.load_judge(out_dir)
+    outputs = bs.valid_outputs_by_doc(bs.load_results(run_dir, arms))
+    scored: list[tuple[tuple, int, str, dict, dict]] = []
+    for line in lines:
+        verdict, mapping = line.get("verdict"), labels.get(line["doc_id"])
+        if not isinstance(verdict, dict) or not mapping:
+            continue
+        for field in bs.PDF6_FIELDS:
+            entry = (verdict.get("fields") or {}).get(field) or {}
+            status = {
+                mapping[lab]: st
+                for lab, st in (entry.get("status") or {}).items()
+                if lab in mapping
+            }
+            if len(status) < 2:
+                continue
+            bad = sum(1 for st in status.values() if st in ("unsupported", "missing_but_in_source"))
+            ok = sum(1 for st in status.values() if st == "correct")
+            key = (len(set(status.values())), min(bad, ok), line.get("source") == "pdf")
+            scored.append((key, line["doc_id"], field, status, verdict))
+    picked, seen = [], set()
+    for key, doc_id, field, status, verdict in sorted(
+        scored, key=lambda t: (t[0], -t[1]), reverse=True
+    ):
+        if doc_id in seen:
+            continue
+        seen.add(doc_id)
+        mapping = labels[doc_id]
+        arm_lines = []
+        for arm in sorted(status, key=eb.ALL_ARMS.index):
+            value = _field_text(outputs.get(doc_id, {}).get(arm, {}), field)
+            arm_lines.append(
+                f"  {arm}: {_STATUS_SHORT[status[arm]]}, {value[:EXAMPLE_VALUE_CHARS].strip()}"
+            )
+        reason = str(verdict.get("reasoning") or "")[:EXAMPLE_REASON_CHARS]
+        letters = " ".join(f"{label}={arm}" for label, arm in sorted(mapping.items()))
+        picked.append(
+            f"doc {doc_id}, {field}\n"
+            + "\n".join(arm_lines)
+            + f"\n  judge: {reason}\n  (the judge's letters: {letters})"
+        )
+        if len(picked) == count:
+            break
+    return picked
+
+
+def render_pdf6_summary(
+    run_dir: pathlib.Path, out_dir: pathlib.Path, arms: Optional[Iterable[str]] = None
+) -> str:
+    """The six-way summary as plain text. Objective figures are over the Sonnet subset (the
+    documents every arm ran), not each arm's own documents, so they compare."""
+    run_dir, out_dir = pathlib.Path(run_dir), pathlib.Path(out_dir)
+    wanted = list(arms) if arms else list(bs.PDF6_ARMS)
+    subset = bs.sonnet_doc_ids()
+    score = bs.score_run(run_dir, wanted, doc_ids=subset)
+    results = bs.load_results(run_dir, wanted)
+    names = score["arms_present"]
+    judge = bs.summarize_pdf6(out_dir)
+    f = _num
+
+    out = [
+        f"Six-way PDF judge summary, run {run_dir.name}",
+        f"Arms: {', '.join(names)}"
+        + (f"  (missing: {', '.join(score['arms_missing'])})" if score["arms_missing"] else ""),
+        f"Objective figures over the {len(subset) if subset else 'all'}-document Sonnet subset.",
+        "",
+        "ARMS: validity and cost",
+    ]
+    rows = []
+    for arm in names:
+        a = score["arms"][arm]
+        c = a["cost"]
+        live, batch = _live_and_batch_per_1000(arm, a)
+        billed = c["billed"] or 1
+        rows.append(
+            [
+                arm,
+                str(a["model"]),
+                a["input"],
+                f"{a['valid']}/{a['n']}",
+                _pct(a["validity"]),
+                f"{c['tokens_in'] / billed:,.0f}",
+                f"{c['tokens_out'] / billed:,.0f}",
+                _usd(c["usd"], 4),
+                _usd(c["usd"] / billed, 4) if c["billed"] else "—",
+                _usd(live, 2),
+                _usd(batch, 2),
+            ]
+        )
+    out.append(
+        _text_table(
+            (
+                "arm",
+                "model",
+                "input",
+                "valid",
+                "validity",
+                "tok in/doc",
+                "tok out/doc",
+                "spent",
+                "$/doc",
+                "live $/1k",
+                "batch-eq $/1k",
+            ),
+            rows,
+        )
+    )
+    flash = "GF-pdf-low"
+    if flash in score["arms"] and score["arms"][flash]["cost"]["billed"]:
+        c = score["arms"][flash]["cost"]
+        per_1000 = {
+            year: (c["tokens_in"] * rate.input_per_token + c["tokens_out"] * rate.output_per_token)
+            / c["billed"]
+            * 1000
+            for year, rate in (
+                ("2026 (to 2026-12-31)", eb.GEMINI_FLASH_RATE_2026),
+                ("2027", eb.GEMINI_FLASH_RATE_2027),
+            )
+        }
+        out += ["", "gemini-3.8-flash price, same tokens (GF-pdf-low):"]
+        out.append(
+            _text_table(
+                ("price", "live $/1k", "batch-eq $/1k"),
+                [
+                    [y, _usd(v, 2), _usd(v * eb.pricing.BATCH_DISCOUNT, 2)]
+                    for y, v in per_1000.items()
+                ],
+            )
+        )
+    out += ["", "Errors (reasons):"]
+    out += [f"  {arm}: {_error_reasons(results.get(arm, []))}" for arm in names]
+
+    out += ["", "EMPTY RATE per field (valid outputs)"]
+    out.append(
+        _text_table(
+            ("arm", *bs.FIELDS),
+            [
+                [arm, *[_pct(score["arms"][arm]["empty_rates"][fld]) for fld in bs.FIELDS]]
+                for arm in names
+            ],
+        )
+    )
+    out += ["", "APPLICABILITY recall vs NHTSA associatedProducts"]
+    out.append(
+        _text_table(
+            ("arm", "recall", "years", "models", "docs"),
+            [
+                [
+                    arm,
+                    _pct(score["arms"][arm]["applicability"]["recall"]),
+                    _pct(score["arms"][arm]["applicability"]["year_recall"]),
+                    _pct(score["arms"][arm]["applicability"]["model_recall"]),
+                    str(score["arms"][arm]["applicability"]["n"]),
+                ]
+                for arm in names
+            ],
+        )
+    )
+
+    jnames = list(judge["wins"])
+    out += [
+        "",
+        f"JUDGE: {judge['judged']} documents judged blind by {bs.JUDGE_MODEL} reading the PDF "
+        f"({judge['errors']} unusable), ${judge['usd']:.2f}",
+        "Source per document: "
+        + (", ".join(f"{k} {v}" for k, v in sorted(judge["sources"].items())) or "none"),
+        "",
+        "Overall ranking",
+    ]
+    out.append(
+        _text_table(
+            ("arm", "wins", "mean rank", "unsupported claims", "docs with any"),
+            [
+                [
+                    arm,
+                    str(judge["wins"][arm]),
+                    f(judge["mean_rank"][arm]),
+                    str(judge["unsupported_claims"][arm]),
+                    str(judge["unsupported_documents"][arm]),
+                ]
+                for arm in jnames
+            ],
+        )
+    )
+    out += ["", "Best per field (judge's pick; tie = no clear best)"]
+    out.append(
+        _text_table(
+            ("field", *jnames, "tie"),
+            [
+                [
+                    fld,
+                    *[str(judge["field_best"][fld][a]) for a in jnames],
+                    str(judge["field_best"][fld]["tie"]),
+                ]
+                for fld in bs.PDF6_FIELDS
+            ],
+        )
+    )
+    out += [
+        "",
+        "Status per field and arm: " + " / ".join(f"{_STATUS_SHORT[s]}={s}" for s in _STATUS_ORDER),
+    ]
+    rows = []
+    for fld in bs.PDF6_FIELDS:
+        for arm in jnames:
+            counts = judge["field_status"][fld].get(arm, {})
+            rows.append([fld, arm, *[str(counts.get(s, 0)) for s in _STATUS_ORDER]])
+    out.append(_text_table(("field", "arm", *[_STATUS_SHORT[s] for s in _STATUS_ORDER]), rows))
+
+    examples = _pick_examples(run_dir, out_dir, [a for a in jnames if a in names] or names)
+    out += ["", "EXAMPLES where the arms differ most"]
+    out += examples or ["  (none: no usable verdicts)"]
+    return "\n".join(out) + "\n"
+
+
+def write_pdf6_summary(
+    run_dir: pathlib.Path,
+    out_dir: Optional[pathlib.Path] = None,
+    arms: Optional[Iterable[str]] = None,
+) -> pathlib.Path:
+    """Write ``summary.md`` into the six-way judge's folder (default ``run_dir/judge-pdf6``)."""
+    run_dir = pathlib.Path(run_dir)
+    out_dir = pathlib.Path(out_dir) if out_dir else run_dir / bs.PDF6_DIR
+    path = out_dir / SUMMARY_NAME
+    path.write_text(render_pdf6_summary(run_dir, out_dir, arms))
+    return path
+
+
 # --------------------------------------------------------------------------- entry points
 
 
@@ -480,10 +767,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         metavar="ARM",
         help=f"arms to report (default: {' '.join(eb.DEFAULT_ARMS)}); commas or spaces",
     )
+    p.add_argument(
+        "--pdf6",
+        action="store_true",
+        help=f"write only {bs.PDF6_DIR}/{SUMMARY_NAME} (the six-way PDF judge summary)",
+    )
+    p.add_argument(
+        "--judge-dir",
+        type=pathlib.Path,
+        help=f"with --pdf6: the judge folder, relative to the run dir (default {bs.PDF6_DIR})",
+    )
     args = p.parse_args(argv)
     run_dir = args.run_dir or eb.latest_run_dir()
     try:
         arms = bs.parse_arm_names(args.arms)
+        if args.pdf6:
+            if run_dir is None or not bs.load_reference(run_dir):
+                print("error: reference.json missing; run bakeoff_score first", file=sys.stderr)
+                return 2
+            out_dir = run_dir / (args.judge_dir or bs.PDF6_DIR)
+            print(write_pdf6_summary(run_dir, out_dir, arms))
+            return 0
         if run_dir is None or not bs.present_arms(run_dir, arms):
             print("error: no run directory with results.jsonl; pass --run-dir", file=sys.stderr)
             return 2

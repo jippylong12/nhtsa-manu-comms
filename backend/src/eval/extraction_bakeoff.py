@@ -11,6 +11,9 @@ the production extractions and a judge.
     H-pdf-live   claude-haiku-5-5,      the PDF itself   Messages API, all 300 documents
     S-text       claude-sonnet-5-5,     extracted text   Messages API, the 100-document subset
     S-pdf        claude-sonnet-5-5,     the PDF itself   Messages API, the 100-document subset
+    GL-pdf-high  gemini-3.5-flash-lite, the PDF, thinking high   Gemini API, the 100-doc subset
+    GF-pdf-low   gemini-3.8-flash,      the PDF, thinking low    Gemini API, the 100-doc subset
+    H-pdf-high   claude-haiku-5-5,      the PDF, effort high     Messages API, the 100-doc subset
 
 Every arm uses the production prompt and response schema from ``src.jobs.llm``
 unchanged. The two Haiku batches sat queued for 25+ minutes and were canceled; the
@@ -22,6 +25,7 @@ price. Run as ``python -m src.eval.extraction_bakeoff <command>``:
     submit --arm G|H-text|H-pdf|all                      (batch arms)
     collect [--wait SECONDS]    write results.jsonl for every batch arm that ended
     run-live --arm H-text-live|H-pdf-live|S-text|S-pdf|all-live [--concurrency N]
+    run-live --arm GL-pdf-high|GF-pdf-low|H-pdf-high|pdf3 [--concurrency N]
     status [--remote]           estimates, batch state and spend
 
 State lives in ``backend/.bakeoff/<run>/<arm>/`` (``requests.jsonl``, ``batch.json``,
@@ -47,6 +51,8 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 import anthropic
+import httpx
+from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
 from src.jobs import extract, llm
@@ -57,9 +63,10 @@ log = logging.getLogger("extraction_bakeoff")
 
 # --------------------------------------------------------------------------- constants
 
-# Raised from 10 by Marcus 2026-11-06 for the Sonnet arms. One budget for the whole
-# experiment: the arms and the judge, across every run directory.
-CAP_USD = 20.0
+# Raised from 10 to 20 and then to 30 by Marcus on 2026-11-06 (Sonnet arms, then the three
+# new PDF arms and the six-way PDF judge). One budget for the whole experiment: the arms,
+# every judge, the pairwise judge and the probe, across every run directory.
+CAP_USD = 30.0
 SEED = 20261106
 SAMPLE_SIZE = 300
 MIN_PER_CELL = 5
@@ -70,6 +77,17 @@ HAIKU_MODEL = "claude-haiku-5-5"
 SONNET_MODEL = "claude-sonnet-5-5"
 HAIKU_MAX_TOKENS = 8192  # every Anthropic arm, Sonnet included, so the arms cannot drift
 SONNET_SUBSET_SIZE = 100
+# The three PDF arms added on 2026-11-06. Haiku at high effort thinks, so its ceiling is
+# higher than the 8192 every other Anthropic arm uses; a truncation is still an error.
+HAIKU_HIGH_MAX_TOKENS = 16_000
+GEMINI_FLASH_LITE_MODEL = GEMINI_MODEL
+GEMINI_FLASH_MODEL = "gemini-3.8-flash"
+# Gemini's output ceiling counts thinking tokens. Set so the cap check has a worst case.
+GEMINI_MAX_OUTPUT_TOKENS = 32_768
+# Google documents 50 MB per PDF, inline or through the Files API. Older limits put a whole
+# inline request at 20 MB, and the bytes travel base64-encoded (x 4/3), so anything over 14 MiB
+# raw is skipped as an unbilled "pdf too large" error instead of risking a rejected request.
+GEMINI_PDF_MAX_BYTES = 14 * 1024 * 1024
 
 # Gemini: chunks of 100 as in llm.submit_batch, and inline payloads must stay under
 # 20 MB (ai.google.dev batch docs), so a chunk also closes at 18 MB.
@@ -86,17 +104,34 @@ MAX_PDF_BYTES = 23 * 1024 * 1024
 
 PDF_TOKENS_PER_PAGE = 3000
 PDF_OUTPUT_TOKENS = 300
+GEMINI_PDF_TOKENS_PER_PAGE = 1000  # estimate and worst case only; real use is far lower
+
+# gemini-3.8-flash list price, facts checked 2026-11-06 on Google's docs: $0.75 in / $3.75 out
+# per 1M (thinking is billed as output) through 2026-12-31, then $1.50 / $7.50.
+GEMINI_FLASH_RATE_2026 = pricing.ModelRate(0.75 / 1e6, 3.75 / 1e6)
+GEMINI_FLASH_RATE_2027 = pricing.ModelRate(1.50 / 1e6, 7.50 / 1e6)
+# src/usage/pricing.py has no row for it (and is outside this change), so the harness registers
+# the 2026 rate there at import. Without it cost_of() would fall back to flash-lite's rate and
+# both the result lines and the usage ledger would under-bill this arm.
+pricing.RATES.setdefault(GEMINI_FLASH_MODEL, GEMINI_FLASH_RATE_2026)
 
 # Batch arms: submitted, then collected.
 ARMS = ("G", "H-text", "H-pdf")
 # Live arms: run through the synchronous Messages API, one result line per document.
 LIVE_ARMS = ("H-text-live", "H-pdf-live", "S-text", "S-pdf")
-ALL_ARMS = (*ARMS, *LIVE_ARMS)
+# The three PDF arms added on 2026-11-06, live, on the 100-document subset. Kept apart from
+# LIVE_ARMS so "all-live" and the default scoring set stay what they were.
+PDF3_ARMS = ("GL-pdf-high", "GF-pdf-low", "H-pdf-high")
+ALL_ARMS = (*ARMS, *LIVE_ARMS, *PDF3_ARMS)
 # Canceled before they ran; the live arms replace them in scoring.
 SUPERSEDED_ARMS = ("H-text", "H-pdf")
 # What scoring, the judge and the report use unless told otherwise.
 DEFAULT_ARMS = ("G", *LIVE_ARMS)
 SONNET_ARMS = ("S-text", "S-pdf")
+# Arms that run the 100-document subset rather than all of the sample.
+SUBSET_ARMS = (*SONNET_ARMS, *PDF3_ARMS)
+# stop_reason values that mean the output was cut off.
+TRUNCATED_REASONS = ("max_tokens", "model_context_window_exceeded")
 
 LIVE_CONCURRENCY = 6
 LIVE_ATTEMPTS = 4  # tries per call, on top of the SDK's own retries
@@ -490,24 +525,63 @@ class _AnthropicArm:
     """
 
     provider = "anthropic"
+    est_pdf_tokens_per_page = PDF_TOKENS_PER_PAGE
+    api_errors = (anthropic.APIError,)
 
-    def __init__(self, name: str, pdf: bool, model: str = HAIKU_MODEL, live: bool = False):
+    def __init__(
+        self,
+        name: str,
+        pdf: bool,
+        model: str = HAIKU_MODEL,
+        live: bool = False,
+        effort: str = "low",
+        max_tokens: int = HAIKU_MAX_TOKENS,
+        thinking: Optional[dict[str, str]] = None,
+        est_out_tokens: int = PDF_OUTPUT_TOKENS,
+    ):
         self.name = name
         self.pdf = pdf
         self.model = model
         self.live = live
+        self.effort = effort
+        self.max_tokens = max_tokens
+        self.thinking = thinking
+        self.est_out_tokens = est_out_tokens
         self.input_mode = "pdf" if pdf else "text"
 
     def _params(self, content: Any) -> dict[str, Any]:
-        return {
+        params: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": HAIKU_MAX_TOKENS,
+            "max_tokens": self.max_tokens,
             "output_config": {
-                "effort": "low",
+                "effort": self.effort,
                 "format": {"type": "json_schema", "schema": _anthropic_schema()},
             },
             "messages": [{"role": "user", "content": content}],
         }
+        if self.thinking:
+            params["thinking"] = dict(self.thinking)
+        return params
+
+    # The provider-specific half of a live call (see _call_live).
+
+    def call(self, client, params: dict, doc_id: int) -> "_Raw":
+        message = client.messages.create(**params)
+        text = next((b.text for b in message.content if b.type == "text"), None)
+        return _Raw(
+            doc_id,
+            text=text,
+            tokens_in=message.usage.input_tokens,
+            tokens_out=message.usage.output_tokens,
+            billed=True,
+            stop_reason=message.stop_reason,
+        )
+
+    def is_retryable(self, error: Exception) -> bool:
+        return _is_retryable(error)
+
+    def is_fatal(self, error: Exception) -> bool:
+        return _is_fatal(error)
 
     def build_requests(self, docs: list[dict]) -> list[_Request]:
         out = []
@@ -602,6 +676,129 @@ class _AnthropicArm:
         return out
 
 
+class _GeminiLiveArm:
+    """A Gemini arm over the PDF itself, one ``generate_content`` call per document.
+
+    The prompt (``PDF_PROMPT``, the production rules with a PDF framing), the response schema
+    and temperature 0 are arm G's; what differs is the PDF as inline ``application/pdf`` data
+    and ``thinking_level``. Thinking tokens are billed as output, so they are counted in
+    ``tokens_out`` as arm G counts them.
+    """
+
+    provider = "gemini"
+    pdf = True
+    live = True
+    input_mode = "pdf"
+    est_pdf_tokens_per_page = GEMINI_PDF_TOKENS_PER_PAGE
+    max_tokens = GEMINI_MAX_OUTPUT_TOKENS
+    api_errors = (genai_errors.APIError, httpx.TransportError, TimeoutError)
+    # A BadRequest here can also mean "API key not valid", so the message is checked too.
+    _FATAL_STATUS = ("UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND")
+    _FATAL_TEXT = ("api key not valid", "api_key_invalid", "billing")
+
+    def __init__(self, name: str, model: str, thinking_level: str, est_out_tokens: int):
+        self.name = name
+        self.model = model
+        self.thinking_level = thinking_level
+        self.est_out_tokens = est_out_tokens
+
+    def _config(self) -> genai_types.GenerateContentConfig:
+        config = llm._generation_config(temperature=0.0)
+        config.thinking_config = genai_types.ThinkingConfig(
+            thinking_level=genai_types.ThinkingLevel(self.thinking_level.upper())
+        )
+        config.max_output_tokens = self.max_tokens
+        return config
+
+    def build_requests(self, docs: list[dict]) -> list[_Request]:
+        out = []
+        for d in docs:
+            req = _Request(d["doc_id"], d.get("nhtsa_id"), str(d["doc_id"]))
+            if not d.get("pdf_b64"):
+                req.error = d.get("pdf_error") or "pdf unavailable"
+            else:
+                data = base64.b64decode(d["pdf_b64"])
+                if len(data) > GEMINI_PDF_MAX_BYTES:
+                    limit = GEMINI_PDF_MAX_BYTES
+                    req.error = f"pdf too large for inline data ({len(data)} bytes > {limit})"
+                else:
+                    req.params = {
+                        "model": self.model,
+                        "contents": [
+                            genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
+                            PDF_PROMPT,
+                        ],
+                        "config": self._config(),
+                    }
+                    req.size = len(data)
+            out.append(req)
+        return out
+
+    def describe(self, req: _Request) -> Any:
+        """The request as recorded on disk; the PDF's bytes are summarised, not copied."""
+        part = req.params["contents"][0]
+        data = part.inline_data.data
+        config = req.params["config"]
+        return {
+            "model": req.params["model"],
+            "contents": [
+                f"<pdf {len(data)} bytes sha256 {hashlib.sha256(data).hexdigest()}>",
+                PDF_PROMPT,
+            ],
+            "temperature": config.temperature,
+            "thinking_level": config.thinking_config.thinking_level.value,
+            "max_output_tokens": config.max_output_tokens,
+            "response_mime_type": config.response_mime_type,
+            "response_schema": "llm.RESPONSE_SCHEMA",
+        }
+
+    def call(self, client, params: dict, doc_id: int) -> "_Raw":
+        resp = client.models.generate_content(**params)
+        usage = resp.usage_metadata
+        # Thinking tokens are billed at the output rate and are not part of
+        # candidates_token_count, so they are added here (as arm G does).
+        tokens_out = (
+            (usage.candidates_token_count or 0)
+            + (getattr(usage, "thoughts_token_count", None) or 0)
+            if usage
+            else 0
+        )
+        candidates = getattr(resp, "candidates", None) or []
+        finish = getattr(candidates[0], "finish_reason", None) if candidates else None
+        name = getattr(finish, "name", None) or (str(finish).split(".")[-1] if finish else None)
+        stop = {"STOP": "end_turn", "MAX_TOKENS": "max_tokens"}.get(
+            name, (name or "").lower() or None
+        )
+        try:
+            text = resp.text
+        except ValueError:
+            text = None
+        return _Raw(
+            doc_id,
+            text=text,
+            tokens_in=(usage.prompt_token_count or 0) if usage else 0,
+            tokens_out=tokens_out,
+            billed=usage is not None,
+            stop_reason=stop,
+        )
+
+    def is_retryable(self, error: Exception) -> bool:
+        if isinstance(error, genai_errors.APIError):
+            code = getattr(error, "code", None) or 0
+            return code in (408, 409, 429) or code >= 500
+        return True  # a dropped connection or a timeout
+
+    def is_fatal(self, error: Exception) -> bool:
+        if not isinstance(error, genai_errors.APIError):
+            return False
+        text = str(error).lower()
+        return (
+            getattr(error, "code", None) in (401, 403, 404)
+            or getattr(error, "status", None) in self._FATAL_STATUS
+            or any(t in text for t in self._FATAL_TEXT)
+        )
+
+
 _ARM_IMPLS = {
     "G": _GeminiArm(),
     "H-text": _AnthropicArm("H-text", pdf=False),
@@ -610,6 +807,21 @@ _ARM_IMPLS = {
     "H-pdf-live": _AnthropicArm("H-pdf-live", pdf=True, live=True),
     "S-text": _AnthropicArm("S-text", pdf=False, model=SONNET_MODEL, live=True),
     "S-pdf": _AnthropicArm("S-pdf", pdf=True, model=SONNET_MODEL, live=True),
+    "GL-pdf-high": _GeminiLiveArm(
+        "GL-pdf-high", GEMINI_FLASH_LITE_MODEL, "high", est_out_tokens=3000
+    ),
+    "GF-pdf-low": _GeminiLiveArm("GF-pdf-low", GEMINI_FLASH_MODEL, "low", est_out_tokens=1500),
+    # Haiku 5.5 thinks adaptively by default; naming it makes the arm's request say so. Everything
+    # else is H-pdf-live's, apart from the larger output ceiling that high effort needs.
+    "H-pdf-high": _AnthropicArm(
+        "H-pdf-high",
+        pdf=True,
+        live=True,
+        effort="high",
+        max_tokens=HAIKU_HIGH_MAX_TOKENS,
+        thinking={"type": "adaptive"},
+        est_out_tokens=3000,
+    ),
 }
 
 
@@ -777,15 +989,18 @@ def estimate_cost(arm: str, sample: list[dict]) -> float:
 
     Text arms use the token counts the production run recorded for each document
     (Haiku and Sonnet tokenise differently, so this is an estimate, not a
-    prediction). PDF arms have no recorded count: 3000 input tokens per page plus
-    300 output tokens per document. Documents with no text are not sent to text arms.
+    prediction). PDF arms have no recorded count: a per-page input estimate (3000 tokens
+    for Anthropic, 1000 for Gemini) plus an output estimate per document (300, or more for
+    an arm that thinks). Documents with no text are not sent to text arms.
     """
     impl = _ARM_IMPLS[arm]
     total = 0.0
     for d in sample:
         if impl.pdf:
-            tin = max(d.get("page_count") or 1, 1) * PDF_TOKENS_PER_PAGE
-            tout = PDF_OUTPUT_TOKENS
+            tin = max(d.get("page_count") or 1, 1) * getattr(
+                impl, "est_pdf_tokens_per_page", PDF_TOKENS_PER_PAGE
+            )
+            tout = getattr(impl, "est_out_tokens", PDF_OUTPUT_TOKENS)
         else:
             if d.get("llm_tokens_in") is None:
                 continue
@@ -810,20 +1025,46 @@ def run_spend(run_dir: pathlib.Path) -> RunSpend:
     return spend
 
 
-def judge_spend(run_dir: pathlib.Path) -> float:
-    """What the blind judge (``bakeoff_score``) has spent in ``run_dir``."""
-    path = pathlib.Path(run_dir) / "judge.jsonl"
+def _jsonl_cost(path: pathlib.Path) -> float:
     return sum(r.get("cost_usd") or 0.0 for r in _read_jsonl(path)) if path.exists() else 0.0
 
 
+def judge_spend(run_dir: pathlib.Path) -> float:
+    """What the blind judges (``bakeoff_score``) have spent in ``run_dir``: the five-way
+    ``judge.jsonl`` and every ``<subdir>/judge.jsonl`` (the six-way ``judge-pdf6``)."""
+    run_dir = pathlib.Path(run_dir)
+    total = _jsonl_cost(run_dir / "judge.jsonl")
+    if run_dir.exists():
+        total += sum(_jsonl_cost(p) for p in sorted(run_dir.glob("*/judge.jsonl")))
+    return total
+
+
+def side_spend(run_dir: pathlib.Path) -> float:
+    """Spend that lives outside the arms and the judges: the pairwise judge
+    (``<subdir>/verdicts.jsonl``, a ``cost_usd`` per line) and the 2027 probe
+    (``probe-*/results.json``, a ``cost_true`` per variant: the ledger row of the probe
+    was priced at the wrong rate, so the true cost is what counts)."""
+    run_dir = pathlib.Path(run_dir)
+    if not run_dir.exists():
+        return 0.0
+    total = sum(_jsonl_cost(p) for p in sorted(run_dir.glob("*/verdicts.jsonl")))
+    for path in sorted(run_dir.glob("probe-*/results.json")):
+        for key, variant in _read_json(path).items():
+            if isinstance(variant, dict) and not key.startswith("_"):
+                total += variant.get("cost_true") or variant.get("cost_ledger") or 0.0
+    return total
+
+
 def experiment_spend(run_dir: pathlib.Path) -> float:
-    """Spent or committed by the whole bake-off: arms and judge, in ``run_dir`` and in
-    every other run under ``BAKEOFF_ROOT``. The cap is one budget for the experiment,
-    so starting a new run directory never resets it."""
+    """Spent or committed by the whole bake-off: arms, every judge, the pairwise judge and
+    the probe, in ``run_dir`` and in every other run under ``BAKEOFF_ROOT``. The cap is one
+    budget for the experiment, so starting a new run directory never resets it. Read from
+    the files each piece writes, not the usage ledger: the ledger is per database, and
+    one arm's rate is not in it."""
     dirs = {pathlib.Path(run_dir).resolve()}
     if BAKEOFF_ROOT.exists():
         dirs |= {p.resolve() for p in BAKEOFF_ROOT.iterdir() if p.is_dir()}
-    return sum(run_spend(d).total + judge_spend(d) for d in dirs)
+    return sum(run_spend(d).total + judge_spend(d) + side_spend(d) for d in dirs)
 
 
 def check_cap(run_dir: pathlib.Path, arms: list[str], sample: list[dict]) -> dict[str, float]:
@@ -938,9 +1179,15 @@ def _result_line(arm: str, request: dict, raw: Optional[_Raw], run_dir: pathlib.
             error = raw.error
         else:
             output, error = llm.validate(raw.text if raw.text is not None else "")
-            valid = error is None
-            if error and raw.stop_reason not in (None, "end_turn"):
+            if raw.stop_reason in TRUNCATED_REASONS:
+                # Cut off at the output ceiling: whatever parsed is not a finished answer.
+                output = None
+                error = f"truncated (stop_reason={raw.stop_reason})" + (
+                    f": {error}" if error else ""
+                )
+            elif error and raw.stop_reason not in (None, "end_turn"):
                 error = f"{error} (stop_reason={raw.stop_reason})"
+            valid = error is None
     return {
         "doc_id": request["doc_id"],
         "nhtsa_id": request["nhtsa_id"],
@@ -1069,52 +1316,44 @@ def _is_fatal(error: Exception) -> bool:
     return status in (401, 403, 404) or "credit balance" in str(error).lower()
 
 
-def _call_live(client, params: dict, doc_id: int) -> Optional[_Raw]:
-    """One document through the Messages API, retried on top of the SDK's own retries.
+def _call_live(client, params: dict, doc_id: int, impl=None) -> Optional[_Raw]:
+    """One document through a provider's synchronous API, retried on top of the SDK's own retries.
 
-    Returns the response as a ``_Raw``; an unbilled error ``_Raw`` for an API error that
-    retrying cannot fix (a 400, say); ``None`` when every try hit a retryable error, so
-    the caller leaves the document for the next run. Anything that is not an API error
-    is a bug and propagates.
+    ``impl`` is the arm (default: an Anthropic one); it knows how to make the call and which
+    errors are retryable or fatal. Returns the response as a ``_Raw``; an unbilled error
+    ``_Raw`` for an API error that retrying cannot fix (a 400, say); ``None`` when every try
+    hit a retryable error, so the caller leaves the document for the next run. Anything that
+    is not an API error is a bug and propagates.
     """
+    impl = impl or _ARM_IMPLS["H-text-live"]
     for attempt in range(LIVE_ATTEMPTS):
         try:
-            message = client.messages.create(**params)
-        except anthropic.APIError as e:
-            if not _is_retryable(e):
-                if _is_fatal(e):
+            return impl.call(client, params, doc_id)
+        except impl.api_errors as e:
+            if not impl.is_retryable(e):
+                if impl.is_fatal(e):
                     raise LiveCallFatal(f"doc {doc_id}: {e}; nothing written for it") from e
-                status = getattr(e, "status_code", None)
+                status = getattr(e, "status_code", None) or getattr(e, "code", None)
                 detail = getattr(e, "message", None) or str(e)
                 return _Raw(doc_id, error=f"api error{f' {status}' if status else ''}: {detail}")
             if attempt == LIVE_ATTEMPTS - 1:
                 log.warning("doc %s: still failing after %d tries: %s", doc_id, LIVE_ATTEMPTS, e)
                 return None
             _sleep(LIVE_BACKOFF_SECONDS * 2**attempt)
-            continue
-        text = next((b.text for b in message.content if b.type == "text"), None)
-        return _Raw(
-            doc_id,
-            text=text,
-            tokens_in=message.usage.input_tokens,
-            tokens_out=message.usage.output_tokens,
-            billed=True,
-            stop_reason=message.stop_reason,
-        )
     return None  # unreachable: the last attempt returns or raises
 
 
 def live_worst_case_usd(arm: str, req: _Request, doc: dict) -> float:
     """The most one call could cost at list price: a generous prompt estimate plus every
-    output token. Text is 2 characters a token; a PDF is ``page_count`` * 3000 tokens
-    plus its prompt text."""
+    output token the arm allows. Text is 2 characters a token; a PDF is ``page_count`` times
+    the arm's per-page estimate (3000 Anthropic, 1000 Gemini) plus its prompt text."""
     impl = _ARM_IMPLS[arm]
     if impl.pdf:
         pages = max(doc.get("page_count") or 1, 1)
-        tin = pages * PDF_TOKENS_PER_PAGE + len(PDF_PROMPT) // 2
+        tin = pages * impl.est_pdf_tokens_per_page + len(PDF_PROMPT) // 2
     else:
         tin = len(req.params["messages"][0]["content"]) // 2
-    return pricing.cost_of(impl.model, tin, HAIKU_MAX_TOKENS, batch=False)
+    return pricing.cost_of(impl.model, tin, impl.max_tokens, batch=False)
 
 
 @dataclass
@@ -1170,8 +1409,9 @@ class _Budget:
 
 
 def _live_sample(arm: str, sample_path: pathlib.Path, sonnet_sample_path: pathlib.Path):
-    """The Sonnet arms run the 100-document subset; the Haiku arms run all of the sample."""
-    return load_sample(sonnet_sample_path if arm in SONNET_ARMS else sample_path)
+    """The Sonnet and the three PDF arms run the 100-document subset; the Haiku arms run all
+    of the sample."""
+    return load_sample(sonnet_sample_path if arm in SUBSET_ARMS else sample_path)
 
 
 def _live_wall(arm_dir: pathlib.Path) -> float:
@@ -1263,7 +1503,7 @@ async def _run_live_arm(
                         await asyncio.sleep(0.05)  # in-flight calls may settle for less
                     try:
                         raw = await loop.run_in_executor(
-                            pool, _call_live, client, req.params, req.doc_id
+                            pool, _call_live, client, req.params, req.doc_id, impl
                         )
                     except BaseException:
                         budget.settle(worst, 0.0)
@@ -1336,17 +1576,29 @@ async def run_live(
     run_dir = pathlib.Path(run_dir)
     if arm == "all-live":
         arms = list(LIVE_ARMS)
-    elif arm in LIVE_ARMS:
+    elif arm == "pdf3":
+        arms = list(PDF3_ARMS)
+    elif arm in (*LIVE_ARMS, *PDF3_ARMS):
         arms = [arm]
     else:
-        raise ValueError(f"{arm!r} is not a live arm; expected one of {LIVE_ARMS} or 'all-live'")
+        raise ValueError(
+            f"{arm!r} is not a live arm; expected one of {(*LIVE_ARMS, *PDF3_ARMS)}, "
+            "'all-live' or 'pdf3'"
+        )
     sonnet_sample_path = pathlib.Path(sonnet_sample_path or SONNET_SAMPLE_PATH)
 
-    client = _anthropic_client()
+    # Every key the arms need is checked before anything is read from the database or NHTSA.
+    clients: dict[str, Any] = {}
+    for a in arms:
+        provider = _ARM_IMPLS[a].provider
+        if provider not in clients:
+            clients[provider] = _client_for(a)
     out: dict[str, LiveResult] = {}
     for a in arms:
         sample = _live_sample(a, sample_path, sonnet_sample_path)
-        out[a] = await _run_live_arm(a, client, run_dir, sample, concurrency)
+        out[a] = await _run_live_arm(
+            a, clients[_ARM_IMPLS[a].provider], run_dir, sample, concurrency
+        )
     return out
 
 
@@ -1396,10 +1648,10 @@ def status(
         else:
             state = "submitted, awaiting collect"
         lines.append(f"{head}  {state}  [{ids}] submitted {batch['submitted_at']}")
-    for arm in LIVE_ARMS:
+    for arm in (*LIVE_ARMS, *PDF3_ARMS):
         impl = _ARM_IMPLS[arm]
-        docs = sonnet if arm in SONNET_ARMS else sample
-        head = f"{arm:<11} {impl.model:<18} estimate ${estimate_cost(arm, docs):.4f} (list price)"
+        docs = sonnet if arm in SUBSET_ARMS else sample
+        head = f"{arm:<12} {impl.model:<22} estimate ${estimate_cost(arm, docs):.4f} (list price)"
         path = _arm_dir(run_dir, arm) / "results.jsonl"
         if not path.exists():
             lines.append(f"{head}  not run")
@@ -1457,7 +1709,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     common(sp, "the newest run under backend/.bakeoff/, or a new one if there is none")
     sp = sub.add_parser("run-live", help="run a live arm through the Messages API (spends money)")
-    sp.add_argument("--arm", required=True, choices=[*LIVE_ARMS, "all-live"])
+    sp.add_argument("--arm", required=True, choices=[*LIVE_ARMS, *PDF3_ARMS, "all-live", "pdf3"])
     sp.add_argument(
         "--concurrency",
         type=int,

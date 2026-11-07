@@ -3,7 +3,8 @@
 Reads the ``results.jsonl`` files the harness (``extraction_bakeoff``) wrote, and
 produces objective scores that need no model, then an optional blind Opus judge.
 Run as ``python -m src.eval.bakeoff_score --run-dir RUN [--arms G H-text-live ...]
-[--judge [--estimate]]``.
+[--judge [--estimate]]``; ``--judge-pdf`` runs the six-way judge that reads the PDF itself and
+writes into ``RUN/judge-pdf6/`` (``--judge-dir`` names another folder).
 
 It works over an arm list: by default ``G`` and the four live arms. ``H-text`` and
 ``H-pdf`` (their batches were canceled) are superseded by the live re-run and are
@@ -30,6 +31,8 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable, Optional
+
+import anthropic
 
 from src.eval import extraction_bakeoff as eb
 from src.usage import pricing
@@ -264,7 +267,7 @@ def _wall_seconds(run_dir: pathlib.Path, arm: str, rows: list[dict]) -> Optional
     """A batch arm: submitted to collected (``batch.json``). A live arm: the sum of its runs
     (``live.json``)."""
     arm_dir = run_dir / arm
-    if arm in eb.LIVE_ARMS:
+    if eb.arm_mode(arm) == "live":
         path = arm_dir / "live.json"
         if not path.exists():
             return None
@@ -305,16 +308,25 @@ def valid_outputs_by_doc(results: dict[str, list[dict]]) -> dict[int, dict[str, 
     return out
 
 
-def score_run(run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None) -> dict[str, Any]:
+def score_run(
+    run_dir: pathlib.Path,
+    arms: Optional[Iterable[str]] = None,
+    doc_ids: Optional[Iterable[int]] = None,
+) -> dict[str, Any]:
     """Every objective metric for the arms that have results. Pure: writes nothing.
 
-    Per-arm figures are over that arm's own documents; ``pairwise`` agreement is over
-    the documents each pair shares. Cost per 1,000 documents divides by the documents
-    the arm was billed for, and a live arm also gets its batch-equivalent (half).
+    Per-arm figures are over that arm's own documents (or only ``doc_ids``, when given, so
+    arms that ran different numbers of documents compare on the same ones); ``pairwise``
+    agreement is over the documents each pair shares. Cost per 1,000 documents divides by
+    the documents the arm was billed for, and a live arm also gets its batch-equivalent
+    (half).
     """
     run_dir = pathlib.Path(run_dir)
     wanted = resolve_arms(arms)
     results = load_results(run_dir, wanted)
+    if doc_ids is not None:
+        keep = set(doc_ids)
+        results = {a: [r for r in rows if r["doc_id"] in keep] for a, rows in results.items()}
     reference = load_reference(run_dir)
     by_doc = valid_outputs_by_doc(results)
 
@@ -411,6 +423,7 @@ N_RANDOM = 30
 # prompt's size (4 characters a token) plus this many output tokens.
 JUDGE_OUT_TOKENS_EST = 6_000
 LABELS = "ABCDE"  # one per arm, up to five
+LABELS6 = "ABCDEF"  # the six-way PDF judge
 
 _LABEL_ENUM = {"type": "string", "enum": list(LABELS)}
 JUDGE_SCHEMA: dict[str, Any] = {
@@ -463,15 +476,20 @@ Judge only against the source text. For each candidate:
 Then rank all candidates, best first, and give one sentence of reasoning."""
 
 
-def label_arms(doc_id: int, arms: list[str], seed: int = eb.SEED) -> dict[str, str]:
+def label_arms(
+    doc_id: int, arms: list[str], seed: int = eb.SEED, labels: str = LABELS
+) -> dict[str, str]:
     """``{label: arm}`` for one document: a shuffle fixed by the seed and the document id.
 
     Independent of the order ``arms`` arrives in, and saved by ``run_judge`` so the
-    judge's labels can be mapped back to arm names afterwards.
+    judge's labels can be mapped back to arm names afterwards. ``labels`` is ``A``-``E`` for
+    the five-way judge and ``A``-``F`` (``LABELS6``) for the six-way one.
     """
+    if len(arms) > len(labels):
+        raise ValueError(f"{len(arms)} arms but only {len(labels)} labels")
     order = sorted(arms)
     random.Random(f"{seed}:{doc_id}").shuffle(order)
-    return {LABELS[i]: arm for i, arm in enumerate(order)}
+    return {labels[i]: arm for i, arm in enumerate(order)}
 
 
 def build_judge_prompt(source: str, labels: dict[str, str], outputs: dict[str, dict]) -> str:
@@ -502,9 +520,11 @@ def select_judge_docs(
     n_random: int = N_RANDOM,
     seed: int = eb.SEED,
     restrict_to: Optional[set[int]] = None,
+    min_valid: int = 2,
 ) -> tuple[list[int], list[int]]:
-    """``(hard, random)`` document ids. Eligible documents have two or more valid outputs
-    and, when ``restrict_to`` is given, are in it (the Sonnet subset, where every arm ran).
+    """``(hard, random)`` document ids. Eligible documents have ``min_valid`` (default two)
+    or more valid outputs and, when ``restrict_to`` is given, are in it (the Sonnet subset,
+    where every arm ran).
 
     ``hard`` is the ``n_hard`` with the largest symptom/remedy disagreement; ``random``
     is a seeded draw of ``n_random`` from the rest.
@@ -512,7 +532,7 @@ def select_judge_docs(
     gaps = {
         d: disagreement(o)
         for d, o in by_doc.items()
-        if len(o) >= 2 and (restrict_to is None or d in restrict_to)
+        if len(o) >= max(min_valid, 2) and (restrict_to is None or d in restrict_to)
     }
     ranked = sorted(gaps, key=lambda d: (-gaps[d], d))
     hard = ranked[:n_hard]
@@ -787,6 +807,502 @@ def summarize_judge(run_dir: pathlib.Path, arms: Optional[Iterable[str]] = None)
     }
 
 
+# --------------------------------------------------------------------------- six-way PDF judge
+
+# The arms the six-way judge compares: G (Flash-Lite over text), the three new PDF arms, and
+# the two earlier PDF arms. Blind labels A-F, shuffled per document.
+PDF6_ARMS = ("G", "GL-pdf-high", "GF-pdf-low", "H-pdf-live", "H-pdf-high", "S-pdf")
+PDF6_DIR = "judge-pdf6"
+PDF6_MIN_VALID = 4  # a document needs at least this many valid outputs to be judged
+PDF6_FIELDS = ("summary", "symptoms", "remedy", "applicability", "systems", "components")
+PDF6_STATUSES = ("correct", "partial", "missing_but_in_source", "correctly_empty", "unsupported")
+# The judge reads the PDF as a document block. Opus 5.5 has a 1M-token context, so the
+# 600-page request limit is the page ceiling; past it (or without a PDF) the judge falls
+# back to the extracted-text excerpt and the line says so.
+JUDGE_MAX_PDF_PAGES = 600
+# Tokens a PDF page costs the judge: an estimate for the plan, and a generous figure for the
+# per-call worst case that guards the cap (the 96-page probe measured ~1,560 on Haiku).
+JUDGE_PDF_TOKENS_PER_PAGE_EST = 2_200
+JUDGE_PDF_TOKENS_PER_PAGE_WORST = 3_000
+
+_PDF6_INSTRUCTIONS_HEAD = (
+    "You are judging structured extractions of one manufacturer communication issued for a "
+    "motor vehicle. {source_sentence} Below are several candidate extractions, each labelled "
+    "with a letter. You do not know how any candidate was produced.\n\n"
+    "Judge only against the source. Read all of it, including tables. For each of the fields "
+    "summary, symptoms, remedy, applicability, systems and components:\n"
+    '- best: the label of the candidate that captures the field best, or "tie" if none is '
+    "clearly better.\n"
+    "- status, for every candidate: one of\n"
+    "  correct (what it says is right and complete enough),\n"
+    "  partial (right but missing part of what the source states, or only partly right),\n"
+    "  missing_but_in_source (empty or silent although the source states it),\n"
+    "  correctly_empty (empty, and the source has nothing for this field),\n"
+    "  unsupported (states something the source does not support).\n"
+    "Then rank all candidates overall, best first, and for every candidate list the claims "
+    "the source does not support (an empty list if none). Give one sentence of reasoning."
+)
+
+_PDF_SENTENCE = "The source document is attached to this message as a PDF."
+_EXCERPT_SENTENCE = (
+    "The source document's extracted text (possibly cut short) is given below, "
+    "after the instructions."
+)
+
+
+def pdf6_schema(labels: Iterable[str]) -> dict[str, Any]:
+    """The structured-output schema for one document, built for the labels it actually has,
+    so a verdict cannot rank or grade a candidate that is not there."""
+    names = sorted(labels)
+    label = {"type": "string", "enum": names}
+    status = {
+        "type": "object",
+        "properties": {n: {"type": "string", "enum": list(PDF6_STATUSES)} for n in names},
+        "required": names,
+        "additionalProperties": False,
+    }
+    field = {
+        "type": "object",
+        "properties": {
+            "best": {"type": "string", "enum": [*names, "tie"]},
+            "status": status,
+        },
+        "required": ["best", "status"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "fields": {
+                "type": "object",
+                "properties": {f: field for f in PDF6_FIELDS},
+                "required": list(PDF6_FIELDS),
+                "additionalProperties": False,
+            },
+            "ranking": {
+                "type": "array",
+                "items": label,
+                "description": "Every candidate label exactly once, best first (overall rank).",
+            },
+            "unsupported_claims": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": label,
+                        "claims": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["label", "claims"],
+                    "additionalProperties": False,
+                },
+                "description": "One entry per candidate; claims is empty when it is faithful.",
+            },
+            "reasoning": {"type": "string", "description": "One sentence."},
+        },
+        "required": ["fields", "ranking", "unsupported_claims", "reasoning"],
+        "additionalProperties": False,
+    }
+
+
+def build_pdf6_prompt(
+    labels: dict[str, str], outputs: dict[str, dict], excerpt: Optional[str] = None
+) -> str:
+    """The judge's text: the instructions and each output under its label. With ``excerpt``
+    the extracted text follows the instructions (the fallback); without it the PDF is
+    sent as a document block next to this text. Arm names appear nowhere in it."""
+    parts = [
+        _PDF6_INSTRUCTIONS_HEAD.format(
+            source_sentence=_PDF_SENTENCE if excerpt is None else _EXCERPT_SENTENCE
+        ),
+        "",
+    ]
+    if excerpt is not None:
+        parts += ["=== SOURCE ===", excerpt[:EXCERPT_CHARS], ""]
+    for label in sorted(labels):
+        parts += [
+            f"=== OUTPUT {label} ===",
+            json.dumps(outputs[labels[label]], indent=1, ensure_ascii=False),
+            "",
+        ]
+    return "\n".join(parts)
+
+
+def _pdf_block(pdf_b64: str) -> dict[str, Any]:
+    return {
+        "type": "document",
+        "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64},
+    }
+
+
+def _generate_pdf6(content: Any, schema: dict[str, Any]) -> dict:
+    """One six-way judge call. Isolated so tests can monkeypatch it. Same model and
+    settings as ``_generate`` (Opus 5.5, adaptive thinking, effort high, 16,000 tokens,
+    structured output); the message is a PDF document block plus the prompt."""
+    from src.anthropic_client import client
+
+    resp = client().messages.create(
+        model=JUDGE_MODEL,
+        max_tokens=JUDGE_MAX_TOKENS,
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": JUDGE_EFFORT,
+            "format": {"type": "json_schema", "schema": schema},
+        },
+        messages=[{"role": "user", "content": content}],
+    )
+    out: dict[str, Any] = {
+        "verdict": None,
+        "tokens_in": resp.usage.input_tokens,
+        "tokens_out": resp.usage.output_tokens,
+    }
+    if resp.stop_reason not in ("end_turn", "stop_sequence"):
+        out["error"] = f"stop_reason={resp.stop_reason}"
+        return out
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    try:
+        out["verdict"] = json.loads(text)
+    except json.JSONDecodeError as e:
+        out["error"] = f"invalid JSON from judge: {e}"
+    return out
+
+
+def _check_pdf6_verdict(verdict: Any, labels: dict[str, str]) -> Optional[str]:
+    """Why a six-way verdict is unusable, or ``None``. A missing or unknown label is a
+    reason, never an exception, so one bad verdict cannot crash the summary."""
+    if not isinstance(verdict, dict):
+        return "no verdict"
+    ranking = verdict.get("ranking")
+    if not isinstance(ranking, list) or sorted(ranking) != sorted(labels):
+        return f"ranking {ranking} is not a ranking of {sorted(labels)}"
+    fields = verdict.get("fields")
+    if not isinstance(fields, dict):
+        return "no per-field verdicts"
+    for f in PDF6_FIELDS:
+        entry = fields.get(f)
+        if not isinstance(entry, dict) or not isinstance(entry.get("status"), dict):
+            return f"field {f} has no verdict"
+        if entry.get("best") not in (*labels, "tie"):
+            return f"field {f} best {entry.get('best')!r} is not a label or tie"
+        if sorted(entry["status"]) != sorted(labels):
+            return f"field {f} status does not cover {sorted(labels)}"
+        if any(v not in PDF6_STATUSES for v in entry["status"].values()):
+            return f"field {f} has an unknown status"
+    if not isinstance(verdict.get("unsupported_claims"), list):
+        return "no unsupported_claims"
+    return None
+
+
+@dataclass
+class PdfJob:
+    """One document for the six-way judge."""
+
+    doc_id: int
+    labels: dict[str, str]
+    outputs: dict[str, dict]
+    pages: int
+    url: Optional[str]
+    stratum: str
+
+
+@dataclass
+class PdfJudgePlan:
+    """The six-way judge calls still to make, and what they could cost."""
+
+    jobs: list[PdfJob]
+    done: set[int]
+    estimate: float
+    worst_case: float
+    spent: float  # the whole bake-off so far: arms, judges, pairwise, probe, every run
+    out_dir: pathlib.Path
+
+
+def _pdf6_prompt_tokens(job: PdfJob, per_page: int, prompt: str, chars_per_token: int) -> int:
+    return job.pages * per_page + len(prompt) // chars_per_token
+
+
+def plan_pdf6(
+    run_dir: pathlib.Path,
+    out_dir: Optional[pathlib.Path] = None,
+    n_hard: int = N_HARD,
+    n_random: int = N_RANDOM,
+    seed: int = eb.SEED,
+    arms: Optional[Iterable[str]] = None,
+    min_valid: int = PDF6_MIN_VALID,
+    sample_path: Optional[pathlib.Path] = None,
+) -> PdfJudgePlan:
+    """Which documents the six-way judge will read, with the label shuffle for each and a
+    cost estimate that assumes the PDF is sent for every one. Calls nothing.
+
+    Documents come from the Sonnet subset (when its file exists) and need ``min_valid``
+    valid outputs among the arms; ``hard`` / ``random`` are chosen as for the five-way
+    judge. A document already in ``out_dir/judge.jsonl`` is not planned again, and the
+    five-way ``judge.jsonl`` in ``run_dir`` is never consulted.
+    """
+    run_dir = pathlib.Path(run_dir)
+    out_dir = pathlib.Path(out_dir) if out_dir else run_dir / PDF6_DIR
+    wanted = list(arms) if arms else list(PDF6_ARMS)
+    results = load_results(run_dir, wanted)
+    reference = load_reference(run_dir)
+    by_doc = {d: o for d, o in valid_outputs_by_doc(results).items() if d in reference}
+    hard, rand = select_judge_docs(
+        by_doc, n_hard, n_random, seed, restrict_to=sonnet_doc_ids(), min_valid=min_valid
+    )
+    stratum = {**{d: "random" for d in rand}, **{d: "hard" for d in hard}}
+    meta = {int(e["doc_id"]): e for e in eb.load_sample(sample_path or eb.SAMPLE_PATH)}
+    done = {x["doc_id"] for x in _read_jsonl_if(out_dir / "judge.jsonl")}
+    jobs, estimate, worst = [], 0.0, 0.0
+    for d in [*hard, *rand]:
+        if d in done:
+            continue
+        entry = meta.get(d) or {}
+        job = PdfJob(
+            d,
+            label_arms(d, list(by_doc[d]), seed, LABELS6),
+            by_doc[d],
+            max(entry.get("page_count") or 1, 1),
+            entry.get("url"),
+            stratum[d],
+        )
+        jobs.append(job)
+        prompt = build_pdf6_prompt(job.labels, job.outputs)
+        estimate += pricing.cost_of(
+            JUDGE_MODEL,
+            _pdf6_prompt_tokens(job, JUDGE_PDF_TOKENS_PER_PAGE_EST, prompt, 4),
+            JUDGE_OUT_TOKENS_EST,
+            batch=False,
+        )
+        worst += _pdf6_worst_case(job, prompt, with_pdf=True)
+    return PdfJudgePlan(jobs, done, estimate, worst, eb.experiment_spend(run_dir), out_dir)
+
+
+def _read_jsonl_if(path: pathlib.Path) -> list[dict]:
+    return _read_jsonl(path) if path.exists() else []
+
+
+def _pdf6_worst_case(job: PdfJob, prompt: str, with_pdf: bool) -> float:
+    """The most one call could cost: a generous prompt size and every output token."""
+    tin = len(prompt) // 2 + (job.pages * JUDGE_PDF_TOKENS_PER_PAGE_WORST if with_pdf else 0)
+    return pricing.cost_of(JUDGE_MODEL, tin, JUDGE_MAX_TOKENS, batch=False)
+
+
+def format_pdf6_plan(plan: PdfJudgePlan) -> str:
+    """The line shown before the six-way judge runs."""
+    total = plan.spent + plan.estimate
+    verdict = "fits under" if total <= eb.CAP_USD else "WOULD PASS"
+    return (
+        f"judge-pdf6: {len(plan.jobs)} call(s) on {JUDGE_MODEL} reading the PDF, "
+        f"estimate ${plan.estimate:.4f}, worst case ${plan.worst_case:.4f} if every call thinks "
+        f"to {JUDGE_MAX_TOKENS:,} tokens; bake-off spent ${plan.spent:.4f} (arms, judges, "
+        f"pairwise, probe); estimate + spent ${total:.4f} {verdict} the ${eb.CAP_USD:.2f} cap"
+    )
+
+
+def _judge_source(
+    job: PdfJob, pdfs: dict[int, tuple[Optional[str], Optional[str]]]
+) -> tuple[Optional[str], Optional[str]]:
+    """``(pdf_b64, None)`` when the judge can read the PDF, else ``(None, why not)``."""
+    b64, err = pdfs.get(job.doc_id, (None, "pdf unavailable"))
+    if not b64:
+        return None, err or "pdf unavailable"
+    if job.pages > JUDGE_MAX_PDF_PAGES:
+        return None, f"too many pages ({job.pages} > {JUDGE_MAX_PDF_PAGES})"
+    return b64, None
+
+
+async def run_judge_pdf6(
+    run_dir: pathlib.Path,
+    out_dir: Optional[pathlib.Path] = None,
+    n_hard: int = N_HARD,
+    n_random: int = N_RANDOM,
+    seed: int = eb.SEED,
+    arms: Optional[Iterable[str]] = None,
+    min_valid: int = PDF6_MIN_VALID,
+    sample_path: Optional[pathlib.Path] = None,
+) -> dict[str, Any]:
+    """Judge the selected documents blind, reading the PDF, into ``out_dir`` (default
+    ``run_dir/judge-pdf6``): ``judge.jsonl``, ``judge_labels.json``. Nothing in ``run_dir``
+    itself is touched.
+
+    The cap is checked first against everything the bake-off has spent (arms, every judge,
+    pairwise, probe) plus the estimate, and again before each call against that call's
+    worst case. The PDF is fetched through the harness's cached download; a missing,
+    over-large or over-long PDF, or one the API rejects, falls back to the 12,000-character
+    excerpt, and each line records which source it used.
+    """
+    run_dir = pathlib.Path(run_dir)
+    plan = plan_pdf6(run_dir, out_dir, n_hard, n_random, seed, arms, min_valid, sample_path)
+    out_dir = plan.out_dir
+    spent = plan.spent
+    if spent + plan.estimate > eb.CAP_USD:
+        raise eb.SpendCapExceeded(
+            f"refusing to judge: bake-off spent or committed ${spent:.4f}, estimate "
+            f"${plan.estimate:.4f} for {len(plan.jobs)} call(s), total "
+            f"${spent + plan.estimate:.4f} exceeds the cap of ${eb.CAP_USD:.2f}. Nothing was sent."
+        )
+    reference = load_reference(run_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    labels_path = out_dir / "judge_labels.json"
+    all_labels: dict[str, dict[str, str]] = (
+        json.loads(labels_path.read_text()) if labels_path.exists() else {}
+    )
+    for job in plan.jobs:
+        all_labels[str(job.doc_id)] = job.labels
+    labels_path.write_text(json.dumps(all_labels, indent=1, sort_keys=True) + "\n")
+
+    pdfs: dict[int, tuple[Optional[str], Optional[str]]] = {}
+    if plan.jobs:
+        pdfs = await eb._fetch_pdfs(
+            [{"doc_id": j.doc_id, "url": j.url} for j in plan.jobs if j.url]
+        )
+
+    judged, stopped_at_cap = 0, False
+    with (out_dir / "judge.jsonl").open("a") as fh:
+        for job in plan.jobs:
+            b64, reason = _judge_source(job, pdfs)
+            excerpt = reference[job.doc_id]["source"]
+            schema = pdf6_schema(job.labels)
+            pdf_prompt = build_pdf6_prompt(job.labels, job.outputs)
+            text_prompt = build_pdf6_prompt(job.labels, job.outputs, excerpt)
+            source = "pdf" if b64 else "excerpt"
+            attempts = [(True, pdf_prompt)] if b64 else []
+            attempts.append((False, text_prompt))
+            tin = tout = 0
+            cost = 0.0
+            got: dict[str, Any] = {}
+            for with_pdf, prompt in attempts:
+                # The estimate is a guess; adaptive thinking can run to max_tokens. Before
+                # every call its worst case must still fit, so the cap holds on actuals.
+                if spent + _pdf6_worst_case(job, prompt, with_pdf) > eb.CAP_USD:
+                    stopped_at_cap = True
+                    got = {}
+                    break
+                content = (
+                    [_pdf_block(b64), {"type": "text", "text": prompt}] if with_pdf else prompt
+                )
+                try:
+                    got = await asyncio.to_thread(_generate_pdf6, content, schema)
+                except Exception as e:  # noqa: BLE001
+                    got = {
+                        "verdict": None,
+                        "tokens_in": 0,
+                        "tokens_out": 0,
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                    if with_pdf and isinstance(e, anthropic.BadRequestError):
+                        reason = f"pdf rejected by the API: {e}"
+                        source = "excerpt"
+                        continue  # fall back to the excerpt, once
+                tin, tout = got.get("tokens_in") or 0, got.get("tokens_out") or 0
+                if tin or tout:
+                    # Metered before the verdict is judged: an unusable answer was still billed.
+                    call_cost = await record_usage(
+                        kind="llm_extract",
+                        model=JUDGE_MODEL,
+                        tokens_in=tin,
+                        tokens_out=tout,
+                        batch=False,
+                        meta={"bakeoff": "judge-pdf6", "run": str(run_dir), "doc_id": job.doc_id},
+                    )
+                    cost = call_cost or pricing.cost_of(JUDGE_MODEL, tin, tout, batch=False)
+                    spent += cost
+                break
+            if stopped_at_cap:
+                break
+            verdict = got.get("verdict")
+            error = got.get("error") or _check_pdf6_verdict(verdict, job.labels)
+            fh.write(
+                json.dumps(
+                    {
+                        "doc_id": job.doc_id,
+                        "nhtsa_id": reference[job.doc_id]["nhtsa_id"],
+                        "stratum": job.stratum,
+                        "source": source,
+                        "source_reason": reason,
+                        "verdict": verdict if error is None else None,
+                        "error": error,
+                        "tokens_in": tin,
+                        "tokens_out": tout,
+                        "cost_usd": cost,
+                        "judged_at": datetime.now().astimezone().isoformat(),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            fh.flush()
+            judged += 1
+    return {
+        "judged": judged,
+        "skipped": len(plan.done),
+        "estimate_usd": plan.estimate,
+        "stopped_at_cap": stopped_at_cap,
+        "out_dir": str(out_dir),
+    }
+
+
+def summarize_pdf6(out_dir: pathlib.Path) -> dict[str, Any]:
+    """The six-way judge's results with labels mapped back to arms.
+
+    ``wins`` and ``mean_rank`` come from the overall ranking; ``field_best`` counts, per
+    field, the arm named best (or ``tie``); ``field_status`` counts each arm's status per
+    field; ``unsupported_claims`` counts the claims flagged per arm. A line with no usable
+    verdict, a label the map does not know, or a missing key is skipped or ignored, never an
+    error.
+    """
+    lines, labels = load_judge(out_dir)
+    arms = sorted(
+        {a for mapping in labels.values() for a in mapping.values()}, key=eb.ALL_ARMS.index
+    )
+    wins = {a: 0 for a in arms}
+    ranks: dict[str, list[int]] = {a: [] for a in arms}
+    claims = {a: 0 for a in arms}
+    claim_docs = {a: 0 for a in arms}
+    best = {f: {**{a: 0 for a in arms}, "tie": 0} for f in PDF6_FIELDS}
+    status = {f: {a: Counter() for a in arms} for f in PDF6_FIELDS}
+    sources: Counter = Counter()
+    judged = 0
+    for line in lines:
+        sources[line.get("source") or "unknown"] += 1
+        verdict, mapping = line.get("verdict"), labels.get(line["doc_id"])
+        if not isinstance(verdict, dict) or not mapping:
+            continue
+        ranking = [x for x in verdict.get("ranking") or [] if x in mapping]
+        if not ranking:
+            continue
+        judged += 1
+        wins[mapping[ranking[0]]] += 1
+        for pos, label in enumerate(ranking, start=1):
+            ranks[mapping[label]].append(pos)
+        for item in verdict.get("unsupported_claims") or []:
+            if item.get("label") in mapping:
+                n = len(item.get("claims") or [])
+                claims[mapping[item["label"]]] += n
+                claim_docs[mapping[item["label"]]] += 1 if n else 0
+        for f, entry in (verdict.get("fields") or {}).items():
+            if f not in best or not isinstance(entry, dict):
+                continue
+            who = entry.get("best")
+            if who == "tie":
+                best[f]["tie"] += 1
+            elif who in mapping:
+                best[f][mapping[who]] += 1
+            for label, st in (entry.get("status") or {}).items():
+                if label in mapping:
+                    status[f][mapping[label]][st] += 1
+    return {
+        "judged": judged,
+        "errors": sum(1 for x in lines if x.get("error")),
+        "sources": dict(sources),
+        "wins": wins,
+        "mean_rank": {a: _mean(r) for a, r in ranks.items()},
+        "field_best": best,
+        "field_status": {f: {a: dict(c) for a, c in per.items()} for f, per in status.items()},
+        "unsupported_claims": claims,
+        "unsupported_documents": claim_docs,
+        "usd": sum(x.get("cost_usd") or 0.0 for x in lines),
+    }
+
+
 # --------------------------------------------------------------------------- CLI
 
 
@@ -848,6 +1364,26 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--n-hard", type=int, default=N_HARD, help="judge: most-disagreeing documents")
     p.add_argument("--n-random", type=int, default=N_RANDOM, help="judge: random documents")
+    p.add_argument(
+        "--judge-pdf",
+        action="store_true",
+        help=(
+            "run the six-way blind judge that reads the PDF itself (spends money, capped); "
+            f"default arms: {' '.join(PDF6_ARMS)}; writes into RUN/{PDF6_DIR}/"
+        ),
+    )
+    p.add_argument(
+        "--judge-dir",
+        type=pathlib.Path,
+        help=f"with --judge-pdf: output folder, relative to the run dir (default {PDF6_DIR})",
+    )
+    p.add_argument(
+        "--min-valid",
+        type=int,
+        default=PDF6_MIN_VALID,
+        help="with --judge-pdf: valid outputs a document needs among the arms",
+    )
+    p.add_argument("--seed", type=int, default=eb.SEED, help="judge: seed for the draw and labels")
     return p
 
 
@@ -859,13 +1395,45 @@ def main(argv: Optional[list[str]] = None) -> int:
         if run_dir is None or not present_arms(run_dir, arms):
             print("error: no run directory with results.jsonl; pass --run-dir", file=sys.stderr)
             return 2
+        if args.judge_dir and not args.judge_pdf:
+            raise ValueError("--judge-dir only applies to --judge-pdf")
+        if args.judge_pdf:
+            arms = arms or list(PDF6_ARMS)
+            if not present_arms(run_dir, arms):
+                print("error: none of the six-way arms has results.jsonl", file=sys.stderr)
+                return 2
+            asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference, arms=arms))
+            out_dir = run_dir / (args.judge_dir or PDF6_DIR)
+            plan = plan_pdf6(
+                run_dir, out_dir, args.n_hard, args.n_random, args.seed, arms, args.min_valid
+            )
+            print(format_pdf6_plan(plan))
+            if args.estimate:
+                return 0
+            out = asyncio.run(
+                run_judge_pdf6(
+                    run_dir, out_dir, args.n_hard, args.n_random, args.seed, arms, args.min_valid
+                )
+            )
+            print(f"judged {out['judged']} document(s) (estimate ${out['estimate_usd']:.4f})")
+            if out["stopped_at_cap"]:
+                print(
+                    f"stopped early: the next call could have passed the ${eb.CAP_USD:.2f} cap",
+                    file=sys.stderr,
+                )
+            summary = summarize_pdf6(out_dir)
+            (out_dir / "score.json").write_text(json.dumps(summary, indent=1) + "\n")
+            print(json.dumps(summary, indent=1))
+            return 0
         asyncio.run(ensure_reference(run_dir, refresh=args.refresh_reference, arms=arms))
         if args.judge:
-            plan = plan_judge(run_dir, args.n_hard, args.n_random, arms=arms)
+            plan = plan_judge(run_dir, args.n_hard, args.n_random, seed=args.seed, arms=arms)
             print(format_plan(plan))
             if args.estimate:
                 return 0
-            out = asyncio.run(run_judge(run_dir, args.n_hard, args.n_random, arms=arms))
+            out = asyncio.run(
+                run_judge(run_dir, args.n_hard, args.n_random, seed=args.seed, arms=arms)
+            )
             print(f"judged {out['judged']} document(s) (estimate ${out['estimate_usd']:.4f})")
             if out["stopped_at_cap"]:
                 print(
