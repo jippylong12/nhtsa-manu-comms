@@ -1053,6 +1053,22 @@ def _is_retryable(error: Exception) -> bool:
     return False
 
 
+class LiveCallFatal(RuntimeError):
+    """An API error about the account, not the document (bad key, no access, unknown
+    model, no credit). Written as a result line it would mark every remaining document
+    done, so a re-run after the fix would skip them; the arm stops instead."""
+
+
+def _is_fatal(error: Exception) -> bool:
+    if isinstance(
+        error,
+        (anthropic.AuthenticationError, anthropic.PermissionDeniedError, anthropic.NotFoundError),
+    ):
+        return True
+    status = getattr(error, "status_code", None)
+    return status in (401, 403, 404) or "credit balance" in str(error).lower()
+
+
 def _call_live(client, params: dict, doc_id: int) -> Optional[_Raw]:
     """One document through the Messages API, retried on top of the SDK's own retries.
 
@@ -1066,6 +1082,8 @@ def _call_live(client, params: dict, doc_id: int) -> Optional[_Raw]:
             message = client.messages.create(**params)
         except anthropic.APIError as e:
             if not _is_retryable(e):
+                if _is_fatal(e):
+                    raise LiveCallFatal(f"doc {doc_id}: {e}; nothing written for it") from e
                 status = getattr(e, "status_code", None)
                 detail = getattr(e, "message", None) or str(e)
                 return _Raw(doc_id, error=f"api error{f' {status}' if status else ''}: {detail}")
@@ -1134,15 +1152,20 @@ class _Budget:
     def __init__(self, spent: float):
         self.spent = spent
         self.reserved = 0.0
+        # Counted, not inferred from ``reserved == 0``: adding and subtracting floats can
+        # leave a residue like 2.8e-17, and a worker waiting on it would spin forever.
+        self.in_flight = 0
 
     def reserve(self, worst: float) -> bool:
         if self.spent + self.reserved + worst > CAP_USD:
             return False
         self.reserved += worst
+        self.in_flight += 1
         return True
 
     def settle(self, worst: float, cost: float) -> None:
-        self.reserved -= worst
+        self.in_flight -= 1
+        self.reserved = self.reserved - worst if self.in_flight else 0.0
         self.spent += cost
 
 
@@ -1233,7 +1256,7 @@ async def _run_live_arm(
                     req = queue.popleft()
                     worst = live_worst_case_usd(arm, req, by_id[req.doc_id])
                     while not budget.reserve(worst):
-                        if budget.reserved == 0:
+                        if budget.in_flight == 0:
                             # Nothing in flight to wait for: this call cannot fit.
                             result.stopped_at_cap = stop = True
                             return

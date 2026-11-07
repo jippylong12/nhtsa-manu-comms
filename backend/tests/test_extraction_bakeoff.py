@@ -5,6 +5,7 @@ replaced with fakes, and an autouse guard fails the test if the real thing is
 ever constructed, so no test can spend money or open a connection.
 """
 
+import asyncio
 import base64
 import copy
 import json
@@ -1206,6 +1207,51 @@ async def test_in_flight_calls_count_against_the_cap_when_several_run_at_once(li
     out = await live.run_live("S-text", client, concurrency=2)
 
     assert len(client.calls) == 1 and out["S-text"].stopped_at_cap is True
+
+
+async def test_a_live_arm_at_the_cap_stops_even_when_float_reservations_leave_a_residue(live):
+    # 0.1 + 0.2 - 0.1 - 0.2 is 2.8e-17, not 0: a worker waiting for "nothing in flight"
+    # by checking reserved == 0 would wait forever once both calls had settled.
+    live.sonnet_path.write_text(json.dumps(live.entries[:3]))
+    worst = {1: 0.1, 2: 0.2, 3: 1.0}
+    live.monkeypatch.setattr(eb, "live_worst_case_usd", lambda arm, req, doc: worst[req.doc_id])
+    live.monkeypatch.setattr(eb, "CAP_USD", 0.35)
+    client = FakeLive()
+
+    out = await asyncio.wait_for(live.run_live("S-text", client, concurrency=2), timeout=10)
+
+    assert len(client.calls) == 2 and out["S-text"].stopped_at_cap is True
+
+
+async def test_an_account_error_stops_the_live_arm_without_marking_documents_done(live):
+    def no_credit_on_second(n, params):
+        if n == 2:
+            raise _http_error(
+                anthropic.BadRequestError,
+                400,
+                "Your credit balance is too low to access the Anthropic API.",
+            )
+
+    with pytest.raises(eb.LiveCallFatal):
+        await live.run_live("H-text-live", FakeLive(on_call=no_credit_on_second))
+    assert [r["doc_id"] for r in _results(live.run_dir, "H-text-live")] == [1]
+
+    client = FakeLive()
+    await live.run_live("H-text-live", client)
+    assert len(client.calls) == 2, "the documents the account error hit are sent again"
+    assert sorted(r["doc_id"] for r in _results(live.run_dir, "H-text-live")) == [1, 2, 3]
+
+
+async def test_a_bad_key_stops_the_live_arm_and_writes_no_result_lines(live):
+    def unauthorized(n, params):
+        raise _http_error(anthropic.AuthenticationError, 401, "invalid x-api-key")
+
+    with pytest.raises(eb.LiveCallFatal):
+        await live.run_live("H-text-live", FakeLive(on_call=unauthorized))
+
+    path = live.run_dir / "H-text-live" / "results.jsonl"
+    assert not path.exists() or _results(live.run_dir, "H-text-live") == []
+    assert live.usage == [] and live.sleeps == []
 
 
 async def test_run_live_all_live_runs_every_live_arm_in_order(live):
