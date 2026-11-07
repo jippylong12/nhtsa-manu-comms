@@ -101,7 +101,9 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                                             }}
                                 disabled={loadingYears}
                             >
-                                <option value="">Select Year</option>
+                                <option value="">
+                                    {loadingYears ? 'Loading years...' : 'Select Year'}
+                                </option>
                                 {years?.map((y) => (
                                     <option key={y} value={y}>{y}</option>
                                 ))}

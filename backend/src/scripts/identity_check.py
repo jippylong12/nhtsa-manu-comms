@@ -7,7 +7,9 @@ the counts recorded before the plain-nameplate migration.
 Exit 1 when any of these hold, otherwise 0:
   * a ``communication_vehicles`` row points at no vehicle (orphan),
   * two active vehicles share one ``(year, make, model)`` identity,
-  * a vehicle's linked count is below its baseline.
+  * a vehicle's linked count is below its baseline,
+  * a vehicle in the baseline is no longer an active vehicle (its links cannot be
+    shown to have survived).
 
 Usage:
     python -m src.scripts.identity_check
@@ -50,11 +52,12 @@ class Report:
     rows: list[VehicleRow]
     orphans: int
     duplicates: list[tuple[int, str, str, list[int]]] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)  # baseline ids with no active vehicle
 
     @property
     def exit_code(self) -> int:
         below = any(r.status != "ok" for r in self.rows)
-        return 1 if (self.orphans or self.duplicates or below) else 0
+        return 1 if (self.orphans or self.duplicates or self.missing or below) else 0
 
 
 def load_baseline(path: str) -> dict[str, int]:
@@ -85,7 +88,11 @@ def build_report(
             )
         )
     duplicates = [(*k, ids) for k, ids in groups.items() if len(ids) > 1]
-    return Report(rows=rows, orphans=orphans, duplicates=duplicates)
+    active_ids = {str(v["id"]) for v in vehicles}
+    missing = sorted(
+        (k for k in (baseline or {}) if k not in active_ids), key=lambda k: (len(k), k)
+    )
+    return Report(rows=rows, orphans=orphans, duplicates=duplicates, missing=missing)
 
 
 async def collect(conn: asyncpg.Connection) -> tuple[list[dict[str, Any]], int]:
@@ -151,6 +158,7 @@ async def run(
             "duplicates": [
                 {"year": y, "make": m, "model": mo, "ids": ids} for y, m, mo, ids in report.duplicates
             ],
+            "missing_baseline_vehicles": report.missing,
             "exit_code": report.exit_code,
         }
         print(json.dumps(payload, indent=2))
@@ -158,6 +166,10 @@ async def run(
         print(_table(report))
         print(f"orphaned join rows: {report.orphans}")
         print(f"duplicate active identities: {len(report.duplicates)}")
+        print(
+            "baseline vehicles no longer active: "
+            + (", ".join(report.missing) if report.missing else "0")
+        )
         print(f"exit code: {report.exit_code}")
     return report.exit_code
 

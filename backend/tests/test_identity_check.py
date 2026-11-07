@@ -38,6 +38,16 @@ def test_a_vehicle_above_baseline_or_without_one_passes():
     assert by_id[5000].baseline is None and by_id[5000].status == "ok"
 
 
+def test_a_baseline_vehicle_that_is_no_longer_active_fails_and_is_named():
+    """A baseline vehicle deleted or deactivated (e.g. wrongly absorbed by the backfill)
+    must not pass silently: its communications cannot be shown to have survived."""
+    report = ic.build_report([_v(6, 700)], orphans=0, baseline={"6": 671, "8": 133})
+
+    assert report.exit_code == 1
+    assert report.missing == ["8"]
+    assert [r.status for r in report.rows] == ["ok"]
+
+
 def test_orphaned_join_rows_fail():
     report = ic.build_report([_v(6, 10)], orphans=2, baseline=None)
 

@@ -83,8 +83,9 @@ python -m src.scripts.identity_check --baseline tests/fixtures/identity_baseline
 
 It prints, per active vehicle, the linked communications, the communications the
 index lists for that identity, and the delta against the baseline. It exits 1 if
-any join row is orphaned, any active identity is duplicated, or any vehicle has
-fewer linked communications than its baseline; `--baseline` is optional and
+any join row is orphaned, any active identity is duplicated, any vehicle has
+fewer linked communications than its baseline, or any vehicle in the baseline is
+no longer active; `--baseline` is optional and
 `--json` emits the report as JSON.
 
 ## Checking the last run
