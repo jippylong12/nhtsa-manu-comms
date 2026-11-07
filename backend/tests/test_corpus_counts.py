@@ -29,11 +29,9 @@ from src.config import get_settings
 from src.corpus import service as corpus_service
 from src.vehicles.service import VehicleService
 
-VID = 999_000_000 + int(uuid.uuid4().int % 100_000)
-
-# The exact shape of the original bug: a vehicle whose name carries a cab style,
-# and bulletins that name only the base model.
-CAB_STYLE_MODEL = "F-150 SUPER CREW"
+# Identity of the test vehicles. Unique per run so a stray row can never collide.
+TAG = f"COUNT{uuid.uuid4().hex[:8].upper()}"
+MODEL = f"{TAG} TRUCK"
 
 
 @pytest_asyncio.fixture
@@ -46,18 +44,17 @@ async def vehicle_with_corpus():
     conn = await asyncpg.connect(settings.database_url)
 
     async def wipe():
-        await conn.execute("DELETE FROM communications WHERE nhtsa_id LIKE $1", f"count-{VID}-%")
-        await conn.execute("DELETE FROM vehicles WHERE nhtsa_vehicle_id = $1", VID)
+        await conn.execute("DELETE FROM communications WHERE nhtsa_id LIKE $1", f"count-{TAG}-%")
+        await conn.execute("DELETE FROM vehicles WHERE model LIKE $1", f"{TAG}%")
 
     try:
         await wipe()
         row_id = await conn.fetchval(
             """
-            INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model)
-            VALUES ($1, 2020, 'FORD', $2) RETURNING id
+            INSERT INTO vehicles (year, make, model)
+            VALUES (2020, 'FORD', $1) RETURNING id
             """,
-            VID,
-            CAB_STYLE_MODEL,
+            MODEL,
         )
         for n in range(3):
             comm_id = await conn.fetchval(
@@ -65,7 +62,7 @@ async def vehicle_with_corpus():
                 INSERT INTO communications (nhtsa_id, communication_number, status, raw)
                 VALUES ($1, $2, 'processed', $3::jsonb) RETURNING id
                 """,
-                f"count-{VID}-{n}",
+                f"count-{TAG}-{n}",
                 f"TSB-{n}",
                 # The bulletin names the base model, not the cab-style name.
                 '{"associatedProducts": [{"productModel": "F-150"}]}',
@@ -89,9 +86,9 @@ async def test_a_cab_style_qualified_vehicle_counts_its_bulletins(vehicle_with_c
     Nothing compares "F-150 SUPER CREW" to "F-150" any more, so the name cannot
     make the count wrong.
     """
-    vehicle = await VehicleService.get_vehicle(VID)
+    vehicle = await VehicleService.get_vehicle(vehicle_with_corpus)
 
-    assert vehicle["model"] == CAB_STYLE_MODEL
+    assert vehicle["model"] == MODEL
     assert vehicle["comm_count"] == 3
 
 
@@ -99,8 +96,10 @@ async def test_a_cab_style_qualified_vehicle_counts_its_bulletins(vehicle_with_c
 async def test_the_card_count_and_the_detail_list_cannot_disagree(vehicle_with_corpus):
     """The symptom that started this project: a card reading 389 above a detail
     page reading 0. Both numbers now come from the same rows."""
-    vehicle = await VehicleService.get_vehicle(VID)
-    _, listed_total = await corpus_service.list_communications(vehicle_id=VID, per_page=200)
+    vehicle = await VehicleService.get_vehicle(vehicle_with_corpus)
+    _, listed_total = await corpus_service.list_communications(
+        vehicle_id=vehicle_with_corpus, per_page=200
+    )
 
     assert vehicle["comm_count"] == listed_total
 
@@ -109,10 +108,17 @@ async def test_the_card_count_and_the_detail_list_cannot_disagree(vehicle_with_c
 async def test_a_model_name_carrying_regex_metacharacters_is_harmless(vehicle_with_corpus):
     """ "CLA 350 4MATIC (EV)" and "RANGER [XLT" are real dropdown entries. They
     used to have to be escaped into a query; now they are never a pattern."""
-    for hostile in ("CLA 350 4MATIC (EV)", "RANGER [XLT", "F-150 (2WD)"):
-        updated = await VehicleService.update_vehicle(VID, model=hostile)
-        assert updated["model"] == hostile.upper()
-        assert updated["comm_count"] == 3, f"{hostile!r} changed the count"
+    conn = await asyncpg.connect(get_settings().database_url)
+    try:
+        for hostile in ("CLA 350 4MATIC (EV)", "RANGER [XLT", "F 150 (2WD)"):
+            await conn.execute(
+                "UPDATE vehicles SET model = $2 WHERE id = $1", vehicle_with_corpus, f"{TAG} {hostile}"
+            )
+            vehicle = await VehicleService.get_vehicle(vehicle_with_corpus)
+            assert vehicle["model"] == f"{TAG} {hostile}"
+            assert vehicle["comm_count"] == 3, f"{hostile!r} changed the count"
+    finally:
+        await conn.close()
 
 
 @pytest.mark.asyncio
@@ -123,20 +129,19 @@ async def test_a_vehicle_with_no_corpus_counts_zero_rather_than_vanishing(
     with nothing linked still returns a row."""
     settings = get_settings()
     conn = await asyncpg.connect(settings.database_url)
-    empty_vid = VID + 1
     try:
-        await conn.execute(
+        empty_vid = await conn.fetchval(
             """
-            INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model)
-            VALUES ($1, 2020, 'FORD', 'RANGER')
+            INSERT INTO vehicles (year, make, model)
+            VALUES (2020, 'FORD', $1) RETURNING id
             """,
-            empty_vid,
+            f"{TAG} EMPTY",
         )
         vehicle = await VehicleService.get_vehicle(empty_vid)
         assert vehicle is not None
         assert vehicle["comm_count"] == 0
     finally:
-        await conn.execute("DELETE FROM vehicles WHERE nhtsa_vehicle_id = $1", empty_vid)
+        await conn.execute("DELETE FROM vehicles WHERE model LIKE $1", f"{TAG}%")
         await conn.close()
 
 
@@ -145,8 +150,8 @@ async def test_unlinking_a_communication_moves_the_count(vehicle_with_corpus):
     """Derived, not stored: there is no second copy to go stale."""
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        await conn.execute("DELETE FROM communications WHERE nhtsa_id = $1", f"count-{VID}-0")
+        await conn.execute("DELETE FROM communications WHERE nhtsa_id = $1", f"count-{TAG}-0")
     finally:
         await conn.close()
 
-    assert (await VehicleService.get_vehicle(VID))["comm_count"] == 2
+    assert (await VehicleService.get_vehicle(vehicle_with_corpus))["comm_count"] == 2

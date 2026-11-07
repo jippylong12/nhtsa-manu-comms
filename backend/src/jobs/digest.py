@@ -86,7 +86,7 @@ async def build_digest(since: Optional[datetime], generated_at: datetime) -> Dig
             SELECT
                 c.nhtsa_id, c.communication_type, c.communication_date,
                 c.summary, c.processed_at,
-                v.nhtsa_vehicle_id, v.year, v.make, v.model,
+                v.id AS vehicle_id, v.year, v.make, v.model,
                 (SELECT d.llm_summary FROM comm_documents d
                  WHERE d.communication_id = c.id AND d.llm_summary IS NOT NULL
                  ORDER BY d.id LIMIT 1) AS llm_summary,

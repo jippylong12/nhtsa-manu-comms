@@ -17,7 +17,7 @@ detail fetch, which already records its failures.
 
 Usage:
     python -m src.jobs.sync --all
-    python -m src.jobs.sync --vehicle 218944
+    python -m src.jobs.sync --vehicle 3
     python -m src.jobs.sync --all --limit 25      # cap comms per vehicle (smoke runs)
 """
 
@@ -93,7 +93,6 @@ async def sync_vehicle(
     """Sync one vehicle. Never raises: a failure here must not abort the run."""
     stats = SyncStats()
     label = f"{vehicle['year']} {vehicle['make']} {vehicle['model']}".strip()
-    nhtsa_vehicle_id = vehicle["nhtsa_vehicle_id"]
 
     # Which communications belong to this vehicle, straight from the local index:
     # exact match on the plain nameplate NHTSA files bulletins under. `make` is
@@ -113,7 +112,7 @@ async def sync_vehicle(
             normalize_model(vehicle["model"]),
         )
     except Exception as e:  # noqa: BLE001 - one vehicle failing is not fatal
-        msg = f"{label} ({nhtsa_vehicle_id}): index lookup failed: {type(e).__name__}: {e}"
+        msg = f"{label} ({vehicle['id']}): index lookup failed: {type(e).__name__}: {e}"
         log.error(msg)
         stats.errors.append(msg)
         return stats
@@ -125,7 +124,7 @@ async def sync_vehicle(
     if limit:
         comm_ids = comm_ids[:limit]
     stats.found = len(comm_ids)
-    log.info("%s (%s): %d communications listed", label, nhtsa_vehicle_id, len(comm_ids))
+    log.info("%s (%s): %d communications listed", label, vehicle["id"], len(comm_ids))
 
     # Communications already stored still need a vehicle link (a comm shared by
     # two vehicles is one row and two links), but they do not need refetching
@@ -227,7 +226,7 @@ async def run(vehicle_ids: list[int] | None, limit: int | None) -> SyncStats:
     async with pool.acquire() as conn:
         vehicles = await repo.tracked_vehicles(conn)
         if vehicle_ids:
-            vehicles = [v for v in vehicles if v["nhtsa_vehicle_id"] in vehicle_ids]
+            vehicles = [v for v in vehicles if v["id"] in vehicle_ids]
         if not vehicles:
             log.warning(
                 "No tracked vehicles matched. Add one in the app, or check the "
@@ -250,7 +249,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sync NHTSA communications into Postgres.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true", help="sync every active tracked vehicle")
-    group.add_argument("--vehicle", type=int, action="append", help="NHTSA vehicleId (repeatable)")
+    group.add_argument("--vehicle", type=int, action="append", help="vehicle row id (repeatable)")
     parser.add_argument("--limit", type=int, help="cap communications per vehicle (smoke runs)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()

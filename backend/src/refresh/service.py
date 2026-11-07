@@ -57,7 +57,7 @@ class RefreshConflict(Exception):
 # --------------------------------------------------------------------------
 
 
-async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
+async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
     """What a refresh would do, and what it would cost. Spends nothing.
 
     Two kinds of work can be outstanding, and the estimate has to cover both or
@@ -75,7 +75,7 @@ async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
     live `get_vehicle_details` call, so the preview no longer touches NHTSA and can
     no longer 504.
     """
-    vehicle = await VehicleService.get_vehicle(nhtsa_vehicle_id)
+    vehicle = await VehicleService.get_vehicle(vehicle_id)
     if vehicle is None:
         return None
 
@@ -101,7 +101,7 @@ async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
               AND d.llm_summary IS NULL
               AND {repo.vehicle_scope('$1')}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
         )
 
     new_bulletins = len(set(listed) - known)
@@ -110,7 +110,7 @@ async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
     per_document = await estimate.cost_per_document()
 
     return {
-        "vehicle_id": nhtsa_vehicle_id,
+        "vehicle_id": vehicle_id,
         "listed_by_nhtsa": len(listed),
         "new_bulletins": new_bulletins,
         "unfinished_documents": unfinished,
@@ -125,7 +125,7 @@ async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 _RUN_COLUMNS = """
-    r.id, v.nhtsa_vehicle_id AS vehicle_id, r.status, r.stage, r.stage_note,
+    r.id, r.vehicle_id, r.status, r.stage, r.stage_note,
     r.done, r.total, r.expected_documents, r.estimated_cost_usd,
     r.actual_cost_usd, r.counts, r.error,
     r.started_at, r.heartbeat_at, r.finished_at
@@ -148,7 +148,7 @@ def _row(row) -> Optional[dict[str, Any]]:
     return d
 
 
-async def latest_run(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
+async def latest_run(vehicle_id: int) -> Optional[dict[str, Any]]:
     """The most recent run for a vehicle, finished or not."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -156,12 +156,11 @@ async def latest_run(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
             await conn.fetchrow(
                 f"""
                 SELECT {_RUN_COLUMNS} FROM refresh_runs r
-                JOIN vehicles v ON v.id = r.vehicle_id
-                WHERE v.nhtsa_vehicle_id = $1
+                WHERE r.vehicle_id = $1
                 ORDER BY r.started_at DESC
                 LIMIT 1
                 """,
-                nhtsa_vehicle_id,
+                vehicle_id,
             )
         )
 
@@ -174,7 +173,6 @@ async def active_run() -> Optional[dict[str, Any]]:
             await conn.fetchrow(
                 f"""
                 SELECT {_RUN_COLUMNS} FROM refresh_runs r
-                JOIN vehicles v ON v.id = r.vehicle_id
                 WHERE r.active_lock IS NOT NULL
                 """
             )
@@ -238,15 +236,15 @@ async def _progress(
         )
 
 
-async def start(nhtsa_vehicle_id: int) -> dict[str, Any]:
+async def start(vehicle_id: int) -> dict[str, Any]:
     """Begin a run. Raises RefreshConflict if one is already active."""
-    vehicle = await VehicleService.get_vehicle(nhtsa_vehicle_id)
+    vehicle = await VehicleService.get_vehicle(vehicle_id)
     if vehicle is None:
-        raise LookupError(f"vehicle {nhtsa_vehicle_id} is not tracked")
+        raise LookupError(f"vehicle {vehicle_id} is not tracked")
 
     await _reap_abandoned()
 
-    plan = await preview(nhtsa_vehicle_id)
+    plan = await preview(vehicle_id)
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
@@ -262,10 +260,10 @@ async def start(nhtsa_vehicle_id: int) -> dict[str, Any]:
                     total, expected_documents, estimated_cost_usd, active_lock
                 )
                 SELECT v.id, 'queued', 'sync', 'Starting', $2, $2, $3, true
-                FROM vehicles v WHERE v.nhtsa_vehicle_id = $1
+                FROM vehicles v WHERE v.id = $1
                 RETURNING id
                 """,
-                nhtsa_vehicle_id,
+                vehicle_id,
                 plan["documents_to_process"],
                 plan["estimated_cost_high_usd"],
             )
@@ -278,14 +276,13 @@ async def start(nhtsa_vehicle_id: int) -> dict[str, Any]:
         row = await conn.fetchrow(
             f"""
             SELECT {_RUN_COLUMNS} FROM refresh_runs r
-            JOIN vehicles v ON v.id = r.vehicle_id
             WHERE r.id = $1
             """,
             run_id,
         )
 
     run = _row(row)
-    task = asyncio.create_task(_execute(run["id"], nhtsa_vehicle_id))
+    task = asyncio.create_task(_execute(run["id"], vehicle_id))
     _running.add(task)
     task.add_done_callback(_running.discard)
     return run
@@ -329,7 +326,7 @@ async def _finish(
         )
 
 
-async def _vehicle_state(nhtsa_vehicle_id: int) -> dict[str, Any]:
+async def _vehicle_state(vehicle_id: int) -> dict[str, Any]:
     """How the vehicle's corpus stands, for the run's closing report."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -346,7 +343,7 @@ async def _vehicle_state(nhtsa_vehicle_id: int) -> dict[str, Any]:
             FROM communications c
             WHERE {repo.vehicle_scope('$1')}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
             llm_stage.MAX_LLM_ATTEMPTS,
         )
     return {k: int(v) for k, v in dict(row).items()}
@@ -372,7 +369,7 @@ async def _freshen_index() -> None:
         log.warning("flat-file index refresh skipped: %s: %s", type(e).__name__, e)
 
 
-async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
+async def _execute(run_id: int, vehicle_id: int) -> None:
     """The background worker. Never raises; every exit updates the run row."""
     try:
         # ---- keep the flat-file index current (best effort) ------------
@@ -386,7 +383,7 @@ async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
             vehicles = [
                 v
                 for v in await repo.tracked_vehicles(conn)
-                if v["nhtsa_vehicle_id"] == nhtsa_vehicle_id
+                if v["id"] == vehicle_id
             ]
             if not vehicles:
                 await _finish(run_id, "failed", error="the vehicle is no longer tracked")
@@ -394,7 +391,7 @@ async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
             client = NHTSAClient()
             stats = await sync_job.sync_vehicle(conn, client, vehicles[0])
 
-        await VehicleService.touch_fetched_at(nhtsa_vehicle_id)
+        await VehicleService.touch_fetched_at(vehicle_id)
         await _progress(
             run_id,
             stage="read",
@@ -402,7 +399,7 @@ async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
         )
 
         # ---- extract ---------------------------------------------------
-        extracted = await processor.run_extract(None, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        extracted = await processor.run_extract(None, vehicle_id=vehicle_id)
         await _progress(
             run_id,
             stage="analyse",
@@ -411,12 +408,12 @@ async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
         )
 
         # ---- llm -------------------------------------------------------
-        await processor.run_llm(None, sync=False, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        await processor.run_llm(None, sync=False, vehicle_id=vehicle_id)
         await llm_stage.promote_completed_communications()
         await _progress(run_id, stage="index", note="Indexing for search")
 
         # ---- embed -----------------------------------------------------
-        await processor.run_embed(None, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        await processor.run_embed(None, vehicle_id=vehicle_id)
 
         # ---- housekeeping ----------------------------------------------
         await _progress(run_id, stage="finalise", note="Tidying up")
@@ -426,7 +423,7 @@ async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
         except Exception as e:  # noqa: BLE001 - reclaiming disk never fails a run
             log.warning("archive prune skipped: %s: %s", type(e).__name__, e)
 
-        state = await _vehicle_state(nhtsa_vehicle_id)
+        state = await _vehicle_state(vehicle_id)
         counts = {
             "new_bulletins": stats.new_comms,
             "new_documents": stats.new_docs,

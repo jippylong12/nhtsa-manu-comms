@@ -33,8 +33,8 @@ async def seeded():
         saved = await conn.fetchval("SELECT last_watermark FROM digest_state WHERE id = true")
 
         v = await conn.fetchval(
-            "INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model) "
-            "VALUES (995001, 2099, 'CHEVROLET', $1) RETURNING id",
+            "INSERT INTO vehicles (year, make, model) "
+            "VALUES (2099, 'CHEVROLET', $1) RETURNING id",
             f"{NS} TRUCK",
         )
         # processed_at at BASE + 1h, +2h, +3h so watermark ordering is explicit.

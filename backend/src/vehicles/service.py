@@ -16,13 +16,14 @@ from typing import Any, Optional
 import asyncpg
 
 from src.db import get_pool
+from src.communications.flatfile import normalize_model
 from src.jobs import repository as repo
 
 # The wire shape in one place. comm_count is a correlated subquery rather than a
 # GROUP BY join so a vehicle with no corpus still returns a row reading zero,
 # instead of dropping out of the list entirely.
 _VEHICLE_COLUMNS = """
-    v.id, v.nhtsa_vehicle_id, v.year, v.make, v.model, v.trim, v.keywords,
+    v.id, v.year, v.make, v.model, v.keywords,
     v.last_fetched_at, v.created_at, v.updated_at,
     (SELECT count(*) FROM communication_vehicles cv WHERE cv.vehicle_id = v.id)
         AS comm_count
@@ -38,11 +39,10 @@ def _to_response(row: asyncpg.Record) -> dict[str, Any]:
     """
     return {
         "id": str(row["id"]),
-        "vehicle_id": row["nhtsa_vehicle_id"],
+        "vehicle_id": row["id"],
         "year": str(row["year"]),
         "model": row["model"],
         "make": row["make"],
-        "trim": row["trim"],
         "keywords": list(row["keywords"]),
         "last_fetched": row["last_fetched_at"],
         "comm_count": row["comm_count"],
@@ -64,29 +64,28 @@ class VehicleService:
 
     @staticmethod
     async def create_vehicle(
-        vehicle_id: int,
         year: str,
+        make: str,
         model: str,
         keywords: list[str] | None = None,
-        make: str | None = None,
-        trim: str | None = None,
     ) -> dict[str, Any]:
-        """Track a vehicle, or reactivate and refresh one already known.
+        """Track a vehicle, or reactivate one already known.
 
-        The pipeline takes its worklist from this table, so the vehicle is
-        visible to sync the moment this returns. There is no bootstrap step.
+        Identity is (year, make, model) with the model in canonical
+        plain-nameplate form, so `f-150` and `F 150` are the same vehicle. The
+        pipeline takes its worklist from this table, so the vehicle is visible
+        to sync the moment this returns. There is no bootstrap step.
         """
         pool = await get_pool()
         async with pool.acquire() as conn:
-            row_id, _ = await repo.upsert_vehicle(
-                conn,
-                nhtsa_vehicle_id=vehicle_id,
-                year=_parse_year(year),
-                make=(make or "UNKNOWN").upper(),
-                model=model.upper(),
-                trim=trim,
-                keywords=keywords or [],
-            )
+            async with conn.transaction():
+                row_id, _ = await repo.upsert_vehicle(
+                    conn,
+                    year=_parse_year(year),
+                    make=make.strip().upper(),
+                    model=normalize_model(model),
+                    keywords=keywords or [],
+                )
             row = await conn.fetchrow(
                 f"SELECT {_VEHICLE_COLUMNS} FROM vehicles v WHERE v.id = $1", row_id
             )
@@ -94,7 +93,7 @@ class VehicleService:
 
     @staticmethod
     async def get_vehicle(vehicle_id: int) -> Optional[dict[str, Any]]:
-        """Get a tracked vehicle by its NHTSA ID, or None if it is not tracked.
+        """Get a tracked vehicle by its id, or None if it is not tracked.
 
         Deactivated vehicles are not found. A soft delete has to look like a
         delete from the outside, or a removed vehicle would stay addressable and
@@ -105,7 +104,7 @@ class VehicleService:
             row = await conn.fetchrow(
                 f"""
                 SELECT {_VEHICLE_COLUMNS} FROM vehicles v
-                WHERE v.nhtsa_vehicle_id = $1 AND v.active
+                WHERE v.id = $1 AND v.active
                 """,
                 vehicle_id,
             )
@@ -135,35 +134,19 @@ class VehicleService:
     @staticmethod
     async def update_vehicle(
         vehicle_id: int,
-        year: Optional[str] = None,
-        model: Optional[str] = None,
         keywords: Optional[list[str]] = None,
-        make: Optional[str] = None,
-        trim: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update a vehicle's tracking configuration.
+        """Update a vehicle's tracking configuration (its keywords).
 
-        Only the fields actually supplied are touched, so PATCHing keywords
-        cannot blank the make. Unlike `create_vehicle`, an explicit empty list
-        here does clear the keywords; that is what the caller asked for.
+        Unlike `create_vehicle`, an explicit empty list here does clear the
+        keywords; that is what the caller asked for.
         """
         assignments: list[str] = []
         params: list[Any] = []
 
-        def assign(column: str, value: Any) -> None:
-            params.append(value)
-            assignments.append(f"{column} = ${len(params)}")
-
-        if year is not None:
-            assign("year", _parse_year(year))
-        if model is not None:
-            assign("model", model.upper())
         if keywords is not None:
-            assign("keywords", keywords)
-        if make is not None:
-            assign("make", make.upper())
-        if trim is not None:
-            assign("trim", trim)
+            params.append(keywords)
+            assignments.append(f"keywords = ${len(params)}")
 
         if not assignments:
             # An empty PATCH is not an error; the caller still expects the
@@ -180,7 +163,7 @@ class VehicleService:
             row_id = await conn.fetchval(
                 f"""
                 UPDATE vehicles SET {", ".join(assignments)}
-                WHERE nhtsa_vehicle_id = ${len(params)} AND active
+                WHERE id = ${len(params)} AND active
                 RETURNING id
                 """,
                 *params,
@@ -206,7 +189,7 @@ class VehicleService:
             row = await conn.fetchrow(
                 """
                 UPDATE vehicles SET active = false
-                WHERE nhtsa_vehicle_id = $1 AND active
+                WHERE id = $1 AND active
                 RETURNING id
                 """,
                 vehicle_id,
@@ -220,7 +203,7 @@ class VehicleService:
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE vehicles SET last_fetched_at = coalesce($2, now()) "
-                "WHERE nhtsa_vehicle_id = $1",
+                "WHERE id = $1",
                 vehicle_id,
                 at,
             )

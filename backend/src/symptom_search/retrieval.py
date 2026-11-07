@@ -275,7 +275,7 @@ def _tag_boost(query_systems: set[str], doc_systems: list[str]) -> tuple[float, 
 _VEHICLE_SCOPE = (
     "EXISTS (SELECT 1 FROM communication_vehicles cv "
     "JOIN vehicles v ON v.id = cv.vehicle_id "
-    "WHERE cv.communication_id = c.id AND v.nhtsa_vehicle_id = $2)"
+    "WHERE cv.communication_id = c.id AND v.id = $2)"
 )
 
 _SELECT_COLS = (
@@ -460,7 +460,7 @@ async def _resolve_revision_families(conn, vehicle_id: int, matches: list[Match]
             FROM comm_documents dd WHERE dd.communication_id = c.id
             ORDER BY dd.id LIMIT 1
         ) d ON true
-        WHERE v.nhtsa_vehicle_id = $1
+        WHERE v.id = $1
           AND c.communication_number IS NOT NULL
           AND c.communication_number ILIKE ANY($2::text[])
         """,

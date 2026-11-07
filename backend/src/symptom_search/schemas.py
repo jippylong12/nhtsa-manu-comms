@@ -14,7 +14,7 @@ from src.vehicles.schemas import CamelModel
 class SymptomSearchRequest(CamelModel):
     """A described problem plus the vehicle it is about."""
 
-    vehicle_id: int = Field(..., description="NHTSA vehicleId to scope the search to")
+    vehicle_id: int = Field(..., description="Vehicle id to scope the search to")
     description: str = Field(..., min_length=1, description="Plain-language symptom description")
 
 

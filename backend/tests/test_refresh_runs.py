@@ -20,7 +20,10 @@ from src.config import get_settings
 from src.jobs import repository as repo
 from src.refresh import estimate, service
 
-VID = 999_000_000 + int(uuid.uuid4().int % 100_000)
+# Identity of the test vehicle, plus a row id no vehicle has.
+IDENTITY = (2019, "MAZDA", "CX 5")
+NO_SUCH_VEHICLE = 999_999_999
+TAG = uuid.uuid4().hex[:8]
 
 
 @pytest_asyncio.fixture
@@ -34,7 +37,9 @@ async def tracked():
         conn = await asyncpg.connect(settings.database_url)
         try:
             # refresh_runs cascades from vehicles.
-            await conn.execute("DELETE FROM vehicles WHERE nhtsa_vehicle_id = $1", VID)
+            await conn.execute(
+                "DELETE FROM vehicles WHERE year = $1 AND make = $2 AND model = $3", *IDENTITY
+            )
         finally:
             await conn.close()
 
@@ -52,10 +57,10 @@ async def tracked():
 
         row_id = await conn.fetchval(
             """
-            INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model)
-            VALUES ($1, 2019, 'MAZDA', 'CX-5') RETURNING id
+            INSERT INTO vehicles (year, make, model)
+            VALUES ($1, $2, $3) RETURNING id
             """,
-            VID,
+            *IDENTITY,
         )
     finally:
         await conn.close()
@@ -145,7 +150,7 @@ async def test_an_abandoned_run_is_reaped(tracked):
 
     await service._reap_abandoned()
 
-    run = await service.latest_run(VID)
+    run = await service.latest_run(tracked)
     assert run["status"] == "failed"
     assert "abandoned" in run["error"]
     # And the lock is free again.
@@ -156,7 +161,7 @@ async def test_an_abandoned_run_is_reaped(tracked):
 async def test_a_live_run_is_not_reaped(tracked):
     await _insert_run(tracked)
     await service._reap_abandoned()
-    assert (await service.latest_run(VID))["status"] == "running"
+    assert (await service.latest_run(tracked))["status"] == "running"
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +176,7 @@ async def test_progress_leaves_unset_fields_alone(tracked):
     await service._progress(run_id, stage="read", note="Reading documents", done=3, total=10)
     await service._progress(run_id, note="Still reading")
 
-    run = await service.latest_run(VID)
+    run = await service.latest_run(tracked)
     assert run["stage"] == "read"
     assert run["stage_note"] == "Still reading"
     assert (run["done"], run["total"]) == (3, 10)
@@ -181,7 +186,7 @@ async def test_progress_leaves_unset_fields_alone(tracked):
 async def test_progress_promotes_a_queued_run_to_running(tracked):
     run_id = await _insert_run(tracked, status="queued")
     await service._progress(run_id, stage="sync", note="Starting")
-    assert (await service.latest_run(VID))["status"] == "running"
+    assert (await service.latest_run(tracked))["status"] == "running"
 
 
 @pytest.mark.asyncio
@@ -238,7 +243,7 @@ async def test_a_deleted_vehicle_takes_its_runs_with_it(tracked):
     await _insert_run(tracked)
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        await conn.execute("DELETE FROM vehicles WHERE nhtsa_vehicle_id = $1", VID)
+        await conn.execute("DELETE FROM vehicles WHERE id = $1", tracked)
         assert (
             await conn.fetchval("SELECT count(*) FROM refresh_runs WHERE vehicle_id = $1", tracked)
             == 0
@@ -301,22 +306,20 @@ def test_durations_read_as_english():
 def test_vehicle_scope_passes_everything_through_when_unset():
     """The CLI jobs pass NULL and must keep processing every vehicle."""
     sql = repo.vehicle_scope("$1")
-    assert "$1::int IS NULL" in sql
+    assert "$1::bigint IS NULL" in sql
 
 
 @pytest.mark.asyncio
 async def test_the_stages_only_see_the_vehicle_they_were_given(tracked, conn):
     """A refresh quotes a price for one vehicle's backlog. If a stage drained
     another vehicle's too, the bill could not match the estimate."""
-    other_vid = VID + 1
     other = await conn.fetchval(
         """
-        INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model)
-        VALUES ($1, 2019, 'MAZDA', 'CX-9') RETURNING id
-        """,
-        other_vid,
+        INSERT INTO vehicles (year, make, model)
+        VALUES (2019, 'MAZDA', 'CX 9') RETURNING id
+        """
     )
-    for row_id, nid in ((tracked, f"scope-mine-{VID}"), (other, f"scope-other-{VID}")):
+    for row_id, nid in ((tracked, f"scope-mine-{TAG}"), (other, f"scope-other-{TAG}")):
         comm_id = await conn.fetchval(
             "INSERT INTO communications (nhtsa_id, status) VALUES ($1, 'pending') RETURNING id",
             nid,
@@ -340,7 +343,7 @@ async def test_the_stages_only_see_the_vehicle_they_were_given(tracked, conn):
         WHERE d.llm_summary IS NULL AND c.status = 'pending'
           AND {repo.vehicle_scope('$1')}
         """,
-        VID,
+        tracked,
     )
     unscoped = await conn.fetch(
         f"""
@@ -363,13 +366,13 @@ async def test_the_stages_only_see_the_vehicle_they_were_given(tracked, conn):
 
 @pytest.mark.asyncio
 async def test_preview_of_an_unknown_vehicle_is_a_miss():
-    assert await service.preview(VID + 12345) is None
+    assert await service.preview(NO_SUCH_VEHICLE) is None
 
 
 @pytest.mark.asyncio
 async def test_starting_for_an_untracked_vehicle_raises():
     with pytest.raises(LookupError):
-        await service.start(VID + 12345)
+        await service.start(NO_SUCH_VEHICLE)
 
 
 @pytest.mark.asyncio
@@ -393,10 +396,10 @@ async def test_starting_returns_a_usable_run_and_spawns_the_worker(tracked, monk
     monkeypatch.setattr(service, "preview", fake_preview)
     monkeypatch.setattr(service, "_execute", fake_execute)
 
-    run = await service.start(VID)
+    run = await service.start(tracked)
 
     assert run is not None, "start() must return the row it just inserted"
-    assert run["vehicle_id"] == VID
+    assert run["vehicle_id"] == tracked
     assert run["status"] == "queued"
     assert run["total"] == 7
     assert run["expected_documents"] == 7
@@ -416,13 +419,13 @@ async def test_a_run_row_survives_the_api_response_model(tracked):
     run_id = await _insert_run(tracked)
     await service._progress(run_id, stage="read", note="Reading documents")
 
-    run = await service.latest_run(VID)
+    run = await service.latest_run(tracked)
     assert isinstance(run["counts"], dict)
     # The real assertion: this is what the endpoint does, and it used to raise.
     assert RefreshRun(**run).counts == {}
 
     await service._finish(run_id, "succeeded", counts={"analysed": 2})
-    finished = await service.latest_run(VID)
+    finished = await service.latest_run(tracked)
     assert RefreshRun(**finished).counts == {"analysed": 2}
 
 
@@ -445,7 +448,7 @@ async def test_a_second_start_conflicts_rather_than_double_spending(tracked, mon
     await _insert_run(tracked)
 
     with pytest.raises(service.RefreshConflict) as caught:
-        await service.start(VID)
+        await service.start(tracked)
 
-    assert caught.value.active["vehicle_id"] == VID
+    assert caught.value.active["vehicle_id"] == tracked
     assert started == [], "the conflicting call must not have started any work"

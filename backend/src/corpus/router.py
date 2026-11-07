@@ -34,7 +34,7 @@ def _csv(value: Optional[str]) -> Optional[list[str]]:
     summary="List processed communications with filters and full-text search",
 )
 async def list_communications(
-    vehicle_id: Optional[int] = Query(None, description="NHTSA vehicleId"),
+    vehicle_id: Optional[int] = Query(None, description="Vehicle id"),
     comm_type: Optional[str] = Query(None, description="Communication type code (TSB, PIT, ...)"),
     status: Optional[str] = Query(None, description="pending | processed | failed"),
     date_from: Optional[datetime] = Query(None, description="Earliest communication date"),
@@ -80,7 +80,7 @@ async def list_communications(
 async def tag_vocabulary(
     limit: int = Query(100, ge=1, le=500),
     vehicle_id: Optional[int] = Query(
-        None, description="Scope the vocabulary to one NHTSA vehicleId"
+        None, description="Scope the vocabulary to one vehicle id"
     ),
 ) -> TagVocabulary:
     vocab = await service.tag_vocabulary(limit=limit, vehicle_id=vehicle_id)

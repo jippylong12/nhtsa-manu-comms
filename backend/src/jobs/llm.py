@@ -223,7 +223,7 @@ def _vision_parts(url: str) -> list[types.Part]:
 async def _pending_documents(
     limit: int | None,
     vision_only: bool = False,
-    nhtsa_vehicle_id: int | None = None,
+    vehicle_id: int | None = None,
 ) -> list[dict]:
     from src.db import get_pool
     from src.jobs.repository import vehicle_scope
@@ -244,7 +244,7 @@ async def _pending_documents(
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """,
-            nhtsa_vehicle_id,
+            vehicle_id,
         )
     return [dict(r) for r in rows]
 
@@ -345,7 +345,7 @@ async def run_sync(
     limit: int | None = None,
     concurrency: int = 4,
     vision_only: bool = False,
-    nhtsa_vehicle_id: int | None = None,
+    vehicle_id: int | None = None,
 ) -> LLMStats:
     """Process documents with the standard API. Full price, immediate results.
 
@@ -357,7 +357,7 @@ async def run_sync(
     client = _client()
     stats = LLMStats()
     docs = await _pending_documents(
-        limit, vision_only=vision_only, nhtsa_vehicle_id=nhtsa_vehicle_id
+        limit, vision_only=vision_only, vehicle_id=vehicle_id
     )
     if not docs:
         log.info("no documents awaiting LLM extraction")
@@ -435,7 +435,7 @@ async def run_sync(
     return stats
 
 
-async def submit_batch(limit: int | None = None, nhtsa_vehicle_id: int | None = None) -> list[str]:
+async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) -> list[str]:
     """Submit pending documents as Batch API jobs. Returns job names.
 
     Vision-fallback documents are excluded: they are a rare path and are
@@ -445,7 +445,7 @@ async def submit_batch(limit: int | None = None, nhtsa_vehicle_id: int | None = 
     client = _client()
     docs = [
         d
-        for d in await _pending_documents(limit, nhtsa_vehicle_id=nhtsa_vehicle_id)
+        for d in await _pending_documents(limit, vehicle_id=vehicle_id)
         if d["extraction_method"] != "vision-fallback"
     ]
     if not docs:

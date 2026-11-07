@@ -46,7 +46,7 @@ def _build_filters(
         f.add(
             "EXISTS (SELECT 1 FROM communication_vehicles cv "
             "JOIN vehicles v ON v.id = cv.vehicle_id "
-            "WHERE cv.communication_id = c.id AND v.nhtsa_vehicle_id = {})",
+            "WHERE cv.communication_id = c.id AND v.id = {})",
             vehicle_id,
         )
     if comm_type:
@@ -165,7 +165,7 @@ async def _vehicles_for_many(conn, nhtsa_ids: list[str]) -> dict[str, list[dict]
     rows = await conn.fetch(
         """
         SELECT c.nhtsa_id,
-               v.nhtsa_vehicle_id, v.year, v.make, v.model, v.trim
+               v.id AS vehicle_id, v.year, v.make, v.model
         FROM communication_vehicles cv
         JOIN vehicles v ON v.id = cv.vehicle_id
         JOIN communications c ON c.id = cv.communication_id
@@ -245,7 +245,7 @@ async def tag_vocabulary(
                 SELECT 1 FROM communication_vehicles cv
                 JOIN vehicles v ON v.id = cv.vehicle_id
                 WHERE cv.communication_id = d.communication_id
-                  AND v.nhtsa_vehicle_id = $2
+                  AND v.id = $2
             )
         """
         if vehicle_id is not None

@@ -115,49 +115,59 @@ async def link_vehicle(
 async def upsert_vehicle(
     conn: asyncpg.Connection,
     *,
-    nhtsa_vehicle_id: int,
     year: int,
     make: str,
     model: str,
-    trim: Optional[str] = None,
     keywords: Optional[list[str]] = None,
 ) -> tuple[int, bool]:
-    """Insert or refresh a tracked vehicle. Returns ``(id, was_inserted)``.
+    """Track a vehicle by identity ``(year, make, model)``. Returns ``(id, was_inserted)``.
 
-    An upsert never destroys information the caller did not supply. Since
-    JIP-416 this table is the only store, so a re-add that omitted the make
-    would otherwise overwrite a known 'HONDA' with the 'UNKNOWN' placeholder,
-    and an add with no keywords would silently clear the ones already
-    configured. `update_vehicle` is the way to clear a field on purpose.
+    `model` is expected in canonical plain-nameplate form (``normalize_model``).
+    Select-then-write rather than ON CONFLICT: the unique index is partial
+    (``WHERE active``), so ON CONFLICT would insert a second row beside an
+    inactive twin instead of reviving it. The caller owns the transaction.
+
+    An existing row is reactivated, and keeps its keywords when the caller
+    supplied none: an add with no keywords never clears the ones already
+    configured. `update_vehicle` is the way to change them on purpose.
     """
-    row = await conn.fetchrow(
+    keywords = keywords or []
+    existing = await conn.fetchval(
         """
-        INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model, trim, keywords)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (nhtsa_vehicle_id) DO UPDATE SET
-            year     = EXCLUDED.year,
-            model    = EXCLUDED.model,
-            -- 'UNKNOWN' is the absence of a make, not a make.
-            make     = CASE WHEN EXCLUDED.make = 'UNKNOWN'
-                            THEN vehicles.make ELSE EXCLUDED.make END,
-            trim     = coalesce(EXCLUDED.trim, vehicles.trim),
-            keywords = CASE WHEN EXCLUDED.keywords = '{}'::text[]
-                            THEN vehicles.keywords ELSE EXCLUDED.keywords END,
-            -- Upserting a vehicle means tracking it. Without this, removing a
-            -- vehicle and adding it back would leave active false, and
-            -- tracked_vehicles filters on active, so sync would ignore it
-            -- forever.
-            active   = true
-        RETURNING id, (xmax = 0) AS inserted
+        SELECT id FROM vehicles
+        WHERE year = $1 AND make = $2 AND model = $3
+        ORDER BY active DESC, id
+        LIMIT 1
         """,
-        nhtsa_vehicle_id,
         year,
         make,
         model,
-        trim,
-        keywords or [],
     )
-    return row["id"], row["inserted"]
+    if existing is not None:
+        await conn.execute(
+            """
+            UPDATE vehicles
+            SET active = true,
+                keywords = CASE WHEN $2::text[] = '{}'::text[] THEN keywords ELSE $2 END,
+                updated_at = now()
+            WHERE id = $1
+            """,
+            existing,
+            keywords,
+        )
+        return existing, False
+    row_id = await conn.fetchval(
+        """
+        INSERT INTO vehicles (year, make, model, keywords)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+        """,
+        year,
+        make,
+        model,
+        keywords,
+    )
+    return row_id, True
 
 
 def vehicle_scope(param: str, comm_id: str = "c.id") -> str:
@@ -167,14 +177,14 @@ def vehicle_scope(param: str, comm_id: str = "c.id") -> str:
     in-app refresh quotes a price for one vehicle's backlog and must then
     process that backlog and no other, or the bill will not match the estimate.
 
-    `param` is the ``$n`` placeholder holding the NHTSA vehicle id. A NULL there
+    `param` is the ``$n`` placeholder holding the vehicles.id row id. A NULL there
     means "every vehicle", which is what the CLI jobs pass.
     """
     return (
-        f"({param}::int IS NULL OR EXISTS ("
+        f"({param}::bigint IS NULL OR EXISTS ("
         f" SELECT 1 FROM communication_vehicles cv"
         f" JOIN vehicles v ON v.id = cv.vehicle_id"
-        f" WHERE cv.communication_id = {comm_id} AND v.nhtsa_vehicle_id = {param}))"
+        f" WHERE cv.communication_id = {comm_id} AND v.id = {param}::bigint))"
     )
 
 
@@ -194,7 +204,7 @@ async def tracked_vehicles(
     """Return tracked vehicles from the canonical store."""
     rows = await conn.fetch(
         f"""
-        SELECT id, nhtsa_vehicle_id, year, make, model, trim, keywords
+        SELECT id, year, make, model, keywords
         FROM vehicles
         {"WHERE active" if only_active else ""}
         ORDER BY year, model

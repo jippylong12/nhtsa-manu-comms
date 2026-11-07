@@ -24,12 +24,10 @@ async def create_vehicle(payload: VehicleCreate) -> VehicleResponse:
     """Add a new vehicle to track for manufacturer communications."""
     try:
         vehicle = await VehicleService.create_vehicle(
-            vehicle_id=payload.vehicle_id,
             year=payload.year,
+            make=payload.make,
             model=payload.model,
             keywords=payload.keywords,
-            make=payload.make,
-            trim=payload.trim,
         )
     except ValueError as e:
         # The year column is an integer; the API takes it as a string.
@@ -57,11 +55,11 @@ async def list_vehicles(page: int = 1, per_page: int = 20) -> VehicleListRespons
 @router.get(
     "/{vehicle_id}",
     response_model=VehicleResponse,
-    summary="Get a vehicle by NHTSA ID",
+    summary="Get a vehicle by its id",
     response_description="The requested vehicle",
 )
 async def get_vehicle(vehicle_id: int) -> VehicleResponse:
-    """Get a single vehicle by its NHTSA Vehicle ID."""
+    """Get a single vehicle by its id."""
     vehicle = await VehicleService.get_vehicle(vehicle_id)
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found")
@@ -79,11 +77,7 @@ async def update_vehicle(vehicle_id: int, payload: VehicleUpdate) -> VehicleResp
     try:
         vehicle = await VehicleService.update_vehicle(
             vehicle_id=vehicle_id,
-            year=payload.year,
-            model=payload.model,
             keywords=payload.keywords,
-            make=payload.make,
-            trim=payload.trim,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

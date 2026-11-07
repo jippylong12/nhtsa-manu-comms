@@ -38,13 +38,13 @@ async def seeded():
         await _cleanup(conn)
 
         v1 = await conn.fetchval(
-            "INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model) "
-            "VALUES (990001, 2024, 'CHEVROLET', $1) RETURNING id",
+            "INSERT INTO vehicles (year, make, model) "
+            "VALUES (2024, 'CHEVROLET', $1) RETURNING id",
             f"{NS} SILVERADO",
         )
         v2 = await conn.fetchval(
-            "INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model) "
-            "VALUES (990002, 2025, 'GMC', $1) RETURNING id",
+            "INSERT INTO vehicles (year, make, model) "
+            "VALUES (2025, 'GMC', $1) RETURNING id",
             f"{NS} SIERRA",
         )
 
@@ -117,7 +117,7 @@ async def seeded():
             f"{NS}-C",
         )
 
-        yield {"v1": 990001, "v2": 990002}
+        yield {"v1": v1, "v2": v2}
     finally:
         await _cleanup(conn)
         await conn.close()
@@ -150,7 +150,7 @@ async def test_filter_by_vehicle_dedupes_shared_comm(seeded):
 async def test_shared_comm_lists_both_vehicles(seeded):
     items, _ = await service.list_communications(vehicle_id=seeded["v2"], per_page=100)
     comm_a = next(i for i in items if i["nhtsa_id"] == f"{NS}-A")
-    vehicle_ids = {v["nhtsa_vehicle_id"] for v in comm_a["vehicles"]}
+    vehicle_ids = {v["vehicle_id"] for v in comm_a["vehicles"]}
     assert vehicle_ids == {seeded["v1"], seeded["v2"]}
 
 
@@ -233,7 +233,7 @@ async def test_detail_includes_documents_and_vehicles(seeded):
     doc = detail["documents"][0]
     assert doc["remedy"] == "Resurface or replace rotors."
     assert doc["has_embedding"] is False
-    assert {v["nhtsa_vehicle_id"] for v in detail["vehicles"]} == {seeded["v1"], seeded["v2"]}
+    assert {v["vehicle_id"] for v in detail["vehicles"]} == {seeded["v1"], seeded["v2"]}
 
 
 async def test_detail_missing_returns_none(seeded):

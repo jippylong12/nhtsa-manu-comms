@@ -1,31 +1,37 @@
-"""/api/vehicles is served from Postgres alone (JIP-416).
+"""/api/vehicles is served from Postgres alone, keyed on vehicles.id (JIP-1561).
 
-The predecessor of this file proved that a vehicle added in the app was mirrored
-from Mongo into the Postgres table the pipeline reads (JIP-414). There is no
-mirror any more: the app writes the pipeline's own table, so what needs proving
-has shifted from "both stores agree" to "one store answers every question", plus
-the two behaviours the mirror got wrong and must not regress.
+A vehicle's identity is (year, make, model) with the model in canonical
+plain-nameplate form (`F-150` is stored `F 150`); `vehicles.id` is the one id the
+API speaks. There is no NHTSA vehicleId and no trim any more.
 
 Runs against the real database, cleaning up after itself.
 """
 
-import uuid
-
 import asyncpg
+import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 
 from src.config import get_settings
 from src.jobs import repository as repo
+from src.vehicles import router as vehicles_router
 from src.vehicles.service import VehicleService
 
-# Far outside the real NHTSA id range so a stray row can never collide.
-VID = 999_000_000 + int(uuid.uuid4().int % 100_000)
+# A vehicle no real tracked vehicle can be, so cleanup by identity is safe.
+YEAR, MAKE, MODEL = 2019, "MAZDA", "CX 5"
+
+_app = FastAPI()
+_app.include_router(vehicles_router.router, prefix="/api")
+
+
+def _http() -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://test")
 
 
 @pytest_asyncio.fixture
 async def clean():
-    """No leftover rows for VID, before or after."""
+    """No leftover rows for the test identity, before or after."""
     settings = get_settings()
     if not settings.database_url:
         pytest.skip("DATABASE_URL not configured")
@@ -33,7 +39,15 @@ async def clean():
     async def wipe():
         conn = await asyncpg.connect(settings.database_url)
         try:
-            await conn.execute("DELETE FROM vehicles WHERE nhtsa_vehicle_id = $1", VID)
+            await conn.execute(
+                "DELETE FROM vehicles WHERE year = $1 AND make = $2 AND model = $3",
+                YEAR,
+                MAKE,
+                MODEL,
+            )
+            await conn.execute(
+                "DELETE FROM vehicles WHERE year = 2021 AND make = 'FORD' AND model = 'F 150'"
+            )
         finally:
             await conn.close()
 
@@ -42,135 +56,178 @@ async def clean():
     await wipe()
 
 
-async def _pg_row():
+async def _rows():
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        return await conn.fetchrow(
-            "SELECT nhtsa_vehicle_id, year, make, model, trim, keywords, active "
-            "FROM vehicles WHERE nhtsa_vehicle_id = $1",
-            VID,
+        return await conn.fetch(
+            "SELECT id, year, make, model, keywords, active FROM vehicles "
+            "WHERE year = $1 AND make = $2 AND model = $3 ORDER BY id",
+            YEAR,
+            MAKE,
+            MODEL,
         )
     finally:
         await conn.close()
 
 
-@pytest.mark.asyncio
-async def test_creating_a_vehicle_writes_the_canonical_table(clean):
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", trim="SUV", keywords=[]
+async def _create(keywords=None, model="CX-5"):
+    return await VehicleService.create_vehicle(
+        year="2019", make="Mazda", model=model, keywords=keywords or []
     )
 
-    row = await _pg_row()
-    assert row is not None, "the vehicle never reached the canonical store"
+
+# --- R2: create contract -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_creating_a_vehicle_stores_the_canonical_identity(clean):
+    created = await _create()
+
+    (row,) = await _rows()
     assert row["active"] is True
-    assert row["year"] == 2019
-    assert row["model"] == "CX-5"
+    assert (row["year"], row["make"], row["model"]) == (YEAR, MAKE, MODEL)
+    assert created["vehicle_id"] == row["id"] == int(created["id"])
 
 
 @pytest.mark.asyncio
-async def test_the_real_make_is_stored_rather_than_inferred(clean):
-    """import_vehicles_from_mongo guessed make from a hardcoded GM nameplate
-    map, so anything else became UNKNOWN. The add flow already knows it."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", trim="SUV", keywords=[]
+async def test_post_normalises_make_and_model_and_ignores_legacy_fields(clean):
+    async with _http() as client:
+        r = await client.post(
+            "/api/vehicles",
+            json={
+                "year": "2021",
+                "make": "Ford",
+                "model": "F-150",
+                "keywords": [],
+                "vehicleId": 123,
+                "trim": "SUPER CREW",
+            },
+        )
+
+    assert r.status_code == 201
+    body = r.json()
+    assert body["make"] == "FORD"
+    assert body["model"] == "F 150"
+    assert body["vehicleId"] == int(body["id"]) != 123
+    assert "trim" not in body
+
+
+@pytest.mark.asyncio
+async def test_post_without_a_make_is_rejected(clean):
+    async with _http() as client:
+        r = await client.post("/api/vehicles", json={"year": "2021", "model": "F-150"})
+
+    assert r.status_code == 422
+
+
+# --- R3: idempotent add --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_adding_the_same_identity_again_returns_the_same_vehicle(clean):
+    first = await _create(model="CX-5")
+    again = await _create(model="cx 5")
+
+    assert again["vehicle_id"] == first["vehicle_id"]
+    assert len(await _rows()) == 1
+
+
+# --- R4: reactivation ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_re_adding_a_removed_vehicle_revives_the_same_row_and_keeps_keywords(clean):
+    first = await _create(keywords=["battery"])
+    assert await VehicleService.delete_vehicle(first["vehicle_id"]) is True
+
+    again = await _create(keywords=[])
+
+    assert again["vehicle_id"] == first["vehicle_id"]
+    (row,) = await _rows()
+    assert row["active"] is True
+    assert list(row["keywords"]) == ["battery"]
+    assert await VehicleService.get_vehicle(first["vehicle_id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_re_adding_with_keywords_replaces_them(clean):
+    first = await _create(keywords=["battery"])
+    await VehicleService.delete_vehicle(first["vehicle_id"])
+
+    await _create(keywords=["brakes"])
+
+    (row,) = await _rows()
+    assert list(row["keywords"]) == ["brakes"]
+
+
+# --- R5: unique identity -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_active_vehicles_cannot_share_an_identity(conn):
+    await conn.execute(
+        "INSERT INTO vehicles (year, make, model) VALUES (2021, 'FORD', 'F 150')"
+    )
+    with pytest.raises(asyncpg.UniqueViolationError) as caught:
+        async with conn.transaction():
+            await conn.execute(
+                "INSERT INTO vehicles (year, make, model) VALUES (2021, 'FORD', 'F 150')"
+            )
+    assert caught.value.constraint_name == "vehicles_active_identity_uidx"
+
+    # A soft-deleted twin is allowed: the index is partial.
+    await conn.execute(
+        "INSERT INTO vehicles (year, make, model, active) VALUES (2021, 'FORD', 'F 150', false)"
     )
 
-    row = await _pg_row()
-    assert row["make"] == "MAZDA"
-    assert row["trim"] == "SUV"
+
+# --- the vehicle is addressed by its row id ------------------------------
 
 
 @pytest.mark.asyncio
 async def test_sync_sees_the_vehicle_without_an_import_bootstrap(clean):
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
+    created = await _create()
 
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        tracked = {v["nhtsa_vehicle_id"] for v in await repo.tracked_vehicles(conn)}
+        tracked = {v["id"] for v in await repo.tracked_vehicles(conn)}
     finally:
         await conn.close()
 
-    assert VID in tracked
+    assert created["vehicle_id"] in tracked
 
 
 @pytest.mark.asyncio
 async def test_deleting_a_vehicle_stops_the_pipeline_polling_it(clean):
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
+    created = await _create()
 
-    assert await VehicleService.delete_vehicle(VID) is True
+    assert await VehicleService.delete_vehicle(created["vehicle_id"]) is True
 
-    row = await _pg_row()
-    assert row is not None, "the row is kept; communication links hang off it"
-    assert row["active"] is False
+    (row,) = await _rows()
+    assert row["active"] is False, "the row is kept; communication links hang off it"
 
 
 @pytest.mark.asyncio
 async def test_a_deleted_vehicle_is_gone_from_the_api(clean):
     """Soft delete is an implementation detail. From outside it is a delete."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
-    await VehicleService.delete_vehicle(VID)
+    created = await _create()
+    vid = created["vehicle_id"]
+    await VehicleService.delete_vehicle(vid)
 
-    assert await VehicleService.get_vehicle(VID) is None
-    assert await VehicleService.delete_vehicle(VID) is False, "a second delete is a 404"
+    assert await VehicleService.get_vehicle(vid) is None
+    assert await VehicleService.delete_vehicle(vid) is False, "a second delete is a 404"
 
     items, _ = await VehicleService.list_vehicles(per_page=200)
-    assert VID not in {v["vehicle_id"] for v in items}
-
-
-@pytest.mark.asyncio
-async def test_re_adding_a_removed_vehicle_reactivates_it(clean):
-    """tracked_vehicles filters on active, so an upsert that left the flag
-    false would strand the vehicle permanently."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
-    await VehicleService.delete_vehicle(VID)
-
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
-
-    assert (await _pg_row())["active"] is True
-    assert await VehicleService.get_vehicle(VID) is not None
-
-
-@pytest.mark.asyncio
-async def test_re_adding_does_not_erase_what_the_caller_omitted(clean):
-    """The add-vehicle form can submit without a make or keywords. Before, the
-    upsert took EXCLUDED unconditionally, so that overwrote a known make with
-    the UNKNOWN placeholder and blanked the configured keywords."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID,
-        year="2019",
-        model="CX-5",
-        make="MAZDA",
-        trim="SUV",
-        keywords=["battery"],
-    )
-
-    await VehicleService.create_vehicle(vehicle_id=VID, year="2019", model="CX-5")
-
-    row = await _pg_row()
-    assert row["make"] == "MAZDA"
-    assert row["trim"] == "SUV"
-    assert list(row["keywords"]) == ["battery"]
+    assert vid not in {v["vehicle_id"] for v in items}
 
 
 @pytest.mark.asyncio
 async def test_the_api_reads_and_writes_one_store(clean):
     """What create returns, get returns, and list contains are the same row."""
-    created = await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=["battery"]
-    )
-    fetched = await VehicleService.get_vehicle(VID)
+    created = await _create(keywords=["battery"])
+    fetched = await VehicleService.get_vehicle(created["vehicle_id"])
     items, total = await VehicleService.list_vehicles(per_page=200)
-    listed = next(v for v in items if v["vehicle_id"] == VID)
+    listed = next(v for v in items if v["vehicle_id"] == created["vehicle_id"])
 
     assert created == fetched == listed
     assert total >= 1
@@ -179,58 +236,79 @@ async def test_the_api_reads_and_writes_one_store(clean):
 
 
 @pytest.mark.asyncio
+async def test_get_by_id_over_http_resolves_the_vehicle(clean):
+    created = await _create()
+    async with _http() as client:
+        found = await client.get(f"/api/vehicles/{created['vehicle_id']}")
+        missing = await client.get("/api/vehicles/999999999")
+
+    assert found.status_code == 200
+    assert found.json()["vehicleId"] == created["vehicle_id"]
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_comm_count_is_derived_not_stored(clean):
     """The count follows the corpus. A stored copy is what let a card read 389
     above a detail page reading 0."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", keywords=[]
-    )
-    assert (await VehicleService.get_vehicle(VID))["comm_count"] == 0
+    created = await _create()
+    vid = created["vehicle_id"]
+    assert (await VehicleService.get_vehicle(vid))["comm_count"] == 0
 
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        nhtsa_id = f"test-{VID}"
+        nhtsa_id = f"test-{vid}"
         comm_id = await conn.fetchval(
             "INSERT INTO communications (nhtsa_id) VALUES ($1) RETURNING id", nhtsa_id
         )
-        row_id = await conn.fetchval("SELECT id FROM vehicles WHERE nhtsa_vehicle_id = $1", VID)
         await conn.execute(
             "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1, $2)",
             comm_id,
-            row_id,
+            vid,
         )
         try:
-            assert (await VehicleService.get_vehicle(VID))["comm_count"] == 1
+            assert (await VehicleService.get_vehicle(vid))["comm_count"] == 1
         finally:
             await conn.execute("DELETE FROM communications WHERE nhtsa_id = $1", nhtsa_id)
     finally:
         await conn.close()
 
 
-@pytest.mark.asyncio
-async def test_updating_keywords_leaves_the_make_alone(clean):
-    """The router has always forwarded make and trim, but VehicleUpdate had no
-    such fields, so every PATCH raised AttributeError before reaching here."""
-    await VehicleService.create_vehicle(
-        vehicle_id=VID, year="2019", model="CX-5", make="MAZDA", trim="SUV", keywords=[]
-    )
-
-    updated = await VehicleService.update_vehicle(VID, keywords=["brakes"])
-
-    assert updated["keywords"] == ["brakes"]
-    assert updated["make"] == "MAZDA"
-    assert updated["trim"] == "SUV"
+# --- R8: PATCH -----------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_updating_an_untracked_vehicle_is_a_miss(clean):
-    assert await VehicleService.update_vehicle(VID, keywords=["brakes"]) is None
+async def test_patch_updates_keywords_and_ignores_identity_fields(clean):
+    created = await _create(keywords=[])
+    vid = created["vehicle_id"]
+
+    async with _http() as client:
+        r = await client.patch(f"/api/vehicles/{vid}", json={"keywords": ["brakes"], "model": "X"})
+
+    assert r.status_code == 200, "an identity field in the body is a no-op, not an error"
+    body = r.json()
+    assert body["keywords"] == ["brakes"]
+    assert body["model"] == "CX 5"
+    assert body["make"] == "MAZDA"
+
+
+@pytest.mark.asyncio
+async def test_patch_of_an_unknown_or_inactive_vehicle_is_404(clean):
+    created = await _create()
+    await VehicleService.delete_vehicle(created["vehicle_id"])
+
+    async with _http() as client:
+        inactive = await client.patch(f"/api/vehicles/{created['vehicle_id']}", json={"keywords": []})
+        unknown = await client.patch("/api/vehicles/999999999", json={"keywords": []})
+
+    assert inactive.status_code == 404
+    assert unknown.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_a_non_numeric_year_is_rejected(clean):
     """year is a string over the wire and an integer column."""
     with pytest.raises(ValueError):
-        await VehicleService.create_vehicle(vehicle_id=VID, year="twenty", model="CX-5")
+        await VehicleService.create_vehicle(year="twenty", make="Mazda", model="CX-5")
 
-    assert await _pg_row() is None
+    assert await _rows() == []

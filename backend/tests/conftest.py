@@ -158,9 +158,9 @@ async def vehicle(conn):
     """A tracked vehicle to hang communications off."""
     row = await conn.fetchrow(
         """
-        INSERT INTO vehicles (nhtsa_vehicle_id, year, make, model, keywords)
-        VALUES (999001, 2026, 'CHEVROLET', 'TEST TRUCK', ARRAY['battery'])
-        RETURNING id, nhtsa_vehicle_id, year, make, model, keywords
+        INSERT INTO vehicles (year, make, model, keywords)
+        VALUES (2026, 'CHEVROLET', 'TEST TRUCK', ARRAY['battery'])
+        RETURNING id, year, make, model, keywords
         """
     )
     return dict(row)
