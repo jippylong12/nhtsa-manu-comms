@@ -130,7 +130,8 @@ EXCERPT_CHARS = 12_000
 
 
 def _read_jsonl(path: pathlib.Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    # "\n" only: splitlines() also breaks on U+0085/U+2028, which sit raw inside strings.
+    return [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
 
 
 def present_arms(run_dir: pathlib.Path) -> list[str]:

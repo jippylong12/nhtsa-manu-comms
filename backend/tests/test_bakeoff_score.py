@@ -167,6 +167,22 @@ def _write_reference(run_dir: pathlib.Path, doc_ids, products=None):
 # --------------------------------------------------------------------------- S1 + partial arms
 
 
+def test_results_with_a_next_line_character_inside_an_output_field_still_load(tmp_path):
+    # json.dumps(ensure_ascii=False), as the harness writes, leaves U+0085 raw in a string.
+    out = _out(summary="Step one\x85step two\u2028done")
+    d = tmp_path / "G"
+    d.mkdir()
+    rows = [_line("G", 1, out), _line("G", 2, _out())]
+    (d / "results.jsonl").write_text(
+        "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rows)
+    )
+
+    loaded = bs.load_results(tmp_path)
+
+    assert [r["doc_id"] for r in loaded["G"]] == [1, 2]
+    assert loaded["G"][0]["output"]["summary"] == out["summary"]
+
+
 def test_score_run_scores_the_arms_that_exist_and_names_the_missing_one(tmp_path):
     good = _out(applicability="2015 and 2017 F-150, Mustang Mach-E")
     off = _out(symptoms=["engine stalls"], remedy="Replace fuel pump", applicability="2015 F-150")
