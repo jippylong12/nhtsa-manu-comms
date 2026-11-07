@@ -105,6 +105,34 @@ is `pending`. `LLM schema violation` and `batch ` failures are left `failed`, so
 that cannot fix them still exits `1`. It takes `--vehicle`, `--sync` and `--cap-usd`; like
 `--reextract`, it refuses `--limit`, and it is an error without `--reextract`.
 
+## Copying re-read results from the replica to production
+
+Use this instead of re-reading a vehicle on production when it was already re-read on the
+replica (a clone, so `nhtsa_id`s and urls match). It spends no model money and replaces
+re-reading on production. It never wipes tables: it only UPDATEs the new-extraction columns
+(summary, structured fields, model/cost, embedding, status, severity) of rows that already
+exist, matched by `nhtsa_id` and document url. It never inserts or deletes, and never touches
+`usage_events`, `refresh_runs`, `comm_products`, `vehicles` or `communication_vehicles`.
+
+1. Migrate production to schema v2 (migrations 0010 to 0012):
+   ```bash
+   cd backend && set -a && source .env && set +a && python -m src.db.migrate
+   ```
+2. Export from the replica (read-only):
+   ```bash
+   cd backend && set -a && source .env && set +a && DATABASE_URL="$TEST_DATABASE_URL" python -m src.scripts.copy_schema_v2 export --vehicle 6 --vehicle 7 --out /tmp/schema-v2-v6-v7.json
+   ```
+3. Dry run on production (writes nothing), then apply:
+   ```bash
+   cd backend && set -a && source .env && set +a && python -m src.scripts.copy_schema_v2 apply --in /tmp/schema-v2-v6-v7.json
+   pg_dump -t communications -t comm_documents "$DATABASE_URL" > /tmp/before-schema-v2.sql
+   python -m src.scripts.copy_schema_v2 apply --in /tmp/schema-v2-v6-v7.json --apply
+   ```
+
+Exit 0: all matched. Exit 1: some records are missing at the destination; they are listed and
+nothing is written (add `--allow-skips` with `--apply` to commit only the matched rows).
+Exit 2: production lacks the v2 columns; run step 1. All updates run in one transaction.
+
 ## Flat-file index
 
 Add-vehicle discovery and sync read `comm_products`, the index built from NHTSA's
