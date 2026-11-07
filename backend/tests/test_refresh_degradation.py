@@ -108,14 +108,23 @@ async def test_a_previously_scanned_vehicle_continues_to_sync_and_the_warning_na
     )
 
 
-async def _scan_every_ingested_window(conn, vehicle_id, *, skip=0):
-    """A matching-etag scan row for every ingested window (all but `skip` of them)."""
+async def _scan_every_ingested_window(conn, vehicle_id):
+    """A matching-etag scan row for every ingested window.
+
+    With nothing ingested (an unbootstrapped database) preview falls back to "any
+    scan at all", so one scan row stands in; otherwise the vehicle would have no
+    scans and the up-to-date test would depend on the replica being bootstrapped.
+    """
+    if not await conn.fetchval("SELECT count(*) FROM flatfile_ingests"):
+        await conn.execute(
+            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, 'W-OLD', 'e')",
+            vehicle_id,
+        )
+        return
     await conn.execute(
         "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
-        "SELECT $1, source_window, etag FROM flatfile_ingests "
-        "ORDER BY source_window OFFSET $2",
+        "SELECT $1, source_window, etag FROM flatfile_ingests",
         vehicle_id,
-        skip,
     )
 
 
@@ -183,28 +192,38 @@ async def test_preview_of_a_vehicle_scanned_against_only_some_windows_is_still_s
     untracked_in_index, monkeypatch
 ):
     monkeypatch.setattr(service, "NHTSAClient", _NeverConstructed)
+    # These ledger rows are committed (preview reads on its own pool connection), and a
+    # leftover one would make every bulletin-less vehicle on this database scan-pending
+    # for good: clear any an interrupted earlier run left, and always clean up.
+    cleanup = "DELETE FROM flatfile_ingests WHERE source_window LIKE 'TESTPEND-%'"
     conn = await asyncpg.connect(get_settings().database_url)
     try:
-        windows = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
-        if windows < 2:
-            await conn.execute(
-                "INSERT INTO flatfile_ingests (source_window, etag, row_count) "
-                "VALUES ('TESTPEND-A', 'a', 1), ('TESTPEND-B', 'b', 1) "
-                "ON CONFLICT DO NOTHING"
-            )
-        # Scanned at every ingested window but the last: its bulletins may be there.
-        await conn.execute(
-            "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
-            "SELECT $1, source_window, etag FROM flatfile_ingests "
-            "ORDER BY source_window LIMIT (SELECT count(*) - 1 FROM flatfile_ingests)",
-            untracked_in_index,
-        )
+        await conn.execute(cleanup)
         try:
+            windows = await conn.fetchval("SELECT count(*) FROM flatfile_ingests")
+            if windows < 2:
+                await conn.execute(
+                    "INSERT INTO flatfile_ingests (source_window, etag, row_count) "
+                    "VALUES ('TESTPEND-A', 'a', 1), ('TESTPEND-B', 'b', 1) "
+                    "ON CONFLICT DO NOTHING"
+                )
+            # Scanned at every ingested window but the last: its bulletins may be there.
+            await conn.execute(
+                "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) "
+                "SELECT $1, source_window, etag FROM flatfile_ingests "
+                "ORDER BY source_window LIMIT (SELECT count(*) - 1 FROM flatfile_ingests)",
+                untracked_in_index,
+            )
             result = await service.preview(untracked_in_index)
         finally:
-            await conn.execute("DELETE FROM flatfile_ingests WHERE source_window LIKE 'TESTPEND-%'")
+            await conn.execute(cleanup)
+        leftover = await conn.fetchval(
+            "SELECT count(*) FROM flatfile_ingests WHERE source_window LIKE 'TESTPEND-%'"
+        )
     finally:
         await conn.close()
+
+    assert leftover == 0
 
     assert result["scan_pending"] is True
     assert result["listed_by_nhtsa"] == 0
