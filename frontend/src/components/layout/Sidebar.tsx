@@ -1,5 +1,6 @@
 import { Plus, Stethoscope } from 'lucide-react';
 import { SidebarVehicleItem } from './SidebarVehicleItem';
+import { useReadOnly } from '../../features/vehicles/hooks/useVehicles';
 import styles from './Sidebar.module.css';
 import type { Vehicle } from '../../client';
 import type { AppView } from '../../contexts/AppContext';
@@ -23,6 +24,7 @@ export function Sidebar({
   onAddVehicle,
   isLoading,
 }: SidebarProps) {
+  const readOnly = useReadOnly();
   return (
     <div className={styles.sidebar}>
       <nav className={styles.nav}>
@@ -44,13 +46,15 @@ export function Sidebar({
         >
           All Vehicles
         </button>
-        <button
-          className={styles.addButton}
-          onClick={onAddVehicle}
-          title="Add Vehicle"
-        >
-          <Plus size={16} />
-        </button>
+        {!readOnly && (
+          <button
+            className={styles.addButton}
+            onClick={onAddVehicle}
+            title="Add Vehicle"
+          >
+            <Plus size={16} />
+          </button>
+        )}
       </div>
       <div className={styles.vehicleList}>
         {isLoading ? (

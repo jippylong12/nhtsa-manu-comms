@@ -3,6 +3,7 @@
 import { format } from 'date-fns';
 import { Calendar, FileText, Trash2, RefreshCw, ChevronRight } from 'lucide-react';
 import type { Vehicle } from '@/client';
+import { useReadOnly } from '../hooks/useVehicles';
 import styles from './VehicleCard.module.css';
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function VehicleCard({ vehicle, onRefresh, onDelete, onSelect, isRefreshing }: Props) {
+    const readOnly = useReadOnly();
     const lastFetched = vehicle.lastFetched
         ? format(new Date(vehicle.lastFetched), 'MMM d, yyyy h:mm a')
         : 'Never';
@@ -25,6 +27,7 @@ export function VehicleCard({ vehicle, onRefresh, onDelete, onSelect, isRefreshi
                     <span className={styles.vehicleYear}>{vehicle.year}</span>
                     <h3 className={styles.vehicleModel}>{vehicle.model}</h3>
                 </div>
+                {!readOnly && (
                 <div className={styles.vehicleActions}>
                     <button
                         className="btn btn-ghost btn-icon"
@@ -42,6 +45,7 @@ export function VehicleCard({ vehicle, onRefresh, onDelete, onSelect, isRefreshi
                         <Trash2 size={18} />
                     </button>
                 </div>
+                )}
             </div>
 
             <div className={styles.vehicleStats}>

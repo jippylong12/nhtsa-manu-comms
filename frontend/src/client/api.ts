@@ -45,5 +45,17 @@ async function request<T>(
     return handleResponse<T>(response);
 }
 
+interface Health {
+    status: string;
+    service: string;
+    readOnly: boolean;
+}
+
+/** GET /api/health; readOnly is true on the early read-only deploy. */
+function getHealth(): Promise<Health> {
+    return request<Health>('/health');
+}
+
 // Export utilities
-export { ApiError, request, API_BASE };
+export { ApiError, request, getHealth, API_BASE };
+export type { Health };
