@@ -130,8 +130,25 @@ async def upsert_vehicle(
     An existing row is reactivated, and keeps its keywords when the caller
     supplied none: an add with no keywords never clears the ones already
     configured. `update_vehicle` is the way to change them on purpose.
+
+    Two adds of the same new identity racing (a double-clicked Add) both miss
+    the SELECT; the loser's write then fails on the partial unique index once
+    the winner commits. The write runs in a savepoint and is retried once, when
+    the winner's row is visible and is simply reused, so the race returns the
+    same vehicle to both callers instead of a 500.
     """
     keywords = keywords or []
+    try:
+        async with conn.transaction():
+            return await _upsert_vehicle_once(conn, year, make, model, keywords)
+    except asyncpg.UniqueViolationError:
+        return await _upsert_vehicle_once(conn, year, make, model, keywords)
+
+
+async def _upsert_vehicle_once(
+    conn: asyncpg.Connection, year: int, make: str, model: str, keywords: list[str]
+) -> tuple[int, bool]:
+    """One select-then-write pass of `upsert_vehicle`."""
     existing = await conn.fetchval(
         """
         SELECT id FROM vehicles

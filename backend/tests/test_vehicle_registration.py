@@ -7,6 +7,8 @@ API speaks. There is no NHTSA vehicleId and no trim any more.
 Runs against the real database, cleaning up after itself.
 """
 
+import asyncio
+
 import asyncpg
 import httpx
 import pytest
@@ -129,6 +131,48 @@ async def test_adding_the_same_identity_again_returns_the_same_vehicle(clean):
     again = await _create(model="cx 5")
 
     assert again["vehicle_id"] == first["vehicle_id"]
+    assert len(await _rows()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_racing_add_of_the_same_new_identity_reuses_the_winner(clean):
+    """Two adds of a new identity at once: the loser must get the winner's row, not a 500.
+
+    The winner's insert is held uncommitted so the loser's SELECT misses it and
+    its INSERT blocks on the partial unique index; committing the winner then
+    makes that INSERT fail with a unique violation, which upsert_vehicle must
+    absorb.
+    """
+    url = get_settings().database_url
+    winner = await asyncpg.connect(url)
+    observer = await asyncpg.connect(url)
+    try:
+        tx = winner.transaction()
+        await tx.start()
+        winner_id = await winner.fetchval(
+            "INSERT INTO vehicles (year, make, model) VALUES ($1, $2, $3) RETURNING id",
+            YEAR,
+            MAKE,
+            MODEL,
+        )
+        loser = asyncio.create_task(_create())
+        for _ in range(200):
+            blocked = await observer.fetchval(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' "
+                "AND query LIKE '%INSERT INTO vehicles%'"
+            )
+            if blocked or loser.done():
+                break
+            await asyncio.sleep(0.025)
+        await tx.commit()
+
+        created = await asyncio.wait_for(loser, timeout=10)
+    finally:
+        await winner.close()
+        await observer.close()
+
+    assert created["vehicle_id"] == winner_id
     assert len(await _rows()) == 1
 
 

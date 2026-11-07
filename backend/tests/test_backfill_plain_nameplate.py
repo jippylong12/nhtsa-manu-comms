@@ -152,6 +152,21 @@ async def test_apply_merges_into_the_lowest_id_with_the_union_of_links(conn, col
 
 
 @pytest.mark.asyncio
+async def test_apply_moves_an_absorbed_vehicles_refresh_runs_to_the_survivor(conn, colliding):
+    """refresh_runs cascades on vehicle delete; a merge must not erase its history or spend."""
+    a, b = colliding["a"], colliding["b"]
+    run_id = await conn.fetchval(
+        "INSERT INTO refresh_runs (vehicle_id, status, actual_cost_usd) "
+        "VALUES ($1, 'succeeded', 0.42) RETURNING id",
+        b,
+    )
+
+    await bf.apply(conn, await bf.plan(conn))
+
+    assert await conn.fetchval("SELECT vehicle_id FROM refresh_runs WHERE id=$1", run_id) == a
+
+
+@pytest.mark.asyncio
 async def test_the_unique_index_holds_after_a_merge(conn, colliding):
     await bf.apply(conn, await bf.plan(conn))
 

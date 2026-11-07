@@ -190,6 +190,13 @@ async def apply(conn: asyncpg.Connection, rows: list[Row]) -> None:
                 survivor,
                 ids,
             )
+            # refresh_runs cascades on vehicle delete; repoint it so the absorbed
+            # rows' refresh history and recorded spend move to the survivor.
+            await conn.execute(
+                "UPDATE refresh_runs SET vehicle_id = $1 WHERE vehicle_id = ANY($2::bigint[])",
+                survivor,
+                ids,
+            )
             await conn.execute(
                 "DELETE FROM communication_vehicles WHERE vehicle_id = ANY($1::bigint[])", ids
             )
