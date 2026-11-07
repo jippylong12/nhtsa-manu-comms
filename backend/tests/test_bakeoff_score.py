@@ -23,6 +23,12 @@ def _no_real_clients(monkeypatch):
     monkeypatch.setattr(anthropic.AsyncAnthropic, "__init__", _boom)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_bakeoff_root(tmp_path, monkeypatch):
+    """Runs under the real backend/.bakeoff/ never count toward a test's cap."""
+    monkeypatch.setattr(bs.eb, "BAKEOFF_ROOT", tmp_path / "bakeoff-root")
+
+
 # --------------------------------------------------------------------------- S1 metric math
 
 
@@ -429,3 +435,47 @@ def test_report_names_the_arms_that_have_no_results_yet(tmp_path):
     assert "Missing arms: H-pdf" in md and "Missing arms: H-pdf" in html
     assert html.count('<section class="doc"') == 20
     assert "Judge has not run" in html
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+async def test_run_judge_stops_before_a_call_whose_worst_case_could_pass_the_cap(
+    judge_env, monkeypatch
+):
+    # Every call thinks to max_tokens: far past the 4,000-token estimate.
+    monkeypatch.setattr(
+        bs,
+        "_generate",
+        lambda p: {"verdict": None, "tokens_in": 5000, "tokens_out": bs.JUDGE_MAX_TOKENS},
+    )
+    arms = bs.eb.run_spend(judge_env.run_dir).total
+    monkeypatch.setattr(bs.eb, "CAP_USD", arms + 0.75)
+
+    out = await bs.run_judge(judge_env.run_dir, n_hard=4, n_random=2)
+
+    judge_total = bs.eb.judge_spend(judge_env.run_dir)
+    assert out["stopped_at_cap"] is True and out["judged"] == 2
+    assert arms + judge_total <= bs.eb.CAP_USD
+
+
+async def test_run_judge_counts_spend_from_another_run_of_the_bakeoff(judge_env, monkeypatch):
+    other = bs.eb.BAKEOFF_ROOT / "20261101-0900"
+    _write_arm(other, "G", [_line("G", 1, _out(), cost=9.99)])
+
+    with pytest.raises(bs.eb.SpendCapExceeded, match="cap"):
+        await bs.run_judge(judge_env.run_dir, n_hard=4, n_random=2)
+    assert judge_env.prompts == []
+
+
+def test_summarize_ignores_a_faithfulness_label_with_no_output_behind_it(tmp_path):
+    _three_arm_run(tmp_path, arms=("G", "H-text"))
+    verdict = _verdict(["A", "B"])
+    verdict["faithfulness"].append({"label": "C", "unsupported_claims": ["x"]})
+    (tmp_path / "judge.jsonl").write_text(json.dumps({"doc_id": 1, "verdict": verdict}) + "\n")
+    (tmp_path / "judge_labels.json").write_text(json.dumps({"1": {"A": "G", "B": "H-text"}}))
+
+    summary = bs.summarize_judge(tmp_path)
+
+    assert summary["judged"] == 1
+    assert sum(summary["faithfulness_flags"].values()) == 1

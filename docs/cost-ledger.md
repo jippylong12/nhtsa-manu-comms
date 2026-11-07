@@ -166,4 +166,4 @@ GROUP BY ROLLUP (meta->>'bakeoff')
 ORDER BY arm NULLS LAST;
 ```
 
-The bake-off holds itself to a $10 cap shared by the arms and the judge; the judge refuses to start when the arms' spend plus its own estimate would pass it.
+The bake-off holds itself to one $10 cap shared by the arms and the judge across every run directory under `backend/.bakeoff/`, so starting a new run never resets it. `submit` reuses the newest run unless `--new-run` is passed, so an arm submitted twice is refused. The judge refuses to start when the spend so far plus its estimate would pass the cap, and before every call it checks that the call's worst case (every `max_tokens` output token used) still fits, stopping early otherwise.

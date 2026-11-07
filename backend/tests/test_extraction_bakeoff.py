@@ -37,6 +37,12 @@ def _no_real_clients(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "send", _boom)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_bakeoff_root(tmp_path, monkeypatch):
+    """Runs under the real backend/.bakeoff/ never count toward a test's cap."""
+    monkeypatch.setattr(eb, "BAKEOFF_ROOT", tmp_path / "bakeoff-root")
+
+
 # --------------------------------------------------------------------------- fixtures
 
 
@@ -706,3 +712,108 @@ async def test_a_missing_or_oversized_pdf_is_an_error_not_a_request(tmp_path, mo
 
     assert out[1] == (None, "pdf unavailable")
     assert out[2][0] is None and "too large" in out[2][1]
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+async def test_a_failed_later_batch_keeps_the_paid_ones_and_a_retry_never_resends_them(harness):
+    entries = [_sample_entry(i) for i in range(1, 251)]
+    harness.sample_path.write_text(json.dumps(entries))
+    gemini = FakeGemini()
+    real_create = gemini._create
+
+    def create_then_fail(model, src, config):
+        if len(gemini.created) == 2:
+            raise RuntimeError("503 from the batch endpoint")
+        return real_create(model, src, config)
+
+    gemini.batches.create = create_then_fail
+    harness.use(gemini_client=gemini)
+
+    with pytest.raises(RuntimeError, match="503"):
+        await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
+
+    batch = json.loads((harness.run_dir / "G" / "batch.json").read_text())
+    assert [b["id"] for b in batch["batches"]] == ["batches/g1", "batches/g2"]
+    with pytest.raises(RuntimeError, match="already submitted"):
+        await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
+    assert len(gemini.created) == 2  # the two paid batches were never sent again
+
+
+async def test_spend_in_another_run_of_the_bakeoff_counts_against_the_cap(harness):
+    other = eb.BAKEOFF_ROOT / "20261101-0900" / "H-text"
+    other.mkdir(parents=True)
+    (other / "batch.json").write_text(json.dumps({"estimate_usd": 0.0, "batches": []}))
+    (other / "results.jsonl").write_text(json.dumps({"cost_usd": 9.99}) + "\n")
+    (eb.BAKEOFF_ROOT / "20261101-0900" / "judge.jsonl").write_text(
+        json.dumps({"cost_usd": 0.5}) + "\n"
+    )
+    gemini = FakeGemini()
+    harness.use(gemini_client=gemini)
+
+    assert eb.experiment_spend(harness.run_dir) == pytest.approx(10.49)
+    with pytest.raises(eb.SpendCapExceeded, match="across the bake-off"):
+        await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
+    assert gemini.created == []
+
+
+def test_submit_from_the_cli_reuses_the_newest_run_so_an_arm_is_never_sent_twice(harness, capsys):
+    client = FakeAnthropic()
+    harness.use(anthropic_client=client)
+    # Each invocation a minute apart, as two commands typed by hand would be.
+    minutes = iter(["20261107-0900", "20261107-0901"])
+    harness.monkeypatch.setattr(eb, "new_run_dir", lambda: eb.BAKEOFF_ROOT / next(minutes))
+    argv = ["submit", "--arm", "H-text", "--sample", str(harness.sample_path)]
+
+    assert eb.main(argv) == 0
+    assert eb.main(argv) == 2
+    assert "already submitted" in capsys.readouterr().err
+    assert len(client.created) == 1
+    assert len([p for p in eb.BAKEOFF_ROOT.iterdir() if p.is_dir()]) == 1
+
+
+async def test_gemini_thinking_tokens_are_counted_and_costed_as_output(harness):
+    item = _gemini_item(1, json.dumps(GOOD), tin=1400, tout=210)
+    item.response.usage_metadata.thoughts_token_count = 500
+    harness.use(gemini_client=FakeGemini(responses=[item]))
+    harness.sample_path.write_text(json.dumps([_sample_entry(1)]))
+
+    await eb.submit("G", harness.run_dir, sample_path=harness.sample_path)
+    await eb.collect(harness.run_dir)
+
+    [line] = _results(harness.run_dir, "G")
+    assert line["tokens_out"] == 710
+    assert line["cost_usd"] == pytest.approx(pricing_cost("gemini-3.5-flash-lite", 1400, 710))
+    assert harness.usage[0]["tokens_out"] == 710
+
+
+async def test_an_errored_anthropic_result_names_the_real_reason_and_is_not_billed(harness):
+    from anthropic.types import ErrorResponse, InvalidRequestError
+    from anthropic.types.messages import MessageBatchErroredResult
+
+    errored = SimpleNamespace(
+        custom_id="1",
+        result=MessageBatchErroredResult(
+            type="errored",
+            error=ErrorResponse(
+                type="error",
+                error=InvalidRequestError(type="invalid_request_error", message="bad schema"),
+            ),
+        ),
+    )
+    harness.use(anthropic_client=FakeAnthropic(results=[errored]))
+    harness.sample_path.write_text(json.dumps([_sample_entry(1)]))
+
+    await eb.submit("H-text", harness.run_dir, sample_path=harness.sample_path)
+    await eb.collect(harness.run_dir)
+
+    [line] = _results(harness.run_dir, "H-text")
+    assert line["error"] == "batch errored: invalid_request_error (bad schema)"
+    assert line["cost_usd"] == 0.0 and harness.usage == []
+
+
+def test_the_largest_pdf_allowed_still_fits_a_request_once_base64_encoded():
+    request_limit = 32 * 1024 * 1024
+    base64_bytes = -(-eb.MAX_PDF_BYTES // 3) * 4
+    assert base64_bytes + 256 * 1024 < request_limit

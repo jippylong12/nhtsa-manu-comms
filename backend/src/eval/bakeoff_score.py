@@ -533,14 +533,14 @@ async def run_judge(
         labels = label_arms(d, list(by_doc[d]), seed)
         jobs.append((d, labels, build_judge_prompt(reference[d]["source"], labels, by_doc[d])))
 
-    spent_judge = sum(x.get("cost_usd") or 0.0 for x in _read_judge_lines(run_dir))
     estimate = estimate_judge_cost([p for _, _, p in jobs])
-    spent_arms = eb.run_spend(run_dir).total
-    if spent_arms + spent_judge + estimate > eb.CAP_USD:
+    # Arms (collected + committed) and judge, across every run of the bake-off.
+    spent = eb.experiment_spend(run_dir)
+    if spent + estimate > eb.CAP_USD:
         raise eb.SpendCapExceeded(
-            f"refusing to judge: arms ${spent_arms:.4f} (collected + committed), judge so far "
-            f"${spent_judge:.4f}, estimate ${estimate:.4f} for {len(jobs)} call(s), total "
-            f"${spent_arms + spent_judge + estimate:.4f} exceeds the cap of ${eb.CAP_USD:.2f}. "
+            f"refusing to judge: bake-off spent or committed ${spent:.4f} (arms and judge), "
+            f"estimate ${estimate:.4f} for {len(jobs)} call(s), total "
+            f"${spent + estimate:.4f} exceeds the cap of ${eb.CAP_USD:.2f}. "
             "Nothing was sent."
         )
 
@@ -549,8 +549,16 @@ async def run_judge(
     labels_path.write_text(json.dumps(all_labels, indent=1, sort_keys=True) + "\n")
 
     judged = 0
+    stopped_at_cap = False
     with (run_dir / "judge.jsonl").open("a") as fh:
         for d, labels, prompt in jobs:
+            # The estimate above is a guess; adaptive thinking can run to max_tokens.
+            # Before every call, the worst case it could cost (2 characters a token,
+            # every output token used) must still fit, so the cap holds on actuals.
+            worst = pricing.cost_of(JUDGE_MODEL, len(prompt) // 2, JUDGE_MAX_TOKENS, batch=False)
+            if spent + worst > eb.CAP_USD:
+                stopped_at_cap = True
+                break
             try:
                 got = await asyncio.to_thread(_generate, prompt)
             except Exception as e:  # noqa: BLE001
@@ -592,8 +600,14 @@ async def run_judge(
                 + "\n"
             )
             fh.flush()
+            spent += cost or pricing.cost_of(JUDGE_MODEL, tin, tout, batch=False)
             judged += 1
-    return {"judged": judged, "skipped": len(done), "estimate_usd": estimate}
+    return {
+        "judged": judged,
+        "skipped": len(done),
+        "estimate_usd": estimate,
+        "stopped_at_cap": stopped_at_cap,
+    }
 
 
 def load_judge(run_dir: pathlib.Path) -> tuple[list[dict], dict[int, dict[str, str]]]:
@@ -622,6 +636,8 @@ def summarize_judge(run_dir: pathlib.Path) -> dict[str, Any]:
         for pos, label in enumerate(verdict["ranking"], start=1):
             ranks[mapping[label]].append(pos)
         for item in verdict["faithfulness"]:
+            if item.get("label") not in mapping:
+                continue  # the schema allows A-C; a label with no output behind it
             n = len(item["unsupported_claims"])
             flags[mapping[item["label"]]] += n
             flagged_docs[mapping[item["label"]]] += 1 if n else 0
@@ -690,6 +706,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.judge:
             out = asyncio.run(run_judge(run_dir, args.n_hard, args.n_random))
             print(f"judged {out['judged']} document(s) (estimate ${out['estimate_usd']:.4f})")
+            if out["stopped_at_cap"]:
+                print(
+                    f"stopped early: the next call could have passed the ${eb.CAP_USD:.2f} cap",
+                    file=sys.stderr,
+                )
             print(json.dumps(summarize_judge(run_dir), indent=1))
             return 0
         score = score_run(run_dir)

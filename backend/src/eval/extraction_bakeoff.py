@@ -64,7 +64,9 @@ GEMINI_CHUNK_BYTES = 18 * 1024 * 1024
 # which leaves headroom for the envelope.
 ANTHROPIC_BATCH_REQUESTS = 100_000
 ANTHROPIC_BATCH_BYTES = 200 * 1024 * 1024
-MAX_PDF_BYTES = 30 * 1024 * 1024
+# A Messages request is limited to 32 MB, and base64 grows a file by 4/3, so a PDF
+# over ~24 MB can never fit; 23 MB leaves room for the prompt and the schema.
+MAX_PDF_BYTES = 23 * 1024 * 1024
 
 PDF_TOKENS_PER_PAGE = 3000
 PDF_OUTPUT_TOKENS = 300
@@ -358,12 +360,20 @@ class _GeminiArm:
                 out.append(_Raw(int(doc_id), error=f"batch error {item.error}"))
                 continue
             usage = item.response.usage_metadata
+            # Thinking tokens are billed at the output rate but are not part of
+            # candidates_token_count, so they are added here.
+            tokens_out = (
+                (usage.candidates_token_count or 0)
+                + (getattr(usage, "thoughts_token_count", None) or 0)
+                if usage
+                else 0
+            )
             out.append(
                 _Raw(
                     int(doc_id),
                     text=item.response.text,
                     tokens_in=(usage.prompt_token_count or 0) if usage else 0,
-                    tokens_out=(usage.candidates_token_count or 0) if usage else 0,
+                    tokens_out=tokens_out,
                     billed=True,
                 )
             )
@@ -463,7 +473,13 @@ class _AnthropicArm:
             doc_id = int(item.custom_id)
             result = item.result
             if result.type != "succeeded":
-                detail = getattr(getattr(result, "error", None), "type", None)
+                # An errored result carries an ErrorResponse whose own type is always
+                # "error"; the reason is the inner error object.
+                err = getattr(result, "error", None)
+                inner = getattr(err, "error", None)
+                detail = getattr(inner, "type", None) or getattr(err, "type", None)
+                if getattr(inner, "message", None):
+                    detail = f"{detail} ({inner.message})"
                 out.append(
                     _Raw(doc_id, error=f"batch {result.type}" + (f": {detail}" if detail else ""))
                 )
@@ -673,15 +689,31 @@ def run_spend(run_dir: pathlib.Path) -> RunSpend:
     return spend
 
 
+def judge_spend(run_dir: pathlib.Path) -> float:
+    """What the blind judge (``bakeoff_score``) has spent in ``run_dir``."""
+    path = pathlib.Path(run_dir) / "judge.jsonl"
+    return sum(r.get("cost_usd") or 0.0 for r in _read_jsonl(path)) if path.exists() else 0.0
+
+
+def experiment_spend(run_dir: pathlib.Path) -> float:
+    """Spent or committed by the whole bake-off: arms and judge, in ``run_dir`` and in
+    every other run under ``BAKEOFF_ROOT``. The cap is one budget for the experiment,
+    so starting a new run directory never resets it."""
+    dirs = {pathlib.Path(run_dir).resolve()}
+    if BAKEOFF_ROOT.exists():
+        dirs |= {p.resolve() for p in BAKEOFF_ROOT.iterdir() if p.is_dir()}
+    return sum(run_spend(d).total + judge_spend(d) for d in dirs)
+
+
 def check_cap(run_dir: pathlib.Path, arms: list[str], sample: list[dict]) -> dict[str, float]:
     """Refuse (raise) when spend so far plus these arms' estimates would pass the cap."""
     estimates = {arm: estimate_cost(arm, sample) for arm in arms}
-    spent = run_spend(run_dir)
-    if spent.total + sum(estimates.values()) > CAP_USD:
+    spent = experiment_spend(run_dir)
+    if spent + sum(estimates.values()) > CAP_USD:
         detail = ", ".join(f"{a} ${e:.4f}" for a, e in estimates.items())
         raise SpendCapExceeded(
-            f"refusing to submit: already spent or committed ${spent.total:.4f} this run, "
-            f"estimate {detail}, total ${spent.total + sum(estimates.values()):.4f} "
+            f"refusing to submit: already spent or committed ${spent:.4f} across the "
+            f"bake-off, estimate {detail}, total ${spent + sum(estimates.values()):.4f} "
             f"exceeds the cap of ${CAP_USD:.2f}. Nothing was sent."
         )
     return estimates
@@ -743,23 +775,27 @@ async def submit(
         )
 
         batches = []
+        submitted_at = datetime.now(timezone.utc).isoformat()
         for n, chunk in enumerate(impl.split(sendable)):
             batch_id = impl.submit(clients[a], chunk, f"bakeoff-{run_dir.name}-{a}-{n}")
             batches.append({"id": batch_id, "doc_ids": [r.doc_id for r in chunk]})
             log.info("%s: submitted batch %s with %d request(s)", a, batch_id, len(chunk))
-        (arm_dir / "batch.json").write_text(
-            json.dumps(
-                {
-                    "arm": a,
-                    "model": impl.model,
-                    "submitted_at": datetime.now(timezone.utc).isoformat(),
-                    "estimate_usd": estimates[a],
-                    "batches": batches,
-                },
-                indent=1,
+            # Written after every batch, not once at the end: if a later batch fails,
+            # the ones already paid for are on disk, the arm counts as submitted, and
+            # a retry refuses instead of sending them a second time.
+            (arm_dir / "batch.json").write_text(
+                json.dumps(
+                    {
+                        "arm": a,
+                        "model": impl.model,
+                        "submitted_at": submitted_at,
+                        "estimate_usd": estimates[a],
+                        "batches": batches,
+                    },
+                    indent=1,
+                )
+                + "\n"
             )
-            + "\n"
-        )
         submitted[a] = [b["id"] for b in batches]
     return submitted
 
@@ -929,7 +965,10 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("sample", help="pick the sample from the database and write the JSON")
     sp = sub.add_parser("submit", help="send an arm as provider batches (spends money)")
     sp.add_argument("--arm", required=True, choices=[*ARMS, "all"])
-    common(sp, "a new backend/.bakeoff/<YYYYMMDD-HHMM>/")
+    sp.add_argument(
+        "--new-run", action="store_true", help="start a new run directory instead of the newest"
+    )
+    common(sp, "the newest run under backend/.bakeoff/, or a new one if there is none")
     sp = sub.add_parser("collect", help="write results.jsonl for finished batches")
     sp.add_argument("--wait", type=float, default=0, help="poll up to this many seconds")
     sp.add_argument("--poll", type=float, default=30, help="seconds between polls")
@@ -952,7 +991,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
 
         if args.command == "submit":
-            run_dir = args.run_dir or new_run_dir()
+            # The newest run by default, so arms submitted one command at a time land
+            # in one run and the already-submitted guard sees them.
+            run_dir = args.run_dir or (
+                new_run_dir() if args.new_run else latest_run_dir() or new_run_dir()
+            )
             print(f"run dir: {run_dir}")
             done = asyncio.run(submit(args.arm, run_dir, sample_path=args.sample))
             for arm, ids in done.items():
