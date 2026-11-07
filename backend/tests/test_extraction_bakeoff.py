@@ -193,7 +193,7 @@ def test_the_haiku_text_arm_builds_a_low_effort_structured_request_without_tempe
     params = req.params
     assert req.custom_id == "7"
     assert params["model"] == "claude-haiku-5-5"
-    assert params["max_tokens"] == 2048
+    assert params["max_tokens"] == 8192
     assert params["output_config"]["effort"] == "low"
     fmt = params["output_config"]["format"]
     assert fmt["type"] == "json_schema"

@@ -53,7 +53,7 @@ LARGEST_FORCED = 10
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 HAIKU_MODEL = "claude-haiku-5-5"
-HAIKU_MAX_TOKENS = 2048
+HAIKU_MAX_TOKENS = 8192
 
 # Gemini: chunks of 100 as in llm.submit_batch, and inline payloads must stay under
 # 20 MB (ai.google.dev batch docs), so a chunk also closes at 18 MB.
