@@ -68,31 +68,28 @@ function renderApplicability(doc: CorpusDocument) {
   const years = doc.applicabilityYears ?? [];
   const models = doc.applicabilityModels ?? [];
   const hasStructured = years.length > 0 || models.length > 0;
-  if (!hasStructured && !doc.applicability) return null;
+  const conditions = doc.applicabilityConditions;
+  if (!hasStructured && !doc.applicability && !conditions) return null;
   return (
     <div className={styles.field}>
       <span className={styles.fieldLabel}>Applies to</span>
       {hasStructured ? (
-        <>
-          <div className={styles.chipRow}>
-            {years.map((y) => (
-              <span key={`year-${y}`} className={`${styles.chip} ${styles.chipYear}`}>
-                {y}
-              </span>
-            ))}
-            {models.map((m) => (
-              <span key={`model-${m}`} className={`${styles.chip} ${styles.chipModel}`}>
-                {m}
-              </span>
-            ))}
-          </div>
-          {doc.applicabilityConditions && (
-            <p className={styles.fieldValue}>{doc.applicabilityConditions}</p>
-          )}
-        </>
+        <div className={styles.chipRow}>
+          {years.map((y) => (
+            <span key={`year-${y}`} className={`${styles.chip} ${styles.chipYear}`}>
+              {y}
+            </span>
+          ))}
+          {models.map((m) => (
+            <span key={`model-${m}`} className={`${styles.chip} ${styles.chipModel}`}>
+              {m}
+            </span>
+          ))}
+        </div>
       ) : (
-        <p className={styles.fieldValue}>{doc.applicability}</p>
+        doc.applicability && <p className={styles.fieldValue}>{doc.applicability}</p>
       )}
+      {conditions && <p className={styles.fieldValue}>{conditions}</p>}
     </div>
   );
 }
