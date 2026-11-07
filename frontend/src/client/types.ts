@@ -212,6 +212,10 @@ export interface CorpusDocument {
     components: string[];
     remedy?: string | null;
     applicability?: string | null;
+    applicabilityYears: number[];
+    applicabilityModels: string[];
+    applicabilityConditions?: string | null;
+    audience?: 'owner' | 'dealer' | 'both' | null;
     hasEmbedding: boolean;
 }
 
@@ -227,8 +231,10 @@ export interface CorpusCommunicationSummary {
     symptoms: string[];
     systems: string[];
     vehicles: CorpusVehicle[];
-    // Set by symptom search when older revisions of this bulletin were folded in.
-    supersededCount?: number;
+    // Optional here: SymptomSearchView builds summaries without severity.
+    severity?: 'serious' | 'medium' | 'small';
+    severitySource?: 'type' | 'classifier';
+    supersededCount: number;
 }
 
 export interface CorpusCommunicationDetail {
@@ -243,6 +249,9 @@ export interface CorpusCommunicationDetail {
     processedAt?: string | null;
     documents: CorpusDocument[];
     vehicles: CorpusVehicle[];
+    severity: 'serious' | 'medium' | 'small';
+    severitySource: 'type' | 'classifier';
+    supersededCount: number;
 }
 
 export interface CorpusListResponse {

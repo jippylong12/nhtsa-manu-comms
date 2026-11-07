@@ -16,6 +16,7 @@ from typing import Optional
 # 2. Summary text analysis for bulletins/programs
 # 3. Communication number patterns (XX-NA-XXX format)
 
+# Severity tier per type is defined in severity.py (SEVERITY_BY_TYPE); keep them in step.
 COMM_TYPE_MAP = {
     # Prefix-based types
     "TSB": "Technical Service Bulletin",

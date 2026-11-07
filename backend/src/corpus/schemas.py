@@ -27,6 +27,10 @@ class CorpusDocument(CamelModel):
     components: list[str] = Field(default_factory=list)
     remedy: Optional[str] = None
     applicability: Optional[str] = None
+    applicability_years: list[int] = Field(default_factory=list)
+    applicability_models: list[str] = Field(default_factory=list)
+    applicability_conditions: Optional[str] = None
+    audience: Optional[str] = None
     has_embedding: bool = False
 
 
@@ -48,6 +52,11 @@ class CommunicationSummary(CamelModel):
     communication_date: Optional[datetime] = None
     summary: str = ""
     status: str
+    severity: str = "small"
+    severity_source: str = "type"
+    # Older revisions of this bulletin folded into this row (0 when none, or
+    # when the list is unfolded with revisions=all).
+    superseded_count: int = 0
     document_count: int = 0
     # Rolled up across the communication's documents so the list view can show
     # tags without a second request per row.
@@ -67,6 +76,9 @@ class CommunicationDetail(CamelModel):
     summary: str = ""
     details_summary: Optional[str] = None
     status: str
+    severity: str = "small"
+    severity_source: str = "type"
+    superseded_count: int = 0
     status_reason: Optional[str] = None
     processed_at: Optional[datetime] = None
     documents: list[CorpusDocument] = Field(default_factory=list)

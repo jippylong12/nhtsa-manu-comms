@@ -245,3 +245,100 @@ async def test_vehicle_upsert_is_idempotent(conn):
 
     keywords = await conn.fetchval("SELECT keywords FROM vehicles WHERE id = $1", first_id)
     assert list(keywords) == ["battery"], "an add with no keywords keeps the configured ones"
+
+
+async def _upsert_as(conn, communication_type, nhtsa_id="90000001"):
+    return await repo.upsert_communication(
+        conn,
+        nhtsa_id=nhtsa_id,
+        communication_number="24-NA-001",
+        communication_type=communication_type,
+        communication_date=datetime(2024, 7, 1, tzinfo=timezone.utc),
+        summary="s",
+        details_summary="d",
+        raw="{}",
+    )
+
+
+async def _severity(conn, nhtsa_id="90000001"):
+    row = await conn.fetchrow(
+        "SELECT severity, severity_source FROM communications WHERE nhtsa_id = $1", nhtsa_id
+    )
+    return row["severity"], row["severity_source"]
+
+
+async def test_new_tsb_is_serious_by_type(conn):
+    await _upsert_as(conn, "TSB")
+    assert await _severity(conn) == ("serious", "type")
+
+
+async def test_type_change_refreshes_severity_while_source_is_type(conn):
+    await _upsert_as(conn, "TSB")
+    await _upsert_as(conn, "IB")
+    assert await _severity(conn) == ("small", "type")
+
+
+async def test_classifier_severity_survives_resync(conn):
+    comm_id, _ = await _upsert_as(conn, "MC")
+    await conn.execute(
+        "UPDATE communications SET severity = 'serious', severity_source = 'classifier' "
+        "WHERE id = $1",
+        comm_id,
+    )
+    await _upsert_as(conn, "IB")
+    assert await _severity(conn) == ("serious", "classifier")
+
+
+async def test_migration_0010_applied_twice_is_a_noop(conn):
+    from pathlib import Path
+
+    sql = (Path(__file__).parent.parent / "migrations" / "0010_schema_v2.sql").read_text()
+    comm_id, _ = await _upsert_as(conn, "TSB")
+    await conn.execute(
+        "UPDATE communications SET severity = 'medium', severity_source = 'classifier' "
+        "WHERE id = $1",
+        comm_id,
+    )
+    await _upsert_as(conn, "PIT", nhtsa_id="90000002")
+    before = await conn.fetch("SELECT id, severity, severity_source FROM communications ORDER BY id")
+    await conn.execute(sql)
+    await conn.execute(sql)
+    after = await conn.fetch("SELECT id, severity, severity_source FROM communications ORDER BY id")
+    assert [tuple(r) for r in before] == [tuple(r) for r in after]
+    assert await _severity(conn, "90000002") == ("medium", "type")
+
+
+async def test_migration_0011_moves_old_documentless_failures_and_is_idempotent(conn):
+    from pathlib import Path
+
+    sql = (
+        Path(__file__).parent.parent / "migrations" / "0011_summary_only_backfill.sql"
+    ).read_text()
+    old, _ = await _insert(conn, nhtsa_id="90000011")
+    other, _ = await _insert(conn, nhtsa_id="90000012")
+    await conn.execute(
+        "UPDATE communications SET status = 'failed', "
+        "status_reason = 'no associated documents published by NHTSA' WHERE id = $1",
+        old,
+    )
+    await conn.execute(
+        "UPDATE communications SET status = 'failed', status_reason = 'document x: boom' "
+        "WHERE id = $1",
+        other,
+    )
+
+    async def snap():
+        rows = await conn.fetch(
+            "SELECT id, status, status_reason, processed_at FROM communications ORDER BY id"
+        )
+        return [tuple(r) for r in rows]
+
+    await conn.execute(sql)
+    first = await snap()
+    await conn.execute(sql)
+    assert await snap() == first
+
+    by_id = {r[0]: r for r in first}
+    assert by_id[old][1:3] == ("processed", "summary only: NHTSA published no document")
+    assert by_id[old][3] is not None
+    assert by_id[other][1:3] == ("failed", "document x: boom")

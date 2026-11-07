@@ -189,3 +189,52 @@ def test_render_html_drops_dangerous_url():
     html = D.render_html(d)
     assert "javascript:" not in html
     assert "View source document" not in html  # link omitted entirely
+
+
+async def _seed_family(vehicle_id):
+    """Two revisions of one bulletin, both newly processed, on the seeded vehicle."""
+    conn = await asyncpg.connect(get_settings().database_url)
+    try:
+        for i, (number, day) in enumerate((("DG1000", 1), ("DG1000A", 2)), start=1):
+            cid = await conn.fetchval(
+                """
+                INSERT INTO communications
+                    (nhtsa_id, communication_number, communication_type,
+                     communication_date, summary, status, processed_at)
+                VALUES ($1, $2, 'TSB', $3, $4, 'processed', $5)
+                RETURNING id
+                """,
+                f"{NS}-F{i}",
+                number,
+                BASE + timedelta(days=day),
+                f"Family revision {i}",
+                BASE + timedelta(hours=10 + i),
+            )
+            await conn.execute(
+                "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1,$2)",
+                cid,
+                vehicle_id,
+            )
+    finally:
+        await conn.close()
+
+
+async def test_digest_lists_a_revision_family_once_as_its_current_revision(seeded):
+    await _seed_family(seeded["vehicle"])
+
+    digest = await D.build_digest(since=None, generated_at=BASE)
+
+    family = [it for it in _ns_items(digest) if it.nhtsa_id.startswith(f"{NS}-F")]
+    assert [it.nhtsa_id for it in family] == [f"{NS}-F2"]
+    assert family[0].superseded_count == 1
+    assert "(latest of 2 revisions)" in D.render_text(digest)
+    assert "(latest of 2 revisions)" in D.render_html(digest)
+    # Both revisions were still processed: the watermark covers the older one too.
+    assert digest.watermark >= BASE + timedelta(hours=12)
+
+
+async def test_digest_omits_the_revision_note_for_a_single_row(seeded):
+    digest = await D.build_digest(since=None, generated_at=BASE)
+    ours = _ns_items(digest)
+    assert ours and all(it.superseded_count == 0 for it in ours)
+    assert all(D._revision_note(it) == "" for it in ours)

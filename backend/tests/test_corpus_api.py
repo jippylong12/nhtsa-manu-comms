@@ -53,8 +53,9 @@ async def seeded():
             """
             INSERT INTO communications
                 (nhtsa_id, communication_number, communication_type,
-                 communication_date, summary, status)
-            VALUES ($1, '24-NA-A', 'TSB', '2099-06-01', 'Brake shudder bulletin', 'processed')
+                 communication_date, summary, status, severity)
+            VALUES ($1, '24-NA-A', 'TSB', '2099-06-01', 'Brake shudder bulletin', 'processed',
+                    'serious')
             RETURNING id
             """,
             f"{NS}-A",
@@ -72,6 +73,15 @@ async def seeded():
             f"https://static.nhtsa.gov/{NS}-A.pdf",
         )
         await conn.execute(
+            """
+            UPDATE comm_documents SET applicability_years = ARRAY[2024, 2025],
+                applicability_models = ARRAY['SILVERADO', 'SIERRA'],
+                applicability_conditions = 'Built before 03/2024', audience = 'dealer'
+            WHERE communication_id = $1
+            """,
+            a,
+        )
+        await conn.execute(
             "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1,$2),($1,$3)",
             a,
             v1,
@@ -83,8 +93,9 @@ async def seeded():
             """
             INSERT INTO communications
                 (nhtsa_id, communication_number, communication_type,
-                 communication_date, summary, status)
-            VALUES ($1, '24-NA-B', 'PIT', '2099-09-01', 'Infotainment update', 'processed')
+                 communication_date, summary, status, severity)
+            VALUES ($1, '24-NA-B', 'PIT', '2099-09-01', 'Infotainment update', 'processed',
+                    'medium')
             RETURNING id
             """,
             f"{NS}-B",
@@ -117,6 +128,29 @@ async def seeded():
             f"{NS}-C",
         )
 
+        # One bulletin republished twice: PIT6202 -> PIT6202A -> PIT6202C, one
+        # NHTSA record per revision, oldest first. Type SU keeps them out of the
+        # TSB/PIT filters the other tests use.
+        for suffix, date in (("0", "2099-01-01"), ("1", "2099-02-01"), ("2", "2099-03-15")):
+            number = ("PIT6202", "PIT6202A", "PIT6202C")[int(suffix)]
+            rid = await conn.fetchval(
+                """
+                INSERT INTO communications
+                    (nhtsa_id, communication_number, communication_type,
+                     communication_date, summary, status, severity)
+                VALUES ($1, $2, 'SU', $3, 'Revised bulletin', 'processed', 'medium')
+                RETURNING id
+                """,
+                f"{NS}-R{suffix}",
+                number,
+                datetime.fromisoformat(date).replace(tzinfo=timezone.utc),
+            )
+            await conn.execute(
+                "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1,$2)",
+                rid,
+                v1,
+            )
+
         yield {"v1": v1, "v2": v2}
     finally:
         await _cleanup(conn)
@@ -135,8 +169,9 @@ def _ids(items):
 async def test_list_returns_all_seeded(seeded):
     items, total = await service.list_communications(search=None, per_page=100)
     ours = {i["nhtsa_id"] for i in items if i["nhtsa_id"].startswith(NS)}
-    assert ours == {f"{NS}-A", f"{NS}-B", f"{NS}-C"}
-    assert total >= 3
+    # The PIT6202 family folds to its current revision, R2.
+    assert ours == {f"{NS}-A", f"{NS}-B", f"{NS}-C", f"{NS}-R2"}
+    assert total >= 4
 
 
 async def test_filter_by_vehicle_dedupes_shared_comm(seeded):
@@ -308,3 +343,68 @@ async def test_tag_vocabulary_without_a_vehicle_still_spans_the_corpus(seeded):
     everything = await service.tag_vocabulary(limit=5000)
 
     assert len(everything["systems"]) > len(scoped["systems"])
+
+
+async def test_list_folds_a_revision_family_to_its_current_revision(seeded):
+    items, total = await service.list_communications(vehicle_id=seeded["v1"], per_page=100)
+    family = [i for i in items if i["communication_number"].startswith("PIT6202")]
+    assert [i["nhtsa_id"] for i in family] == [f"{NS}-R2"]
+    assert family[0]["superseded_count"] == 2
+    # v1 holds A, B and the family: three families, five rows.
+    assert total == 3
+
+
+async def test_unrevised_rows_report_no_superseded(seeded):
+    items, _ = await service.list_communications(comm_type="TSB", per_page=100)
+    comm_a = next(i for i in items if i["nhtsa_id"] == f"{NS}-A")
+    assert comm_a["superseded_count"] == 0
+
+
+async def test_revisions_all_returns_every_revision(seeded):
+    items, total = await service.list_communications(
+        vehicle_id=seeded["v1"], revisions="all", per_page=100
+    )
+    family = [i for i in items if i["communication_number"].startswith("PIT6202")]
+    assert {i["nhtsa_id"] for i in family} == {f"{NS}-R0", f"{NS}-R1", f"{NS}-R2"}
+    assert all(i["superseded_count"] == 0 for i in family)
+    assert total == 5
+
+
+async def test_pagination_counts_families_not_rows(seeded):
+    page1, total = await service.list_communications(vehicle_id=seeded["v1"], per_page=2, page=1)
+    page2, _ = await service.list_communications(vehicle_id=seeded["v1"], per_page=2, page=2)
+    assert total == 3
+    assert len(page1) == 2 and len(page2) == 1
+    assert not ({i["nhtsa_id"] for i in page1} & {i["nhtsa_id"] for i in page2})
+
+
+async def test_filter_by_severity_serious(seeded):
+    items, _ = await service.list_communications(severity="serious", per_page=200)
+    assert items and all(i["severity"] == "serious" for i in items)
+    ours = [i for i in items if i["nhtsa_id"].startswith(NS)]
+    assert _ids(ours) == {f"{NS}-A"}
+
+
+async def test_severity_filter_composes_with_folding(seeded):
+    items, total = await service.list_communications(
+        severity="medium", vehicle_id=seeded["v1"], per_page=100
+    )
+    assert _ids(items) == {f"{NS}-B", f"{NS}-R2"}
+    assert total == 2
+
+
+async def test_detail_carries_schema_v2_fields(seeded):
+    detail = await service.get_communication(f"{NS}-A")
+    assert detail["severity"] == "serious"
+    assert detail["severity_source"] == "type"
+    doc = detail["documents"][0]
+    assert doc["applicability_years"] == [2024, 2025]
+    assert doc["applicability_models"] == ["SILVERADO", "SIERRA"]
+    assert doc["applicability_conditions"] == "Built before 03/2024"
+    assert doc["audience"] == "dealer"
+
+    from src.corpus.schemas import CommunicationDetail
+
+    body = CommunicationDetail(**detail).model_dump(by_alias=True)
+    assert body["severitySource"] == "type"
+    assert body["documents"][0]["applicabilityYears"] == [2024, 2025]

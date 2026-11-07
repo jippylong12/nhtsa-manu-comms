@@ -31,6 +31,7 @@ from typing import Optional
 
 from src.config import get_settings
 from src.db import close_pool, get_pool
+from src.symptom_search.retrieval import revision_stem
 
 log = logging.getLogger("digest")
 
@@ -45,6 +46,8 @@ class DigestItem:
     symptoms: list[str]
     systems: list[str]
     url: Optional[str]
+    # Older revisions of this bulletin folded into this item.
+    superseded_count: int = 0
 
 
 @dataclass
@@ -73,6 +76,12 @@ async def _get_watermark(conn) -> Optional[datetime]:
     return await conn.fetchval("SELECT last_watermark FROM digest_state WHERE id = true")
 
 
+def _recency(row) -> tuple:
+    """Sort key: newest communication_date first (undated last), then nhtsa_id."""
+    date = row["communication_date"]
+    return (date.timestamp() if date else float("-inf"), row["nhtsa_id"])
+
+
 async def build_digest(since: Optional[datetime], generated_at: datetime) -> Digest:
     """Collect communications processed since `since`, grouped by vehicle.
 
@@ -84,7 +93,7 @@ async def build_digest(since: Optional[datetime], generated_at: datetime) -> Dig
         rows = await conn.fetch(
             """
             SELECT
-                c.nhtsa_id, c.communication_type, c.communication_date,
+                c.nhtsa_id, c.communication_number, c.communication_type, c.communication_date,
                 c.summary, c.processed_at,
                 v.id AS vehicle_id, v.year, v.make, v.model,
                 (SELECT d.llm_summary FROM comm_documents d
@@ -109,30 +118,49 @@ async def build_digest(since: Optional[datetime], generated_at: datetime) -> Dig
             since,
         )
 
-    groups: dict[str, VehicleGroup] = {}
+    # Every revision is processed, but a reader wants each bulletin once: per
+    # vehicle, keep the current revision of each family and count the rest.
+    families: dict[str, dict[str, list]] = {}
     watermark = since
     for r in rows:
         label = f"{r['year']} {r['make']} {r['model']}".strip()
-        grp = groups.setdefault(label, VehicleGroup(label=label))
-        grp.items.append(
-            DigestItem(
-                nhtsa_id=r["nhtsa_id"],
-                communication_type=r["communication_type"],
-                communication_date=r["communication_date"],
-                summary=r["summary"] or "",
-                llm_summary=r["llm_summary"],
-                symptoms=list(r["symptoms"]),
-                systems=list(r["systems"]),
-                url=r["url"],
-            )
-        )
+        stem = revision_stem(r["communication_number"]) or r["nhtsa_id"]
+        families.setdefault(label, {}).setdefault(stem, []).append(r)
         if r["processed_at"] and (watermark is None or r["processed_at"] > watermark):
             watermark = r["processed_at"]
+
+    groups: list[VehicleGroup] = []
+    for label, by_stem in families.items():
+        # Newest first, as the query ordered them; the first of each family is
+        # its current revision.
+        folded = [
+            (max(members, key=_recency), len(members) - 1) for members in by_stem.values()
+        ]
+        folded.sort(key=lambda t: _recency(t[0]), reverse=True)
+        groups.append(
+            VehicleGroup(
+                label=label,
+                items=[
+                    DigestItem(
+                        nhtsa_id=r["nhtsa_id"],
+                        communication_type=r["communication_type"],
+                        communication_date=r["communication_date"],
+                        summary=r["summary"] or "",
+                        llm_summary=r["llm_summary"],
+                        symptoms=list(r["symptoms"]),
+                        systems=list(r["systems"]),
+                        url=r["url"],
+                        superseded_count=superseded,
+                    )
+                    for r, superseded in folded
+                ],
+            )
+        )
 
     return Digest(
         generated_at=generated_at,
         since=since,
-        groups=list(groups.values()),
+        groups=groups,
         watermark=watermark,
     )
 
@@ -148,6 +176,13 @@ def _safe_link(url: Optional[str]) -> bool:
     return bool(url) and url.strip().lower().startswith(("http://", "https://"))
 
 
+def _revision_note(item: DigestItem) -> str:
+    """' (latest of N revisions)' when older revisions were folded into the item."""
+    if item.superseded_count <= 0:
+        return ""
+    return f" (latest of {item.superseded_count + 1} revisions)"
+
+
 def render_text(digest: Digest) -> str:
     """Plain-text alternative part."""
     lines = [
@@ -159,7 +194,7 @@ def render_text(digest: Digest) -> str:
         lines.append(f"== {grp.label} ({len(grp.items)}) ==")
         for it in grp.items:
             date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
-            lines.append(f"- [{it.communication_type or 'OTHER'}] {date}")
+            lines.append(f"- [{it.communication_type or 'OTHER'}] {date}{_revision_note(it)}")
             lines.append(f"  {it.llm_summary or it.summary}")
             if it.systems:
                 lines.append(f"  Systems: {', '.join(it.systems)}")
@@ -196,7 +231,7 @@ def render_html(digest: Digest) -> str:
                 <tr><td style="padding:14px 0;border-bottom:1px solid #1f2937;">
                     <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">
                         <strong style="color:#f59e0b;">{escape(it.communication_type or 'OTHER')}</strong>
-                        &nbsp;&middot;&nbsp;{date}
+                        &nbsp;&middot;&nbsp;{date}{escape(_revision_note(it))}
                     </div>
                     <div style="font-size:15px;color:#e5e7eb;line-height:1.5;margin-bottom:6px;">
                         {escape(it.llm_summary or it.summary or 'No summary available')}

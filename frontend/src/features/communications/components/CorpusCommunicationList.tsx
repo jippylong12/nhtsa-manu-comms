@@ -14,9 +14,15 @@ import {
   Wrench,
   Cpu,
   Stethoscope,
+  Building2,
 } from 'lucide-react';
 
-import type { CorpusCommunicationSummary, CommType, ProcessingStatus } from '@/client';
+import type {
+  CorpusCommunicationSummary,
+  CorpusDocument,
+  CommType,
+  ProcessingStatus,
+} from '@/client';
 import { COMM_TYPE_COLORS, COMM_TYPE_LABELS } from '@/client';
 import { useCorpusDetailQuery } from '../hooks/useCorpus';
 
@@ -53,6 +59,41 @@ function StatusBadge({ status }: { status: ProcessingStatus }) {
       <Icon size={11} />
       {meta.label}
     </span>
+  );
+}
+
+// Structured applicability (years + models chips, conditions line) wins over the
+// v1 prose paragraph, which is only the fallback for rows without arrays.
+function renderApplicability(doc: CorpusDocument) {
+  const years = doc.applicabilityYears ?? [];
+  const models = doc.applicabilityModels ?? [];
+  const hasStructured = years.length > 0 || models.length > 0;
+  if (!hasStructured && !doc.applicability) return null;
+  return (
+    <div className={styles.field}>
+      <span className={styles.fieldLabel}>Applies to</span>
+      {hasStructured ? (
+        <>
+          <div className={styles.chipRow}>
+            {years.map((y) => (
+              <span key={`year-${y}`} className={`${styles.chip} ${styles.chipYear}`}>
+                {y}
+              </span>
+            ))}
+            {models.map((m) => (
+              <span key={`model-${m}`} className={`${styles.chip} ${styles.chipModel}`}>
+                {m}
+              </span>
+            ))}
+          </div>
+          {doc.applicabilityConditions && (
+            <p className={styles.fieldValue}>{doc.applicabilityConditions}</p>
+          )}
+        </>
+      ) : (
+        <p className={styles.fieldValue}>{doc.applicability}</p>
+      )}
+    </div>
   );
 }
 
@@ -204,20 +245,28 @@ function CorpusRow({
 
               {detail.documents.map((doc) => (
                 <div key={doc.id} className={styles.docBlock}>
-                  {doc.remedy && (
+                  {(doc.remedy || doc.audience === 'dealer') && (
                     <div className={styles.field}>
-                      <span className={styles.fieldLabel}>
-                        <Wrench size={13} /> Remedy
-                      </span>
-                      <p className={styles.fieldValue}>{doc.remedy}</p>
+                      <div className={styles.labelRow}>
+                        {doc.remedy && (
+                          <span className={styles.fieldLabel}>
+                            <Wrench size={13} /> Remedy
+                          </span>
+                        )}
+                        {doc.audience === 'dealer' && (
+                          <span
+                            className={styles.audienceBadge}
+                            title="Addressed to dealers and technicians"
+                          >
+                            <Building2 size={12} />
+                            Dealer-facing
+                          </span>
+                        )}
+                      </div>
+                      {doc.remedy && <p className={styles.fieldValue}>{doc.remedy}</p>}
                     </div>
                   )}
-                  {doc.applicability && (
-                    <div className={styles.field}>
-                      <span className={styles.fieldLabel}>Applies to</span>
-                      <p className={styles.fieldValue}>{doc.applicability}</p>
-                    </div>
-                  )}
+                  {renderApplicability(doc)}
                   {doc.symptoms.length > 0 && (
                     <div className={styles.field}>
                       <span className={styles.fieldLabel}>

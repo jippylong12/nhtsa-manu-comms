@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 import asyncpg
 
+from src.communications.severity import severity_for_type
+
 
 async def upsert_communication(
     conn: asyncpg.Connection,
@@ -38,16 +40,19 @@ async def upsert_communication(
         """
         INSERT INTO communications (
             nhtsa_id, communication_number, communication_type,
-            communication_date, summary, details_summary, raw, status
+            communication_date, summary, details_summary, raw, status, severity
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'pending')
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'pending', $8)
         ON CONFLICT (nhtsa_id) DO UPDATE SET
             communication_number = EXCLUDED.communication_number,
             communication_type   = EXCLUDED.communication_type,
             communication_date   = EXCLUDED.communication_date,
             summary              = EXCLUDED.summary,
             details_summary      = EXCLUDED.details_summary,
-            raw                  = EXCLUDED.raw
+            raw                  = EXCLUDED.raw,
+            severity             = CASE WHEN communications.severity_source = 'type'
+                                        THEN EXCLUDED.severity
+                                        ELSE communications.severity END
         RETURNING id, (xmax = 0) AS inserted
         """,
         nhtsa_id,
@@ -57,6 +62,7 @@ async def upsert_communication(
         summary,
         details_summary,
         raw,
+        severity_for_type(communication_type),
     )
     return row["id"], row["inserted"]
 

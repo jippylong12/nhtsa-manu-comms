@@ -264,6 +264,10 @@ GOOD = {
     "remedy": "Replace latch.",
     "applicability": "2021 Example Truck",
     "doc_kind": "service_procedure",
+    "applicability_years": [2021],
+    "applicability_models": ["Example Truck"],
+    "applicability_conditions": "",
+    "audience": "dealer",
 }
 
 

@@ -81,7 +81,7 @@ async def run_extract(
     limit: int | None, vehicle_id: int | None = None
 ) -> "extract_stage.ExtractStats":
     """Extract stage. `vehicle_id` restricts it to one tracked vehicle."""
-    await extract_stage.mark_documentless_communications(vehicle_id)
+    await extract_stage.mark_summary_only_communications(vehicle_id)
     stats = await extract_stage.extract_pending(limit=limit, vehicle_id=vehicle_id)
     await record_run(
         "extract",

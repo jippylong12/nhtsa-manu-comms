@@ -332,7 +332,12 @@ async def _finish(
 
 
 async def _vehicle_state(vehicle_id: int) -> dict[str, Any]:
-    """How the vehicle's corpus stands, for the run's closing report."""
+    """How the vehicle's corpus stands, for the run's closing report.
+
+    `analysed` counts every `processed` row, summary-only bulletins (NHTSA
+    published no document) included; `unavailable` is download or extraction
+    failures only.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

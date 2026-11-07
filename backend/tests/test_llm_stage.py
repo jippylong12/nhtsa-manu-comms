@@ -6,11 +6,16 @@ nothing here calls the real API.
 
 import base64
 import json
+import uuid
 from types import SimpleNamespace
 
 import anthropic
+import asyncpg
 import httpx
 import pytest
+import pytest_asyncio
+
+from src.config import get_settings
 
 from src.jobs import llm, pdf_input
 
@@ -22,6 +27,10 @@ GOOD = {
     "remedy": "Reprogram the radio.",
     "applicability": "2024 Silverado EV",
     "doc_kind": "service_procedure",
+    "applicability_years": [2024],
+    "applicability_models": ["Silverado EV"],
+    "applicability_conditions": "",
+    "audience": "dealer",
 }
 
 
@@ -321,3 +330,70 @@ async def test_collect_batch_stores_succeeded_and_fails_errored_results_and_mete
     assert any("could not be matched" in e for e in stats.errors)
     assert sorted((u["document_id"], u["batch"]) for u in stage.usage) == [(2, True), (3, True)]
     assert all(u["meta"] == {"path": "batch", "input": "pdf", "project": "schema-v2"} for u in stage.usage)
+
+
+# --- promotion: severity from the classifier for catch-all types -------------------------
+
+NS_PROMOTE = f"TESTPROMOTE-{uuid.uuid4().hex[:8]}"
+
+
+@pytest_asyncio.fixture
+async def promotable():
+    """Insert pending communications whose one document is done; clean up afterwards."""
+    settings = get_settings()
+    if not settings.database_url:
+        pytest.skip("DATABASE_URL not configured")
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+
+        async def add(suffix, comm_type, doc_kind):
+            comm_id = await conn.fetchval(
+                """
+                INSERT INTO communications (nhtsa_id, communication_type, communication_date, status)
+                VALUES ($1, $2, '2099-01-01', 'pending') RETURNING id
+                """,
+                f"{NS_PROMOTE}-{suffix}",
+                comm_type,
+            )
+            await conn.execute(
+                """
+                INSERT INTO comm_documents (communication_id, url, llm_summary, doc_kind, audience)
+                VALUES ($1, $2, 'done', $3, 'owner')
+                """,
+                comm_id,
+                f"https://x/{NS_PROMOTE}-{suffix}.pdf",
+                doc_kind,
+            )
+            return comm_id
+
+        async def state(comm_id):
+            return dict(
+                await conn.fetchrow(
+                    "SELECT status, severity, severity_source FROM communications WHERE id=$1",
+                    comm_id,
+                )
+            )
+
+        yield add, state
+    finally:
+        await conn.execute("DELETE FROM communications WHERE nhtsa_id LIKE $1", f"{NS_PROMOTE}%")
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_promoting_a_catch_all_recall_is_classified_serious_and_a_tsb_keeps_its_type(
+    promotable,
+):
+    add, state = promotable
+    mc = await add("mc", "MC", "recall")
+    tsb = await add("tsb", "TSB", "service_procedure")
+
+    await llm.promote_completed_communications()
+
+    mc_state = await state(mc)
+    assert mc_state["status"] == "processed"
+    assert mc_state["severity"] == "serious"
+    assert mc_state["severity_source"] == "classifier"
+    tsb_state = await state(tsb)
+    assert tsb_state["status"] == "processed"
+    assert tsb_state["severity_source"] == "type"

@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from src.db import get_pool
+from src.symptom_search.retrieval import REVISION_STEM_SQL
 
 
 class _Filters:
@@ -37,6 +38,7 @@ def _build_filters(
     systems: Optional[list[str]],
     components: Optional[list[str]],
     search: Optional[str],
+    severity: Optional[str] = None,
 ) -> _Filters:
     f = _Filters()
 
@@ -53,6 +55,8 @@ def _build_filters(
         f.add("c.communication_type = {}", comm_type)
     if status:
         f.add("c.status = {}", status)
+    if severity:
+        f.add("c.severity = {}", severity)
     if date_from:
         f.add("c.communication_date >= {}", date_from)
     if date_to:
@@ -96,6 +100,8 @@ async def list_communications(
     systems: Optional[list[str]] = None,
     components: Optional[list[str]] = None,
     search: Optional[str] = None,
+    severity: Optional[str] = None,
+    revisions: str = "latest",
     page: int = 1,
     per_page: int = 50,
 ) -> tuple[list[dict], int]:
@@ -109,12 +115,25 @@ async def list_communications(
         systems=systems,
         components=components,
         search=search,
+        severity=severity,
     )
     where = f.where()
     pool = await get_pool()
 
+    # latest: fold each revision family (computed over the filtered rows) to its
+    # current revision. all: every row, no folding.
+    if revisions == "latest":
+        source = f"""
+            SELECT DISTINCT ON (stem) c.*, stem,
+                   count(*) OVER (PARTITION BY stem) - 1 AS superseded_count
+            FROM (SELECT c.*, {REVISION_STEM_SQL} AS stem FROM communications c {where}) c
+            ORDER BY stem, c.communication_date DESC NULLS LAST, c.nhtsa_id DESC
+        """
+    else:
+        source = f"SELECT c.*, 0 AS superseded_count FROM communications c {where}"
+
     async with pool.acquire() as conn:
-        total = await conn.fetchval(f"SELECT count(*) FROM communications c {where}", *f.params)
+        total = await conn.fetchval(f"SELECT count(*) FROM ({source}) c", *f.params)
 
         limit_param = f"${len(f.params) + 1}"
         offset_param = f"${len(f.params) + 2}"
@@ -123,6 +142,7 @@ async def list_communications(
             SELECT
                 c.nhtsa_id, c.communication_number, c.communication_type,
                 c.communication_date, coalesce(c.summary, '') AS summary, c.status,
+                c.severity, c.severity_source, c.superseded_count,
                 (SELECT count(*) FROM comm_documents d WHERE d.communication_id = c.id) AS document_count,
                 (SELECT d.llm_summary FROM comm_documents d
                  WHERE d.communication_id = c.id AND d.llm_summary IS NOT NULL
@@ -133,8 +153,7 @@ async def list_communications(
                 (SELECT coalesce(array_agg(DISTINCT s), '{{}}')
                  FROM comm_documents d, unnest(d.systems) s
                  WHERE d.communication_id = c.id) AS systems
-            FROM communications c
-            {where}
+            FROM ({source}) c
             ORDER BY c.communication_date DESC NULLS LAST, c.id DESC
             LIMIT {limit_param} OFFSET {offset_param}
             """,
@@ -195,7 +214,8 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
             """
             SELECT nhtsa_id, communication_number, communication_type,
                    communication_date, coalesce(summary, '') AS summary,
-                   details_summary, status, status_reason, processed_at, id
+                   details_summary, status, status_reason, processed_at, severity,
+                   severity_source, id
             FROM communications WHERE nhtsa_id = $1
             """,
             nhtsa_id,
@@ -207,7 +227,8 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
             """
             SELECT id, url, doc_summary, extraction_method, page_count,
                    llm_summary, doc_kind, symptoms, systems, components,
-                   remedy, applicability, (embedding IS NOT NULL) AS has_embedding
+                   remedy, applicability, applicability_years, applicability_models,
+                   applicability_conditions, audience, (embedding IS NOT NULL) AS has_embedding
             FROM comm_documents
             WHERE communication_id = $1
             ORDER BY id

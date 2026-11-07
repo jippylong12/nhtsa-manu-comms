@@ -22,6 +22,7 @@ import anthropic
 import httpx
 
 from src.anthropic_client import client as anthropic_client
+from src.communications.severity import CATCH_ALL_TYPES, classify_from_document
 from src.config import get_settings
 from src.jobs import pdf_input
 from src.usage import pricing
@@ -90,6 +91,25 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                 "other",
             ],
         },
+        "applicability_years": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Every model year the document states applies, as integers; empty if none.",
+        },
+        "applicability_models": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Model nameplates exactly as printed, without make or trim, e.g. 'F-150', 'Silverado EV'; empty if none.",
+        },
+        "applicability_conditions": {
+            "type": "string",
+            "description": "Engine, RPO/option code, build-date, plant or VIN qualifiers that narrow applicability; empty string if none.",
+        },
+        "audience": {
+            "type": "string",
+            "enum": ["owner", "dealer", "both"],
+            "description": "Who the document addresses.",
+        },
     },
     "required": [
         "summary",
@@ -99,6 +119,10 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "remedy",
         "applicability",
         "doc_kind",
+        "applicability_years",
+        "applicability_models",
+        "applicability_conditions",
+        "audience",
     ],
 }
 
@@ -107,7 +131,11 @@ _RULES = """Extract structured data describing what this document says. Rules:
 - If a field genuinely has no content in this document, return an empty array or empty string. Do not invent filler.
 - symptoms are what someone would OBSERVE (noise, vibration, warning lamp, no-start), not internal causes.
 - Keep each array item short: a noun phrase, not a sentence.
-- applicability should capture model years and models even when they appear in a flattened table."""
+- applicability should capture model years and models even when they appear in a flattened table.
+- doc_kind: service_procedure only when the document prescribes steps a technician performs; informational when it only informs or announces; recall only for a safety recall or campaign; customer_letter for a letter addressed to owners; warranty_admin for labor operations, claims and policy; other when none fits.
+- audience: dealer when the document is addressed to dealers or technicians only; owner when addressed to vehicle owners; both when it speaks to both or is unclear.
+- applicability_years are integers; applicability_models are the nameplates as printed, without make or trim; applicability_conditions carries engine, RPO, build-date, plant and VIN qualifiers.
+- Never state that this document supersedes or is superseded by another unless the document says so explicitly, and then quote its direction exactly."""
 
 TEXT_PROMPT = (
     "You are analysing a manufacturer communication (TSB, PI, recall, or warranty bulletin) "
@@ -126,7 +154,8 @@ MERGE_PROMPT = (
     "Below are {n} partial extractions of consecutive page ranges of one manufacturer "
     "communication, as JSON. Merge them into one record of the same shape: union the arrays "
     "without duplicates, keep every stated model year and model, write one summary and one "
-    "remedy covering the whole document, choose the doc_kind the majority of parts chose. "
+    "remedy covering the whole document, choose the doc_kind the majority of parts chose, "
+    "union applicability_years and applicability_models, keep the audience the majority of parts chose. "
     "Use only what the parts contain.\n\n"
 )
 
@@ -173,15 +202,34 @@ def validate(payload: Any) -> tuple[Optional[dict], Optional[str]]:
             return None, f"{key} must be a list, got {type(payload[key]).__name__}"
         if not all(isinstance(v, str) for v in payload[key]):
             return None, f"{key} must contain only strings"
-    for key in ("summary", "remedy", "applicability", "doc_kind"):
+    for key in ("summary", "remedy", "applicability", "doc_kind", "applicability_conditions"):
         if not isinstance(payload[key], str):
             return None, f"{key} must be a string, got {type(payload[key]).__name__}"
 
     allowed = RESPONSE_SCHEMA["properties"]["doc_kind"]["enum"]
     if payload["doc_kind"] not in allowed:
         return None, f"doc_kind {payload['doc_kind']!r} not in {allowed}"
+    if payload["audience"] not in RESPONSE_SCHEMA["properties"]["audience"]["enum"]:
+        return None, f"audience {payload['audience']!r} not in owner, dealer, both"
     if not payload["summary"].strip():
         return None, "summary is empty"
+    if not isinstance(payload["applicability_years"], list):
+        return None, "applicability_years must be a list"
+    if not isinstance(payload["applicability_models"], list):
+        return None, "applicability_models must be a list"
+
+    years: list[int] = []
+    for v in payload["applicability_years"]:
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, str) and v.strip().isdigit():
+            v = int(v.strip())
+        if isinstance(v, int) and 1950 <= v <= 2100 and v not in years:
+            years.append(v)
+    models: list[str] = []
+    for v in payload["applicability_models"]:
+        if isinstance(v, str) and v.strip() and v.strip() not in models:
+            models.append(v.strip())
 
     return {
         "summary": payload["summary"].strip(),
@@ -191,6 +239,10 @@ def validate(payload: Any) -> tuple[Optional[dict], Optional[str]]:
         "remedy": payload["remedy"].strip(),
         "applicability": payload["applicability"].strip(),
         "doc_kind": payload["doc_kind"],
+        "applicability_years": years,
+        "applicability_models": models,
+        "applicability_conditions": payload["applicability_conditions"].strip(),
+        "audience": payload["audience"],
     }, None
 
 
@@ -403,7 +455,9 @@ async def _store(doc: dict, clean: dict, tokens_in: int, tokens_out: int, batch:
             UPDATE comm_documents
             SET llm_summary=$2, doc_kind=$3, symptoms=$4, systems=$5, components=$6,
                 remedy=$7, applicability=$8, llm_model=$9,
-                llm_tokens_in=$10, llm_tokens_out=$11, llm_cost_usd=$12, llm_at=now()
+                llm_tokens_in=$10, llm_tokens_out=$11, llm_cost_usd=$12, llm_at=now(),
+                applicability_years=$13, applicability_models=$14,
+                applicability_conditions=$15, audience=$16
             WHERE id=$1
             """,
             doc["id"],
@@ -418,6 +472,10 @@ async def _store(doc: dict, clean: dict, tokens_in: int, tokens_out: int, batch:
             tokens_in,
             tokens_out,
             cost_of(tokens_in, tokens_out, batch),
+            clean["applicability_years"],
+            clean["applicability_models"],
+            clean["applicability_conditions"],
+            clean["audience"],
         )
 
 
@@ -466,19 +524,44 @@ async def promote_completed_communications() -> int:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE communications c
-            SET status='processed', processed_at=now(), status_reason=NULL
-            WHERE c.status='pending'
-              AND EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id=c.id)
-              AND NOT EXISTS (
-                  SELECT 1 FROM comm_documents d
-                  WHERE d.communication_id=c.id AND d.llm_summary IS NULL
-              )
-            """
-        )
-    n = int(result.split()[-1]) if result else 0
+        async with conn.transaction():
+            promoted = await conn.fetch(
+                """
+                UPDATE communications c
+                SET status='processed', processed_at=now(), status_reason=NULL
+                WHERE c.status='pending'
+                  AND EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id=c.id)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM comm_documents d
+                      WHERE d.communication_id=c.id AND d.llm_summary IS NULL
+                  )
+                RETURNING c.id, c.communication_type
+                """
+            )
+            for row in promoted:
+                if row["communication_type"] not in CATCH_ALL_TYPES:
+                    continue
+                doc = await conn.fetchrow(
+                    """
+                    SELECT d.doc_kind, d.symptoms, d.remedy, d.audience
+                    FROM comm_documents d WHERE d.communication_id=$1
+                    ORDER BY d.id LIMIT 1
+                    """,
+                    row["id"],
+                )
+                if doc is None:
+                    continue
+                severity, reason = classify_from_document(
+                    doc["doc_kind"], doc["symptoms"], doc["remedy"], doc["audience"]
+                )
+                await conn.execute(
+                    "UPDATE communications SET severity=$2, severity_source='classifier' "
+                    "WHERE id=$1",
+                    row["id"],
+                    severity,
+                )
+                log.debug("classified communication %s as %s: %s", row["id"], severity, reason)
+    n = len(promoted)
     if n:
         log.info("promoted %d communication(s) to processed", n)
     return n
