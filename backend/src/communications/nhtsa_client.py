@@ -1,4 +1,18 @@
-"""Service for fetching data from NHTSA API."""
+"""Client for NHTSA's per-communication detail endpoint.
+
+Reduced to a single job since the plain-nameplate re-key (ADR 0001, M3): given a
+NHTSA ID, fetch that one manufacturer communication (its summary, documents, and
+metadata) from `/safetyIssues/byNhtsaId`. Which ids belong to a vehicle now comes
+from the local `comm_products` flat-file index (see `src/communications/flatfile.py`),
+not from this client.
+
+Everything that walked NHTSA's crash-test taxonomy is gone: `get_vehicle_details`,
+`get_vehicle_variants` (byYmmt), the `/vehicles/*` discovery calls, and the
+`extract_*_from_details` helpers. They resolved a numeric `vehicleId` through a
+route NHTSA's gateway hard-killed at 30s; the flat-file index removes that whole
+failure mode. What survives is the byNhtsaId fetch, whose retry/backoff is
+unchanged.
+"""
 
 import asyncio
 from typing import Any, AsyncGenerator
@@ -9,7 +23,7 @@ from src.config import get_settings
 
 
 class NHTSAClient:
-    """Async client for NHTSA API."""
+    """Async client for NHTSA's per-communication detail endpoint."""
 
     def __init__(self):
         settings = get_settings()
@@ -18,44 +32,6 @@ class NHTSAClient:
             "User-Agent": "nhtsa-manu-comms/2.0 (+https://nhtsa.gov)",
             "Accept": "application/json",
         }
-
-    async def get_vehicle_details(self, vehicle_id: int, max_retries: int = 3) -> dict[str, Any]:
-        """Fetch vehicle details including manufacturer communications list.
-
-        Retries transient upstream failures, which `get_safety_issue` has always
-        done and this did not. NHTSA returns a 504 on this endpoint often enough
-        to see one in ordinary use, and a single unlucky response would
-        otherwise fail the in-app refresh preview outright and abort a sync
-        before it looked at a single bulletin.
-
-        Raises the last httpx error once the retries are exhausted; callers
-        translate it into something the user can act on.
-        """
-        url = f"{self.base_url}/vehicles/{vehicle_id}/details"
-        params = {
-            "data": "complaints,recalls,investigations,manufacturercommunications",
-            "productDetail": "minimal",
-            "name": "",
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for attempt in range(max_retries):
-                last = attempt == max_retries - 1
-                try:
-                    response = await client.get(url, params=params, headers=self.headers)
-                    # 403 is NHTSA's rate limit, 5xx its own trouble. Both pass
-                    # on a later attempt; a 404 will not, so it is not retried.
-                    if (response.status_code == 403 or response.status_code >= 500) and not last:
-                        await asyncio.sleep(2**attempt)  # 1s, 2s
-                        continue
-                    response.raise_for_status()
-                    return response.json()
-                except httpx.RequestError:
-                    if last:
-                        raise
-                    await asyncio.sleep(2**attempt)
-        # Unreachable: the final attempt either returns or raises.
-        raise RuntimeError("unreachable")
 
     async def get_safety_issue(self, nhtsa_id: int, max_retries: int = 3) -> dict[str, Any] | None:
         """Fetch a single manufacturer communication by NHTSA ID with retry logic."""
@@ -73,8 +49,15 @@ class NHTSAClient:
             for attempt in range(max_retries):
                 try:
                     response = await client.get(url, params=params, headers=self.headers)
-                    if response.status_code == 403:
-                        # Rate limited - wait and retry with exponential backoff
+                    # 403 is NHTSA's rate limit; 5xx is its gateway/backend trouble
+                    # (the byNhtsaId endpoint 504s in unhealthy windows). Both are
+                    # transient and pass on a later attempt, so retry with backoff
+                    # and, if they persist, return None -- a per-communication miss
+                    # the caller counts as a fetch failure. This is now the only
+                    # NHTSA call in the fetch path, so it must degrade rather than
+                    # raise: a single 504 must not abort a whole vehicle's sync or
+                    # the run. A 4xx other than 403 will not pass and still surfaces.
+                    if response.status_code == 403 or response.status_code >= 500:
                         if attempt < max_retries - 1:
                             wait_time = 2**attempt  # 1s, 2s, 4s
                             await asyncio.sleep(wait_time)
@@ -132,171 +115,3 @@ class NHTSAClient:
 
         for coro in asyncio.as_completed(tasks):
             yield await coro
-
-    async def get_model_years(self) -> list[int]:
-        """Fetch available model years from Safety Ratings API."""
-        # SafetyRatings is still fine for year discovery
-        url = f"{self.base_url}/SafetyRatings"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, headers=self.headers)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("Results", [])
-                years = []
-                for r in results:
-                    try:
-                        years.append(int(r["ModelYear"]))
-                    except (ValueError, KeyError, TypeError):
-                        continue
-                return sorted(years, reverse=True)
-            except httpx.RequestError:
-                return []
-
-    async def get_makes_for_year(self, year: int) -> list[str]:
-        """Fetch makes for a given model year using /vehicles/makes endpoint."""
-        url = f"{self.base_url}/vehicles/makes"
-        params = {"modelYear": year}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, params=params, headers=self.headers)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("results", [])
-                return sorted(set(r["make"] for r in results if r.get("make")))
-            except httpx.RequestError:
-                return []
-
-    async def get_models_for_make_year(self, year: int, make: str) -> list[str]:
-        """Fetch models for a given year and make using /vehicles/models endpoint."""
-        url = f"{self.base_url}/vehicles/models"
-        params = {"modelYear": year, "make": make, "max": 100}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, params=params, headers=self.headers)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("results", [])
-                return sorted(set(r["vehicleModel"] for r in results if r.get("vehicleModel")))
-            except httpx.RequestError:
-                return []
-
-    async def get_trims_for_model(self, year: int, make: str, model: str) -> list[str]:
-        """Fetch available trims for a given Y/M/M using /vehicles/trims endpoint."""
-        url = f"{self.base_url}/vehicles/trims"
-        params = {"modelYear": year, "make": make, "model": model, "max": 100}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, params=params, headers=self.headers)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("results", [])
-                return sorted(set(r["trim"] for r in results if r.get("trim")))
-            except httpx.RequestError:
-                return []
-
-    async def get_vehicle_variants(
-        self, year: int, make: str, model: str, trim: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Fetch specific vehicle variants with vehicleId using /vehicles/byYmmt endpoint.
-
-        This is the KEY endpoint that returns the correct vehicleId for use with
-        /vehicles/{vehicleId}/details for manufacturer communications.
-        """
-        url = f"{self.base_url}/vehicles/byYmmt"
-        params: dict[str, Any] = {"modelYear": year, "make": make, "model": model, "max": 100}
-        if trim:
-            params["trim"] = trim
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(url, params=params, headers=self.headers)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("results", [])
-                # Return structured variant info with the correct vehicleId
-                variants = []
-                for r in results:
-                    variants.append(
-                        {
-                            "vehicleId": r.get("vehicleId"),  # This is the CORRECT ID!
-                            "ncapId": r.get("ncapId"),  # SafetyRatings ID (for reference)
-                            "modelYear": r.get("modelYear"),
-                            "make": r.get("make"),
-                            "model": r.get("vehicleModel"),
-                            "trim": r.get("trim"),
-                            "series": r.get("series"),
-                            "vehicleDescription": build_vehicle_description(
-                                r.get("vehicleModel"), r.get("trim"), r.get("series")
-                            ),
-                        }
-                    )
-                return variants
-            except httpx.RequestError:
-                return []
-
-
-def build_vehicle_description(model: str | None, trim: str | None, series: str | None) -> str:
-    """Join the human-readable parts of a variant, skipping missing pieces.
-
-    Shared with the vehicle_catalog cache read path so a cached variant renders
-    identically to a live one.
-    """
-    return " ".join(part for part in (model, trim, series) if part)
-
-
-def extract_comm_ids_from_details(details: dict[str, Any]) -> list[int]:
-    """Extract manufacturer communication NHTSA IDs from vehicle details."""
-    try:
-        comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
-    except (KeyError, IndexError, TypeError):
-        return []
-
-    # Sort by date (keep all types now)
-    all_comms = comms or []
-    all_comms.sort(key=lambda x: x.get("communicationDate") or "", reverse=True)
-
-    ids = []
-    for c in all_comms:
-        n = c.get("nhtsaIdNumber")
-        try:
-            ids.append(int(str(n)))
-        except (TypeError, ValueError):
-            continue
-    return ids
-
-
-def extract_id_to_summary(details: dict[str, Any]) -> dict[int, str]:
-    """Extract NHTSA ID to summary mapping from vehicle details."""
-    mapping: dict[int, str] = {}
-    try:
-        comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
-    except (KeyError, IndexError, TypeError):
-        return mapping
-
-    for c in comms or []:
-        n = c.get("nhtsaIdNumber")
-        summary = str(c.get("summary", "") or "")
-        try:
-            mapping[int(str(n))] = summary
-        except (TypeError, ValueError):
-            continue
-    return mapping
-
-
-def extract_id_to_comm_number(details: dict[str, Any]) -> dict[int, str]:
-    """Extract NHTSA ID to manufacturer communication number mapping."""
-    mapping: dict[int, str] = {}
-    try:
-        comms = details["results"][0]["safetyIssues"]["manufacturerCommunications"]
-    except (KeyError, IndexError, TypeError):
-        return mapping
-
-    for c in comms or []:
-        n = c.get("nhtsaIdNumber")
-        comm_number = str(c.get("manufacturerCommunicationNumber", "") or "")
-        try:
-            if comm_number:
-                mapping[int(str(n))] = comm_number
-        except (TypeError, ValueError):
-            continue
-    return mapping

@@ -39,5 +39,10 @@ export function useDiscoveryVariants(year: number | null, make: string, model: s
                 : Promise.resolve([]),
         enabled: !!year && !!make && !!model,
         staleTime: 1000 * 60 * 60, // 1 hour
+        // NHTSA's byYmmt lookup runs right at their 30s gateway timeout, so a
+        // failure is a full 30s wait. Retrying (the global default is 1) would
+        // make the user watch the spinner for a minute before the error. Fail
+        // after the single attempt instead; reselecting the model retries.
+        retry: 0,
     });
 }

@@ -187,8 +187,9 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                             <div className={styles.vehicleNotFound} role="alert">
                                 <AlertCircle size={18} />
                                 <div>
-                                    <strong>Could not look up this vehicle</strong>
+                                    <strong>NHTSA's lookup timed out</strong>
                                     <span className={styles.variantDetails}>
+                                        This happens for high-volume models when NHTSA is slow.
                                         Reselect the model to try again.
                                     </span>
                                 </div>

@@ -1,10 +1,19 @@
 """Job 1: NHTSA discovery into canonical pending rows.
 
-Polls NHTSA per tracked vehicle and inserts any communication not already in
-Postgres as a `pending` canonical row, plus a `comm_documents` row per attached
-PDF and a `communication_vehicles` link. It never downloads or reads a document;
-that is Job 2's role, and `communications.status` is the only contract between
-them.
+Learns each tracked vehicle's communications from the `comm_products` flat-file
+index -- exact match on `(model_year, make, plain nameplate)` -- and inserts any
+communication not already in Postgres as a `pending` canonical row, plus a
+`comm_documents` row per attached PDF and a `communication_vehicles` link. The
+per-communication detail (summary, documents) still comes from NHTSA's
+`/safetyIssues/byNhtsaId`, one call per new bulletin. It never downloads or reads
+a document; that is Job 2's role, and `communications.status` is the only contract
+between them.
+
+The discovery step used to resolve a numeric `vehicleId` via byYmmt and read the
+comm-id list out of `/vehicles/{id}/details` -- a route NHTSA's gateway hard-killed
+at 30s. Since ADR 0001 (M3) the list comes from the local index instead, so
+discovery cannot time out and a fully-down NHTSA only stops the per-bulletin
+detail fetch, which already records its failures.
 
 Usage:
     python -m src.jobs.sync --all
@@ -22,12 +31,8 @@ from typing import Any, Optional
 
 from dateutil import parser as dateutil_parser
 
-from src.communications.nhtsa_client import (
-    NHTSAClient,
-    extract_comm_ids_from_details,
-    extract_id_to_comm_number,
-    extract_id_to_summary,
-)
+from src.communications.flatfile import normalize_model
+from src.communications.nhtsa_client import NHTSAClient
 from src.communications.schemas import get_comm_type
 from src.db import close_pool, get_pool
 from src.jobs import repository as repo
@@ -90,17 +95,33 @@ async def sync_vehicle(
     label = f"{vehicle['year']} {vehicle['make']} {vehicle['model']}".strip()
     nhtsa_vehicle_id = vehicle["nhtsa_vehicle_id"]
 
+    # Which communications belong to this vehicle, straight from the local index:
+    # exact match on the plain nameplate NHTSA files bulletins under. `make` is
+    # already uppercase; `model` is normalized the same way the index is, so a
+    # vehicle keyed `CIVIC` meets `comm_products.model = 'CIVIC'`. (A vehicle still
+    # keyed to a granular body style -- `F-150 REGULAR CAB` -- matches nothing
+    # until the M4 backfill re-keys it to the plain nameplate; that is expected.)
     try:
-        details = await client.get_vehicle_details(nhtsa_vehicle_id)
+        products = await conn.fetch(
+            """
+            SELECT nhtsa_id, summary
+            FROM comm_products
+            WHERE model_year = $1 AND make = $2 AND model = $3
+            """,
+            int(vehicle["year"]),
+            str(vehicle["make"]).upper(),
+            normalize_model(vehicle["model"]),
+        )
     except Exception as e:  # noqa: BLE001 - one vehicle failing is not fatal
-        msg = f"{label} ({nhtsa_vehicle_id}): details fetch failed: {type(e).__name__}: {e}"
+        msg = f"{label} ({nhtsa_vehicle_id}): index lookup failed: {type(e).__name__}: {e}"
         log.error(msg)
         stats.errors.append(msg)
         return stats
 
-    comm_ids = extract_comm_ids_from_details(details)
-    id_to_summary = extract_id_to_summary(details)
-    id_to_comm_number = extract_id_to_comm_number(details)
+    comm_ids = [r["nhtsa_id"] for r in products]
+    # Concise summary per bulletin, from the index -- the replacement for the map
+    # sync used to build from the vehicle-details payload.
+    id_to_summary: dict[str, str] = {r["nhtsa_id"]: (r["summary"] or "") for r in products}
     if limit:
         comm_ids = comm_ids[:limit]
     stats.found = len(comm_ids)
@@ -109,12 +130,12 @@ async def sync_vehicle(
     # Communications already stored still need a vehicle link (a comm shared by
     # two vehicles is one row and two links), but they do not need refetching
     # from NHTSA. Skipping them is the main thing that keeps re-runs polite.
-    known = await repo.existing_nhtsa_ids(conn, [str(i) for i in comm_ids])
+    known = await repo.existing_nhtsa_ids(conn, comm_ids)
     for nid in comm_ids:
-        if str(nid) not in known:
+        if nid not in known:
             continue
         stats.skipped_known += 1
-        row = await conn.fetchrow("SELECT id FROM communications WHERE nhtsa_id = $1", str(nid))
+        row = await conn.fetchrow("SELECT id FROM communications WHERE nhtsa_id = $1", nid)
         if row and await repo.link_vehicle(
             conn,
             communication_id=row["id"],
@@ -123,7 +144,9 @@ async def sync_vehicle(
         ):
             stats.new_links += 1
 
-    to_fetch = [i for i in comm_ids if str(i) not in known]
+    # Convert to int only for the NHTSA call: get_safety_issue matches the
+    # returned bulletin by numeric nhtsaIdNumber, so a string id would miss it.
+    to_fetch = [int(nid) for nid in comm_ids if nid not in known]
     if not to_fetch:
         log.info("%s: nothing new (%s)", label, stats.summary())
         return stats
@@ -134,9 +157,7 @@ async def sync_vehicle(
             stats.fetch_failures += 1
             continue
         try:
-            await _store_comm(
-                conn, vehicle, nhtsa_id, comm, id_to_summary, id_to_comm_number, stats
-            )
+            await _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats)
         except Exception as e:  # noqa: BLE001
             msg = f"{label}: storing {nhtsa_id} failed: {type(e).__name__}: {e}"
             log.error(msg)
@@ -146,9 +167,7 @@ async def sync_vehicle(
     return stats
 
 
-async def _store_comm(
-    conn, vehicle, nhtsa_id, comm, id_to_summary, id_to_comm_number, stats
-) -> None:
+async def _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats) -> None:
     """Persist one communication, its documents, and its vehicle link."""
     documents = [
         {
@@ -159,9 +178,10 @@ async def _store_comm(
         for d in (comm.get("associatedDocuments") or [])
     ]
     summary = str(comm.get("summary", "") or "")
-    # The vehicle-details payload carries the properly prefixed number
-    # (PIT/PIC/PIP); the safety-issues payload often does not.
-    comm_number = id_to_comm_number.get(nhtsa_id) or comm.get("manufacturerCommunicationNumber")
+    # The comm number now comes only from the byNhtsaId payload; the vehicle-details
+    # payload that once supplied the prefixed form (PIT/PIC/PIP) is gone. When it is
+    # absent get_comm_type falls back to the summary and document types.
+    comm_number = comm.get("manufacturerCommunicationNumber")
 
     async with conn.transaction():
         comm_pk, inserted = await repo.upsert_communication(
@@ -171,7 +191,7 @@ async def _store_comm(
             communication_type=get_comm_type(comm_number, summary, documents),
             communication_date=_parse_date(comm.get("communicationDate")),
             summary=summary,
-            details_summary=id_to_summary.get(nhtsa_id),
+            details_summary=id_to_summary.get(str(nhtsa_id)),
             raw=json.dumps(comm, default=str),
         )
         if inserted:

@@ -20,7 +20,8 @@ from typing import Any, Optional
 
 import asyncpg
 
-from src.communications.nhtsa_client import NHTSAClient, extract_comm_ids_from_details
+from src.communications import flatfile
+from src.communications.nhtsa_client import NHTSAClient
 from src.db import get_pool
 from src.jobs import extract as extract_stage
 from src.jobs import llm as llm_stage
@@ -62,24 +63,34 @@ async def preview(nhtsa_vehicle_id: int) -> Optional[dict[str, Any]]:
     Two kinds of work can be outstanding, and the estimate has to cover both or
     it will under-quote:
 
-    * bulletins NHTSA lists that the corpus has never seen, and
+    * bulletins the flat-file index lists that the corpus has never seen, and
     * documents already in the corpus for this vehicle that were never
       analysed, left behind by an interrupted or partial earlier run.
 
     The second is exactly the state the user currently sees as "pending", so a
     refresh that ignored it would leave the vehicle looking half-finished after
     reporting success.
+
+    The bulletin list now comes from the local `comm_products` index rather than a
+    live `get_vehicle_details` call, so the preview no longer touches NHTSA and can
+    no longer 504.
     """
     vehicle = await VehicleService.get_vehicle(nhtsa_vehicle_id)
     if vehicle is None:
         return None
 
-    client = NHTSAClient()
-    details = await client.get_vehicle_details(nhtsa_vehicle_id)
-    listed = [str(i) for i in extract_comm_ids_from_details(details)]
-
     pool = await get_pool()
     async with pool.acquire() as conn:
+        listed = [
+            r["nhtsa_id"]
+            for r in await conn.fetch(
+                "SELECT nhtsa_id FROM comm_products "
+                "WHERE model_year = $1 AND make = $2 AND model = $3",
+                int(vehicle["year"]),
+                str(vehicle["make"]).upper(),
+                flatfile.normalize_model(vehicle["model"]),
+            )
+        ]
         known = await repo.existing_nhtsa_ids(conn, listed)
         unfinished = await conn.fetchval(
             f"""
@@ -341,9 +352,33 @@ async def _vehicle_state(nhtsa_vehicle_id: int) -> dict[str, Any]:
     return {k: int(v) for k, v in dict(row).items()}
 
 
+async def _freshen_index() -> None:
+    """Re-ingest any flat-file windows whose NHTSA ETag changed. Never raises.
+
+    The index is the cache both discovery and sync read from, and this keeps it
+    current at the head of the run. It is ETag-guarded, so an unchanged corpus
+    costs only eight HEAD requests; and a failure leaves the previous index in
+    place -- bounded staleness rather than breakage, which is the whole point of
+    the flat-file design -- so it must never fail the run.
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            report = await flatfile.refresh_index(conn)
+        changed = {w: r.get("rows") for w, r in report.items() if r.get("status") == "ingested"}
+        if changed:
+            log.info("flat-file index refreshed: %s", changed)
+    except Exception as e:  # noqa: BLE001 - a stale index still serves; never fail the run
+        log.warning("flat-file index refresh skipped: %s: %s", type(e).__name__, e)
+
+
 async def _execute(run_id: int, nhtsa_vehicle_id: int) -> None:
     """The background worker. Never raises; every exit updates the run row."""
     try:
+        # ---- keep the flat-file index current (best effort) ------------
+        await _progress(run_id, stage="sync", note="Checking NHTSA flat files for updates", done=0)
+        await _freshen_index()
+
         # ---- sync ------------------------------------------------------
         await _progress(run_id, stage="sync", note="Checking NHTSA for new bulletins", done=0)
         pool = await get_pool()

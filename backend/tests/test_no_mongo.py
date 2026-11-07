@@ -107,7 +107,8 @@ def test_every_route_is_still_mounted():
         "/api/refresh/{vehicle_id}",
         "/api/refresh/{vehicle_id}/preview",
         "/api/communications/discovery/years",
-        "/api/communications/discovery/variants",
+        "/api/communications/discovery/makes",
+        "/api/communications/discovery/models",
         "/api/symptom-search",
         "/api/admin/usage",
     ):
@@ -131,6 +132,9 @@ def test_the_retired_endpoints_are_gone():
         "/api/communications/fetch",
         "/api/communications/fetch-sync",
         "/api/communications/stats/{vehicle_id}",
+        # The byYmmt resolve step, removed by the plain-nameplate re-key (M3).
+        "/api/communications/discovery/variants",
+        "/api/communications/discovery/trims",
     ):
         assert gone not in paths, f"{gone} came back"
 
@@ -147,7 +151,7 @@ def test_the_pipeline_jobs_import_without_the_mongo_drivers():
             "src.jobs.run_pipeline",
             "src.jobs.digest",
             "src.migrations",
-            "src.scripts.seed_vehicle_catalog",
+            "src.communications.flatfile",
             "src.db.migrate",
         ):
             importlib.import_module(module)
