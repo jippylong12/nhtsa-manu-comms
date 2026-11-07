@@ -249,6 +249,34 @@ async def test_a_response_cut_off_at_max_tokens_counts_as_a_validation_failure(s
     assert stats.retried == 1 and stats.processed == 1
 
 
+def _msg_with_thinking(text):
+    """A high-effort response: a thinking block comes before the text block."""
+    msg = _msg(text)
+    msg.content.insert(0, SimpleNamespace(type="thinking", thinking="let me read it"))
+    return msg
+
+
+async def test_a_thinking_block_before_the_text_block_is_ignored_on_the_live_path(stage):
+    stage.add_doc(7, "pdf", [b"%PDF"])
+    stage.client = FakeAnthropic([_msg_with_thinking(json.dumps(GOOD))])
+
+    stats = await llm.run_sync()
+
+    assert stats.processed == 1 and stats.retried == 0
+    assert stage.stored[0][1]["summary"] == GOOD["summary"]
+
+
+async def test_a_thinking_block_before_the_text_block_is_ignored_on_the_batch_path(stage):
+    stage.add_doc(8, "pdf", [b"%PDF"])
+    result = _succeeded(8, json.dumps(GOOD))
+    result.result.message = _msg_with_thinking(json.dumps(GOOD))
+    stage.client = FakeAnthropic(results=[result])
+
+    stats = await llm.collect_batch(["msgbatch_1"], poll_seconds=0)
+
+    assert stats.processed == 1 and stats.failed == 0
+
+
 async def test_an_invalid_key_stops_the_run_and_marks_nothing_failed(stage):
     stage.add_doc(7, "pdf", [b"%PDF"])
     response = httpx.Response(401, request=httpx.Request("POST", "https://api.anthropic.com"))

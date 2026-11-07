@@ -32,9 +32,16 @@ corpus cost.
 
 ## Decision
 
-**Claude Haiku 5.5, effort `low`, reads the PDF itself and returns the structured
+**Claude Haiku 5.5, effort `high`, reads the PDF itself and returns the structured
 fields through a JSON schema.** Embeddings (`gemini-embedding-001`) and the
 symptom-search answer call (`settings.gemini_model`) stay on Gemini.
+
+Effort `high` is the bake-off's `H-pdf-high` arm, which Marcus picked over `low`
+(the first plan said `low`; that was a planning error). The request is that arm's:
+`thinking: {"type": "adaptive"}` and `max_tokens` 16,000, because thinking counts
+against `max_tokens`. The cost row above is `H-pdf-live` at low effort; the bake-off
+measured high at about 18% more per document than low, so roughly $1.76 per 1,000
+documents live and $0.89 on Batch.
 
 ### 1. Input plan per document
 

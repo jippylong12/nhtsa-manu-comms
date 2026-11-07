@@ -102,21 +102,22 @@ async def test_a_processed_communication_is_never_dragged_back(comm):
 # --------------------------------------------------------------------------- #
 # The request shape
 # --------------------------------------------------------------------------- #
-def test_the_request_asks_for_low_effort_and_a_closed_json_schema():
+def test_the_request_asks_for_high_effort_and_a_closed_json_schema():
     params = _params("hello")
 
-    assert params["max_tokens"] == 8192
-    assert params["output_config"]["effort"] == "low"
+    assert params["max_tokens"] == 16000, "thinking counts against max_tokens at high effort"
+    assert params["output_config"]["effort"] == "high"
     fmt = params["output_config"]["format"]
     assert fmt["type"] == "json_schema"
     assert fmt["schema"]["additionalProperties"] is False
     assert params["messages"] == [{"role": "user", "content": "hello"}]
 
 
-def test_the_request_never_carries_temperature_or_thinking():
+def test_the_request_has_no_temperature_and_names_adaptive_thinking_like_the_bakeoff_arm():
     params = _params("hello")
 
-    assert "temperature" not in params and "thinking" not in params
+    assert "temperature" not in params
+    assert params["thinking"] == {"type": "adaptive"}
 
 
 def test_the_shared_response_schema_is_left_untouched_by_the_anthropic_copy():

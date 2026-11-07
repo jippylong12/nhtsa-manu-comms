@@ -45,7 +45,9 @@ BATCH_MAX_BYTES = 200 * 1024 * 1024
 # Kept only so the frozen bake-off module still imports; nothing in the stage uses it.
 CHUNK_SIZE = 100
 
-MAX_TOKENS = 8192
+# At effort "high" the model thinks first and thinking counts against max_tokens, so the ceiling
+# is the bake-off's HAIKU_HIGH_MAX_TOKENS (the H-pdf-high arm).
+MAX_TOKENS = 16_000
 CALL_ATTEMPTS = 4  # tries per call, on top of the SDK's own retries
 BACKOFF_SECONDS = 2.0  # doubled after each failed try
 PROJECT = "schema-v2"
@@ -262,12 +264,17 @@ def anthropic_schema() -> dict[str, Any]:
 
 
 def _params(content: Any) -> dict[str, Any]:
-    """One request. No temperature and no thinking: low effort, structured output."""
+    """One request, the bake-off's H-pdf-high shape: effort high, structured output.
+
+    No temperature (the API rejects it). ``thinking`` is named as adaptive, as the arm did;
+    thinking blocks come back before the text block and ``_call`` skips them.
+    """
     return {
         "model": get_settings().extraction_model,
         "max_tokens": MAX_TOKENS,
+        "thinking": {"type": "adaptive"},
         "output_config": {
-            "effort": "low",
+            "effort": "high",
             "format": {"type": "json_schema", "schema": anthropic_schema()},
         },
         "messages": [{"role": "user", "content": content}],
