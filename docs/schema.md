@@ -13,14 +13,15 @@ erDiagram
     vehicles ||--o{ communication_vehicles : "tracked by"
     communications ||--o{ communication_vehicles : "applies to"
     communications ||--o{ comm_documents : "has PDFs"
+    communications ||..o{ comm_products : "nhtsa_id, by value"
+    flatfile_ingests ||--o{ comm_products : "source_window"
 
     vehicles {
         bigserial id PK
-        integer nhtsa_vehicle_id UK
+        integer nhtsa_vehicle_id "nullable legacy"
         integer year
         text make
-        text model
-        text trim
+        text model "canonical plain nameplate"
         text_array keywords
         boolean active
     }
@@ -68,7 +69,49 @@ erDiagram
         text_array matched_keywords
         timestamptz first_seen_at
     }
+
+    comm_products {
+        text nhtsa_id PK "joins communications.nhtsa_id by value, no FK"
+        text make PK "uppercase, as published"
+        text model PK "normalize_model form"
+        integer model_year PK "9999 = unknown"
+        text summary "concise summary from the CSV"
+        text source_window "e.g. 2020-2024"
+    }
+
+    flatfile_ingests {
+        text source_window PK "1995-1999 ... 2025-2026"
+        text etag "S3 ETag of the ingested zip"
+        timestamptz last_modified
+        integer row_count
+        timestamptz ingested_at
+    }
 ```
+
+`comm_products` is the flat-file index: one row per `(communication, make, model,
+year)` NHTSA lists in its daily flat files. Discovery (years, makes, models) and
+sync (which `nhtsa_id`s belong to a vehicle) both read it. `comm_products.nhtsa_id`
+joins `communications.nhtsa_id` by value only; there is no foreign key, because an
+index row exists before (and independently of) the communication being fetched.
+`flatfile_ingests` is the ETag ledger, one row per source window, which makes the
+refresh idempotent: a window is re-ingested only when its ETag changed.
+
+## Vehicle identity
+
+A tracked vehicle is identified by `(year, make, model)`, and `vehicles.id` is the
+one identifier everything uses, including `vehicleId` on the wire (API paths and
+payloads). `nhtsa_vehicle_id` is nullable legacy data that nothing reads.
+
+* **Canonical model form.** `vehicles.model` is stored the way
+  `flatfile.normalize_model` writes it: uppercase, hyphen to space, whitespace
+  collapsed. `F-150` is stored as `F 150`, and discovery lists the same strings.
+* **Uniqueness.** `vehicles_active_identity_uidx` is a partial unique index on
+  `(year, make, model) WHERE active`, so a soft-deleted vehicle may share an
+  identity with a live one.
+* **Reactivation.** Re-adding an identity that exists but is inactive revives that
+  row (same `id`, links intact) instead of inserting a twin. Existing keywords are
+  kept when the add supplies none. The partial index cannot be an `ON CONFLICT`
+  target, so `upsert_vehicle` selects first and then updates or inserts.
 
 ## The job contract
 
@@ -82,7 +125,7 @@ stateDiagram-v2
     failed --> pending : manual or automatic retry (attempts incremented)
 ```
 
-Job 1 never touches documents; Job 2 never talks to the NHTSA discovery API.
+Job 1 never touches documents; Job 2 never talks to the NHTSA API.
 Either can be re-run independently without coordinating with the other.
 
 ## Design decisions
@@ -175,3 +218,15 @@ python -m src.db.migrate --status   # show applied / pending
 ```
 
 Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
+
+### Migration history of note
+
+| Migration | What it does |
+|-----------|--------------|
+| `0007` | Adds `comm_products` and `flatfile_ingests` (additive) |
+| `0008` | Relaxes `nhtsa_vehicle_id` (nullable, no unique), adds `vehicles_active_identity_uidx` |
+| `0009` | Drops `vehicles.trim` and the retired YMM-to-vehicleId cache table |
+
+The data backfill to canonical models is a script
+(`python -m src.scripts.backfill_plain_nameplate`), not a migration; see the
+[runbook](pipeline-runbook.md#flat-file-index).

@@ -87,14 +87,14 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 ## Conventions
 
 ## Naming Patterns
-- Use `snake_case.py` for all modules: `nhtsa_client.py`, `run_pipeline.py`, `seed_vehicle_catalog.py`
+- Use `snake_case.py` for all modules: `nhtsa_client.py`, `run_pipeline.py`, `flatfile.py`
 - Feature modules organized as packages with `__init__.py`: `backend/src/vehicles/`, `backend/src/communications/`
 - Each feature package follows: `router.py`, `service.py`, `schemas.py`
 - Use `camelCase.ts` for non-component modules: `queryKeys.ts`, `api.ts`, `types.ts`
 - Use `PascalCase.tsx` for React components: `VehicleCard.tsx`, `CorpusCommunicationList.tsx`, `RefreshDialog.tsx`
 - Hook files prefixed with `use`: `useVehicles.ts`, `useCommunications.ts`, `useDiscovery.ts`
-- Use `snake_case` for all functions and methods: `create_vehicle()`, `get_discovery_trims()`
-- Private/internal methods prefixed with underscore: `_build_filters()`, `_cache_variants()`, `_extract_communication()`
+- Use `snake_case` for all functions and methods: `create_vehicle()`, `get_discovery_models()`
+- Private/internal methods prefixed with underscore: `_build_filters()`, `_freshen_index()`, `_extract_communication()`
 - Use `camelCase` for all functions: `handleAddVehicle`, `handleSearch`
 - React hooks prefixed with `use`: `useVehiclesQuery`, `useCommunicationsQuery`
 - API object methods use `camelCase`: `vehicleApi.list()`, `communicationApi.fetchWithProgress()`
@@ -224,7 +224,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Contains: `VehicleService`, `CommunicationService` (static method classes)
 - Depends on: Database module, NHTSAClient, schemas
 - Used by: Router layer
-- Purpose: Async HTTP client for NHTSA government API
+- Purpose: Async HTTP client for NHTSA government API. Discovery is Postgres-only (served from `comm_products`); the only NHTSA API call left is `/safetyIssues/byNhtsaId`, once per bulletin
 - Location: `backend/src/communications/nhtsa_client.py`
 - Contains: `NHTSAClient` class, response extraction helpers
 - Depends on: httpx, config settings
@@ -259,9 +259,12 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Location: `frontend/src/main.tsx`
 - Triggers: `npm run dev` (Vite dev server)
 - Responsibilities: Renders `<App />` into DOM root
-- Location: `backend/src/scripts/seed_vehicle_catalog.py`
-- Triggers: Manual execution for pre-populating vehicle catalog data
-- Responsibilities: Fetches model data from NHTSA via curl, warm-starts `vehicle_catalog`
+- Location: `backend/src/communications/flatfile.py`
+- Triggers: Manual `python -m src.communications.flatfile --bootstrap | --refresh | --status` (the in-app refresh also runs the `--refresh` ETag check itself)
+- Responsibilities: Ingests NHTSA's flat-file corpus into `comm_products`, tracking per-window ETags in `flatfile_ingests`
+- Location: `backend/src/scripts/backfill_plain_nameplate.py`
+- Triggers: One-time manual `python -m src.scripts.backfill_plain_nameplate --dry-run | --apply`
+- Responsibilities: Maps tracked vehicles to the plain nameplate (canonical `model`), merging identity collisions
 - Location: `backend/src/migrations.py`
 - Triggers: Manual `python -m src.migrations`
 - Responsibilities: Backfills `communication_type` field using enhanced detection logic
@@ -278,11 +281,12 @@ See `docs/schema.md` for the full schema and `backend/migrations/` for the histo
 
 | Table | Purpose |
 |-------|---------|
-| `vehicles` | Tracked vehicles. Soft-deleted via `active` |
+| `vehicles` | Tracked vehicles, identified by `(year, make, model)` (canonical plain nameplate). Soft-deleted via `active` |
 | `communications` | One row per `nhtsa_id`. `status` is the contract between sync and the processor |
 | `comm_documents` | One row per PDF: extracted text, LLM output, embedding |
 | `communication_vehicles` | The join that removes the per-vehicle duplication |
-| `vehicle_catalog` | YMM to vehicleId cache in front of NHTSA byYmmt |
+| `comm_products` | Flat-file index: one row per (communication, make, model, year); what discovery and sync read |
+| `flatfile_ingests` | ETag ledger per flat-file window |
 | `refresh_runs` | State of an in-app refresh; one active at a time |
 | `pipeline_runs` | Operational record of a CLI job execution |
 | `usage_events` | Billing record: one row per billable model call |

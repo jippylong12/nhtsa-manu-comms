@@ -165,3 +165,23 @@ async def test_a_granular_bodystyle_nameplate_matches_nothing_until_migrated(con
 
     assert stats.found == 0
     assert client.requested == []
+
+
+@pytest.mark.asyncio
+async def test_when_every_fetch_fails_all_are_counted_not_raised_and_it_returns_promptly(
+    conn, no_pacing
+):
+    """D3 (JIP-435): NHTSA byNhtsaId down for everything degrades to counts."""
+    import time
+
+    vehicle = await _seed(conn)
+    await conn.execute("DELETE FROM communications WHERE nhtsa_id = '900003'")
+    client = _FakeClient({})  # every byNhtsaId returns None
+
+    started = time.monotonic()
+    stats = await sync_job.sync_vehicle(conn, client, vehicle)
+
+    assert time.monotonic() - started < 1.0
+    assert stats.found == 3
+    assert stats.fetch_failures == stats.found
+    assert stats.errors == []

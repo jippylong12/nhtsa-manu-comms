@@ -124,7 +124,7 @@ download and read the documents, analyse them, index them for search.
 - `GET /api/refresh/{vehicleId}` - Progress of the current or most recent run
 
 ### Discovery (fills the add-vehicle form)
-- `GET /api/communications/discovery/years|makes|models|variants|trims`
+- `GET /api/communications/discovery/years|makes|models` - Served from the flat-file index; no NHTSA call
 
 ### Other
 - `GET /api/symptom-search` - Semantic search with a composed answer
