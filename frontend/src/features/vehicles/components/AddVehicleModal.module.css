@@ -64,23 +64,9 @@
   padding-right: 2.5rem;
 }
 
-.loadingVariants {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: var(--text-muted);
-  padding: var(--space-md);
-  background: var(--bg-hover);
-  border-radius: var(--radius-md);
-}
-
-.spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.retryButton {
+  align-self: flex-start;
+  margin-top: var(--space-sm);
 }
 
 .vehicleConfirmed {

@@ -101,7 +101,6 @@ export interface Vehicle {
     year: string;
     model: string;
     make?: string | null;
-    trim?: string | null;
     keywords: string[];
     lastFetched: string | null;
     /** Communications in the corpus for this vehicle, derived on read. */
@@ -111,21 +110,13 @@ export interface Vehicle {
 }
 
 export interface VehicleCreate {
-    vehicleId: number;
     year: string;
+    make: string;
     model: string;
-    // Carried through so the pipeline records the real make instead of
-    // inferring it from the model name. See JIP-414.
-    make?: string;
-    trim?: string;
     keywords?: string[];
 }
 
 export interface VehicleUpdate {
-    year?: string;
-    model?: string;
-    make?: string;
-    trim?: string;
     keywords?: string[];
 }
 
@@ -139,17 +130,6 @@ export interface VehicleListResponse {
 // The Mongo-era Communication, VehicleStats, FetchRequest, FetchProgress and
 // FetchResult models lived here. Reading communications is CorpusCommunication
 // below; running a fetch is RefreshRun. See JIP-417.
-
-export interface VehicleVariant {
-    vehicleId: number;
-    ncapId: number;
-    modelYear: number;
-    make: string;
-    model: string;
-    trim: string;
-    series: string;
-    vehicleDescription: string;
-}
 
 // --- Refresh (runs the pipeline for one vehicle) ---
 
@@ -213,11 +193,10 @@ export const isRefreshActive = (run: RefreshRun | null | undefined): boolean =>
 export type ProcessingStatus = 'pending' | 'processed' | 'failed';
 
 export interface CorpusVehicle {
-    nhtsaVehicleId: number;
+    vehicleId: number;
     year: number;
     make: string;
     model: string;
-    trim?: string | null;
 }
 
 export interface CorpusDocument {

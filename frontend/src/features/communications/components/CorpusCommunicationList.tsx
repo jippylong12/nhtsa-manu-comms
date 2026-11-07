@@ -266,7 +266,7 @@ function CorpusRow({
               {detail.vehicles.length > 0 && (
                 <div className={styles.vehiclesRow}>
                   {detail.vehicles.map((v) => (
-                    <span key={v.nhtsaVehicleId} className={styles.vehicleTag}>
+                    <span key={v.vehicleId} className={styles.vehicleTag}>
                       {v.year} {v.make} {v.model}
                     </span>
                   ))}
