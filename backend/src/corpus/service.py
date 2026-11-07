@@ -236,8 +236,20 @@ async def get_communication(nhtsa_id: str) -> Optional[dict]:
             comm["id"],
         )
 
+        # Same family definition as the list badge: every other revision that
+        # shares this row's stem, whichever revision this row is.
+        superseded_count = await conn.fetchval(
+            f"""
+            SELECT count(*) - 1
+            FROM (SELECT {REVISION_STEM_SQL} AS stem FROM communications c) f
+            WHERE stem = (SELECT {REVISION_STEM_SQL} FROM communications c WHERE c.id = $1)
+            """,
+            comm["id"],
+        )
+
         result = dict(comm)
         result.pop("id", None)
+        result["superseded_count"] = superseded_count
         result["documents"] = [dict(d) for d in docs]
         result["vehicles"] = await _vehicles_for(conn, nhtsa_id)
         return result
