@@ -325,3 +325,22 @@ async def test_the_run_stops_once_the_ledger_reaches_the_cap_and_leaves_the_rest
     final = await world.last_run("reextract")
     assert final["ok"] is False
     assert final["error"] == "cap reached"
+
+
+def test_limit_is_refused_with_reextract_before_anything_is_reset(monkeypatch):
+    # --limit would only reach the extract stage, so the reset would still clear the
+    # whole scope; the CLI must refuse it rather than wipe more than was asked.
+    called = []
+
+    async def fake_reextract(*args, **kwargs):
+        called.append(args)
+        return 0
+
+    monkeypatch.setattr(process, "reextract", fake_reextract)
+    monkeypatch.setattr("sys.argv", ["process", "--reextract", "--limit", "5", "--yes"])
+
+    with pytest.raises(SystemExit) as exc:
+        process.main()
+
+    assert exc.value.code == 2
+    assert called == []

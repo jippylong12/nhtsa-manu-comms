@@ -50,6 +50,27 @@ documents live; `process --all` and `run_pipeline` use the Batch API unless
 run without marking any communication failed. Why the model reads the PDF itself,
 and how long documents are handled: [ADR 0002](adr/0002-haiku-pdf-direct-extraction.md).
 
+## Re-extracting the corpus
+
+```bash
+python -m src.jobs.process --reextract --cap-usd 5            # whole corpus, Batch API
+python -m src.jobs.process --reextract --vehicle 12 --sync     # one vehicles.id, live
+```
+
+It prints a plan (documents to reset, estimated cost, the cap) and asks before
+changing anything (`--yes` skips the prompt). The reset clears the LLM fields and
+embeddings of every processed document in scope and sends those communications back
+to `pending`; summary-only bulletins are left alone. It then re-reads in slices of 50,
+checking the `usage_events` spend since the reset against `--cap-usd` between slices,
+and re-embeds. `--limit` is refused: the reset always covers the whole scope, so
+narrow a trial run with `--vehicle`.
+
+Exit codes: `0` done, `1` declined at the prompt or a slice made no progress, `3` the
+cap was reached. After a no-progress `1` or a `3` the remaining documents are still `pending` and
+nothing re-read is lost, but embeddings have not been rebuilt. Do not run
+`--reextract` again to finish (it would reset the documents already re-read); drain
+the rest with `python -m src.jobs.process --all`, which also re-embeds.
+
 ## Flat-file index
 
 Add-vehicle discovery and sync read `comm_products`, the index built from NHTSA's

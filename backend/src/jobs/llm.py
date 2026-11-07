@@ -646,6 +646,30 @@ async def _extract_one(
     stats.processed += 1
 
 
+async def _extract_isolated(
+    client,
+    doc: dict,
+    stats: LLMStats,
+    *,
+    plan: pdf_input.InputPlan | None = None,
+) -> None:
+    """``_extract_one``, except that an unexpected error costs this one document, not the run.
+
+    Without this, gather() propagates the first stray exception (a database error storing
+    one response, a PDF the planner chokes on) and every sibling still in flight is
+    abandoned. ExtractionFatal still stops the run.
+    """
+    try:
+        await _extract_one(client, doc, stats, plan=plan)
+    except ExtractionFatal:
+        raise
+    except Exception as e:  # noqa: BLE001 - one bad document, keep going
+        stats.failed += 1
+        stats.errors.append(f"doc {doc['id']}: {type(e).__name__}: {e}")
+        log.warning("doc %s: %s: %s", doc["id"], type(e).__name__, e)
+        await _mark_failed(doc["communication_id"], f"LLM stage error: {type(e).__name__}: {e}")
+
+
 async def run_sync(
     limit: int | None = None,
     concurrency: int | None = None,
@@ -669,7 +693,7 @@ async def run_sync(
 
     async def handle(doc: dict) -> None:
         async with semaphore:
-            await _extract_one(client, doc, stats)
+            await _extract_isolated(client, doc, stats)
 
     tasks = [asyncio.create_task(handle(d)) for d in docs]
     try:
@@ -705,7 +729,8 @@ async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) 
     """Submit pending pdf and text documents as Message Batches. Returns batch ids.
 
     Documents whose plan is ``chunks`` run live right here (they are several calls and a
-    merge, which a batch cannot express).
+    merge, which a batch cannot express), before any batch is created: an ExtractionFatal
+    from them must not leave submitted batches behind whose ids the caller never gets.
     """
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
@@ -722,7 +747,7 @@ async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) 
     for doc in docs:
         try:
             plan = await _plan_for(doc)
-        except RuntimeError as e:
+        except Exception as e:  # noqa: BLE001 - one unplannable PDF must not block the batch
             stats.failed += 1
             stats.errors.append(f"doc {doc['id']}: {e}")
             await _mark_failed(doc["communication_id"], f"pdf unavailable: {e}"[:500], retryable=False)
@@ -745,16 +770,16 @@ async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) 
             )
         )
 
+    for doc, plan in live:
+        await _extract_isolated(client, doc, stats, plan=plan)
+    if live:
+        log.info("chunked documents run live during submit :: %s", stats.summary())
+
     batch_ids: list[str] = []
     for chunk in _batch_chunks(requests):
         batch = await asyncio.to_thread(lambda c=chunk: client.messages.batches.create(requests=c))
         batch_ids.append(batch.id)
         log.info("submitted batch %s with %d document(s)", batch.id, len(chunk))
-
-    for doc, plan in live:
-        await _extract_one(client, doc, stats, plan=plan)
-    if live:
-        log.info("chunked documents run live during submit :: %s", stats.summary())
     return batch_ids
 
 

@@ -307,6 +307,63 @@ async def test_submit_batch_splits_requests_over_the_byte_limit(stage, monkeypat
     assert len(ids) == 2 and [len(c) for c in stage.client.created] == [1, 1]
 
 
+async def test_a_stray_error_storing_one_document_costs_that_document_not_the_run(
+    stage, monkeypatch
+):
+    stage.add_doc(1, "pdf", [b"%PDF"])
+    stage.add_doc(2, "pdf", [b"%PDF"])
+    stage.client = FakeAnthropic([_good(), _good()])
+    stored = []
+
+    async def store(doc, clean, tin, tout, batch):
+        if doc["id"] == 1:
+            raise asyncpg.exceptions.CharacterNotInRepertoireError("invalid byte sequence 0x00")
+        stored.append(doc["id"])
+
+    monkeypatch.setattr(llm, "_store", store)
+
+    stats = await llm.run_sync(concurrency=1)
+
+    assert stored == [2], "the sibling document was still stored"
+    assert stats.processed == 1 and stats.failed == 1
+    assert [c for c, _, _ in stage.failed] == [10]
+    assert stage.failed[0][1].startswith("LLM stage error")
+
+
+async def test_submit_batch_skips_a_document_the_planner_cannot_read(stage, monkeypatch):
+    stage.add_doc(1, "pdf", [b"%PDF"])
+    stage.add_doc(2, "text", text="words")
+    stage.client = FakeAnthropic()
+
+    def plan(path, page_count, method, has_text):
+        if path.endswith("/1.pdf"):
+            raise ValueError("unsupported pdf structure")
+        return stage.plans[path]
+
+    monkeypatch.setattr(pdf_input, "plan", plan)
+
+    ids = await llm.submit_batch()
+
+    assert ids == ["msgbatch_1"]
+    assert [r["custom_id"] for r in stage.client.created[0]] == ["2"]
+    assert [c for c, _, _ in stage.failed] == [10]
+
+
+async def test_a_fatal_error_on_a_chunked_document_submits_no_batch(stage):
+    stage.add_doc(1, "pdf", [b"%PDF"])
+    stage.add_doc(2, "chunks", [b"a", b"b"])
+    response = httpx.Response(401, request=httpx.Request("POST", "https://api.anthropic.com"))
+    stage.client = FakeAnthropic(
+        [anthropic.AuthenticationError("bad key", response=response, body=None)]
+    )
+
+    with pytest.raises(llm.ExtractionFatal):
+        await llm.submit_batch()
+
+    assert stage.client.created == [], "no batch whose id the caller would never see"
+    assert stage.failed == []
+
+
 async def test_collect_batch_stores_succeeded_and_fails_errored_results_and_meters_both(stage):
     stage.add_doc(1, "pdf", [b"%PDF"])
     stage.add_doc(2, "pdf", [b"%PDF"])

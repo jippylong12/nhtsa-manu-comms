@@ -381,6 +381,10 @@ def main() -> int:
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+    if args.reextract and args.limit:
+        # The reset always covers the whole scope; --limit would only reach the extract
+        # stage, so `--reextract --limit 5` would still clear and re-read every document.
+        parser.error("--limit does not apply to --reextract; narrow it with --vehicle")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
