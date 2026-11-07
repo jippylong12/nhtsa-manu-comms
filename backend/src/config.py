@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # Built frontend served by the API (single-service deploy). Relative paths resolve
+    # against backend/. Missing directory or empty string: the API serves JSON only.
+    frontend_dist: str = "../frontend/dist"
+
+    # Read-only mode (READ_ONLY=true): the write, refresh and usage routes are not
+    # mounted and /api/health reports readOnly. The early deploy runs this way.
+    read_only: bool = False
+
     # Document pipeline
     pdf_archive_dir: str = ".pdf_archive"
     pdf_download_concurrency: int = 3

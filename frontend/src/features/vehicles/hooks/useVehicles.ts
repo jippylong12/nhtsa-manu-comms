@@ -1,8 +1,19 @@
 /* Vehicle Query Hooks */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getHealth } from '@/client/api';
 import { vehicleApi, type VehicleCreate, type VehicleUpdate } from '@/client';
 import { vehicleKeys, corpusKeys } from '@/features/queryKeys';
+
+/** True on a read-only deploy. One cached health query shared by every caller. */
+export function useReadOnly(): boolean {
+    const { data } = useQuery({
+        queryKey: ['health'],
+        queryFn: getHealth,
+        staleTime: Infinity,
+    });
+    return data?.readOnly === true;
+}
 
 export function useVehiclesQuery(page = 1, perPage = 20) {
     return useQuery({

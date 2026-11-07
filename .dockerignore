@@ -1,0 +1,12 @@
+.git
+**/.pdf_archive
+**/.bakeoff
+**/.flatfile_cache
+**/node_modules
+**/.env*
+**/tests
+**/__pycache__
+**/.venv
+backend/venv
+frontend/dist
+tmp

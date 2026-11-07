@@ -13,13 +13,15 @@ from src.vehicles.schemas import (
 )
 from src.vehicles.service import VehicleService
 
-router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
+# Split so read-only mode (READ_ONLY=true) can leave the write router unmounted.
+read_router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
+write_router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
 
 # Strong references to in-flight background scans; asyncio only holds a weak one.
 _scans: set[asyncio.Task] = set()
 
 
-@router.post(
+@write_router.post(
     "",
     response_model=VehicleResponse,
     status_code=status.HTTP_201_CREATED,
@@ -44,7 +46,7 @@ async def create_vehicle(payload: VehicleCreate) -> VehicleResponse:
     return VehicleResponse(**vehicle)
 
 
-@router.get(
+@read_router.get(
     "",
     response_model=VehicleListResponse,
     summary="List all tracked vehicles",
@@ -61,7 +63,7 @@ async def list_vehicles(page: int = 1, per_page: int = 20) -> VehicleListRespons
     )
 
 
-@router.get(
+@read_router.get(
     "/{vehicle_id}",
     response_model=VehicleResponse,
     summary="Get a vehicle by its id",
@@ -75,7 +77,7 @@ async def get_vehicle(vehicle_id: int) -> VehicleResponse:
     return VehicleResponse(**vehicle)
 
 
-@router.patch(
+@write_router.patch(
     "/{vehicle_id}",
     response_model=VehicleResponse,
     summary="Update vehicle configuration",
@@ -95,7 +97,7 @@ async def update_vehicle(vehicle_id: int, payload: VehicleUpdate) -> VehicleResp
     return VehicleResponse(**vehicle)
 
 
-@router.delete(
+@write_router.delete(
     "/{vehicle_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Stop tracking a vehicle",
@@ -110,3 +112,9 @@ async def delete_vehicle(vehicle_id: int) -> None:
     deleted = await VehicleService.delete_vehicle(vehicle_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Vehicle not found")
+
+
+# Both halves together, for callers that mount every vehicle route at once.
+router = APIRouter()
+router.include_router(read_router)
+router.include_router(write_router)

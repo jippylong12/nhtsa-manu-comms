@@ -6,6 +6,7 @@ import { RefreshSurface } from '../../refresh/components/RefreshSurface';
 import type { useRefreshFlow } from '../../refresh/hooks/useRefresh';
 import type { Vehicle } from '@/client';
 
+import { useReadOnly } from '../hooks/useVehicles';
 import styles from './VehicleGrid.module.css';
 
 interface VehicleGridProps {
@@ -30,6 +31,7 @@ export function VehicleGrid({
   refresh,
   refreshTargetId,
 }: VehicleGridProps) {
+  const readOnly = useReadOnly();
   return (
     <div className={styles.page}>
       <div className={styles.container}>
@@ -43,17 +45,19 @@ export function VehicleGrid({
               Monitor NHTSA manufacturer communications for software updates,
               safety recalls, and service bulletins for your vehicles.
             </p>
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={onAddVehicle}
-            >
-              <Plus size={20} />
-              Add Vehicle
-            </button>
+            {!readOnly && (
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={onAddVehicle}
+              >
+                <Plus size={20} />
+                Add Vehicle
+              </button>
+            )}
           </div>
         </div>
 
-        <RefreshSurface flow={refresh} />
+        {!readOnly && <RefreshSurface flow={refresh} />}
 
         {isLoading ? (
           <div className={styles.vehiclesGrid}>
@@ -66,15 +70,19 @@ export function VehicleGrid({
             <Car className="empty-state-icon" size={64} />
             <h3 className="empty-state-title">No vehicles added yet</h3>
             <p className="empty-state-description">
-              Add a vehicle to start tracking manufacturer communications.
+              {readOnly
+                ? 'No vehicles are tracked yet.'
+                : 'Add a vehicle to start tracking manufacturer communications.'}
             </p>
-            <button
-              className="btn btn-primary"
-              onClick={onAddVehicle}
-            >
-              <Plus size={18} />
-              Add Your First Vehicle
-            </button>
+            {!readOnly && (
+              <button
+                className="btn btn-primary"
+                onClick={onAddVehicle}
+              >
+                <Plus size={18} />
+                Add Your First Vehicle
+              </button>
+            )}
           </div>
         ) : (
           <div className={styles.vehiclesGrid}>
