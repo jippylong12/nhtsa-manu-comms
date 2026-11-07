@@ -14,6 +14,10 @@ VALID = {
     "remedy": "Reprogram the radio using SPS.",
     "applicability": "2024 Chevrolet Silverado EV",
     "doc_kind": "service_procedure",
+    "applicability_years": [2024],
+    "applicability_models": ["Silverado EV"],
+    "applicability_conditions": "",
+    "audience": "dealer",
 }
 
 
@@ -93,6 +97,53 @@ def test_non_object_payload_is_rejected():
     assert "expected object" in err
 
 
+def test_missing_audience_is_rejected():
+    payload = {k: v for k, v in VALID.items() if k != "audience"}
+    clean, err = validate(payload)
+    assert clean is None
+    assert err == "missing fields: audience"
+
+
+def test_unknown_audience_is_rejected():
+    clean, err = validate({**VALID, "audience": "fleet"})
+    assert clean is None
+    assert "audience" in err
+
+
+def test_years_are_coerced_and_junk_is_dropped():
+    clean, err = validate({**VALID, "applicability_years": ["2018", 2019, "n/a"]})
+    assert err is None
+    assert clean["applicability_years"] == [2018, 2019]
+
+
+def test_years_and_duplicate_models_are_cleaned():
+    clean, err = validate(
+        {
+            **VALID,
+            "applicability_years": ["2017", "2018"],
+            "applicability_models": ["F-150", " F-150 ", ""],
+            "audience": "dealer",
+        }
+    )
+    assert err is None
+    assert clean["applicability_years"] == [2017, 2018]
+    assert clean["applicability_models"] == ["F-150"]
+    assert clean["audience"] == "dealer"
+    assert clean["applicability_conditions"] == ""
+
+
+def test_the_prompt_carries_the_four_v2_rules():
+    from src.jobs.llm import PDF_PROMPT
+
+    for line in (
+        "doc_kind: service_procedure only when the document prescribes steps a technician performs;",
+        "audience: dealer when the document is addressed to dealers or technicians only;",
+        "applicability_years are integers; applicability_models are the nameplates as printed,",
+        "Never state that this document supersedes or is superseded by another unless the document says so explicitly",
+    ):
+        assert line in PDF_PROMPT
+
+
 def test_batch_pricing_is_half_of_sync():
     sync = cost_of(1000, 500, batch=False)
     batch = cost_of(1000, 500, batch=True)
@@ -100,9 +151,9 @@ def test_batch_pricing_is_half_of_sync():
 
 
 def test_cost_matches_published_rates():
-    # 1M input tokens at $0.30, 1M output at $2.50.
-    assert cost_of(1_000_000, 0, batch=False) == pytest.approx(0.30)
-    assert cost_of(0, 1_000_000, batch=False) == pytest.approx(2.50)
+    # Claude Haiku 5.5: 1M input tokens at $0.10, 1M output at $0.50.
+    assert cost_of(1_000_000, 0, batch=False) == pytest.approx(0.10)
+    assert cost_of(0, 1_000_000, batch=False) == pytest.approx(0.50)
 
 
 def test_zero_tokens_costs_nothing():

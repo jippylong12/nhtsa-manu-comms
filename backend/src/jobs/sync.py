@@ -39,6 +39,9 @@ from src.jobs import repository as repo
 
 log = logging.getLogger("sync")
 
+# status_reason that extract gives a communication NHTSA published without a document.
+SUMMARY_ONLY_REASON = "summary only: NHTSA published no document"
+
 
 @dataclass
 class SyncStats:
@@ -49,6 +52,8 @@ class SyncStats:
     new_docs: int = 0
     new_links: int = 0
     skipped_known: int = 0
+    rechecked: int = 0
+    reopened: int = 0
     fetch_failures: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -58,6 +63,8 @@ class SyncStats:
         self.new_docs += other.new_docs
         self.new_links += other.new_links
         self.skipped_known += other.skipped_known
+        self.rechecked += other.rechecked
+        self.reopened += other.reopened
         self.fetch_failures += other.fetch_failures
         self.errors.extend(other.errors)
 
@@ -65,6 +72,7 @@ class SyncStats:
         return (
             f"found={self.found} new_comms={self.new_comms} new_docs={self.new_docs} "
             f"new_links={self.new_links} already_known={self.skipped_known} "
+            f"rechecked={self.rechecked} reopened={self.reopened} "
             f"fetch_failures={self.fetch_failures} errors={len(self.errors)}"
         )
 
@@ -138,6 +146,22 @@ async def sync_vehicle(
     # two vehicles is one row and two links), but they do not need refetching
     # from NHTSA. Skipping them is the main thing that keeps re-runs polite.
     known = await repo.existing_nhtsa_ids(conn, comm_ids)
+    # Summary-only bulletins are the exception: NHTSA sometimes attaches the PDF
+    # later, so each one is asked for again (one request each) and goes through
+    # the same _store_comm path as a new id.
+    summary_only = (
+        {
+            r["nhtsa_id"]
+            for r in await conn.fetch(
+                "SELECT nhtsa_id FROM communications "
+                "WHERE nhtsa_id = ANY($1::text[]) AND status_reason = $2",
+                list(known),
+                SUMMARY_ONLY_REASON,
+            )
+        }
+        if known
+        else set()
+    )
     for nid in comm_ids:
         if nid not in known:
             continue
@@ -153,13 +177,20 @@ async def sync_vehicle(
 
     # Convert to int only for the NHTSA call: get_safety_issue matches the
     # returned bulletin by numeric nhtsaIdNumber, so a string id would miss it.
-    to_fetch = [int(nid) for nid in comm_ids if nid not in known]
+    to_fetch = [int(nid) for nid in comm_ids if nid not in known or nid in summary_only]
     if not to_fetch:
         log.info("%s: nothing new (%s)", label, stats.summary())
         return stats
 
-    log.info("%s: fetching %d new communications", label, len(to_fetch))
+    log.info(
+        "%s: fetching %d communications (%d summary-only re-checks)",
+        label,
+        len(to_fetch),
+        len(summary_only & set(comm_ids)),
+    )
     async for nhtsa_id, comm in client.fetch_communications_batch(to_fetch):
+        if str(nhtsa_id) in summary_only:
+            stats.rechecked += 1
         if not comm:
             stats.fetch_failures += 1
             continue
@@ -204,6 +235,7 @@ async def _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats) -> No
         if inserted:
             stats.new_comms += 1
 
+        inserted_docs = 0
         for d in documents:
             if not d["url"]:
                 continue
@@ -215,6 +247,22 @@ async def _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats) -> No
                 load_date=_parse_date(d["load_date"]),
             ):
                 stats.new_docs += 1
+                inserted_docs += 1
+
+        if inserted_docs and not inserted:
+            # A late document for a summary-only bulletin: back to pending so the
+            # extract stage picks it up. Guarded on the marker so any other state stays.
+            reopened = await conn.execute(
+                """
+                UPDATE communications
+                SET status = 'pending', status_reason = NULL, processed_at = NULL
+                WHERE id = $1 AND status_reason = $2
+                """,
+                comm_pk,
+                SUMMARY_ONLY_REASON,
+            )
+            if reopened.endswith(" 1"):
+                stats.reopened += 1
 
         if await repo.link_vehicle(
             conn,

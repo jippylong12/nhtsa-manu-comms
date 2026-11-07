@@ -46,6 +46,15 @@ async def list_communications(
     search: Optional[str] = Query(
         None, description="Full-text query over summaries and document text"
     ),
+    severity: Optional[str] = Query(
+        None, pattern="^(serious|medium|small)$", description="serious | medium | small"
+    ),
+    revisions: str = Query(
+        "latest",
+        pattern="^(latest|all)$",
+        description="latest: one row per bulletin revision family (the current revision, "
+        "with supersededCount); all: every revision as its own row",
+    ),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ) -> CommunicationListResponse:
@@ -61,6 +70,8 @@ async def list_communications(
         systems=_csv(systems),
         components=_csv(components),
         search=search,
+        severity=severity,
+        revisions=revisions,
         page=page,
         per_page=per_page,
     )

@@ -16,7 +16,7 @@ import pytest
 import pytest_asyncio
 
 from src.config import get_settings
-from src.jobs.llm import MAX_LLM_ATTEMPTS, RETRY_TEMPERATURE, _generation_config, _mark_failed
+from src.jobs.llm import MAX_LLM_ATTEMPTS, RESPONSE_SCHEMA, _mark_failed, _params, anthropic_schema
 
 NS = f"TESTRETRY-{uuid.uuid4().hex[:8]}"
 
@@ -100,21 +100,27 @@ async def test_a_processed_communication_is_never_dragged_back(comm):
 
 
 # --------------------------------------------------------------------------- #
-# The retry has to actually differ from the attempt that failed
+# The request shape
 # --------------------------------------------------------------------------- #
-def test_first_attempt_is_deterministic():
-    assert _generation_config().temperature == 0.0
+def test_the_request_asks_for_high_effort_and_a_closed_json_schema():
+    params = _params("hello")
+
+    assert params["max_tokens"] == 16000, "thinking counts against max_tokens at high effort"
+    assert params["output_config"]["effort"] == "high"
+    fmt = params["output_config"]["format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["schema"]["additionalProperties"] is False
+    assert params["messages"] == [{"role": "user", "content": "hello"}]
 
 
-def test_retry_raises_temperature():
-    """At temperature 0 the model repeats itself, so a retry at 0 would return
-    the same malformed response and buy nothing."""
-    assert _generation_config(temperature=RETRY_TEMPERATURE).temperature == RETRY_TEMPERATURE
-    assert RETRY_TEMPERATURE > 0.0
+def test_the_request_has_no_temperature_and_names_adaptive_thinking_like_the_bakeoff_arm():
+    params = _params("hello")
+
+    assert "temperature" not in params
+    assert params["thinking"] == {"type": "adaptive"}
 
 
-def test_retry_still_pins_the_response_schema():
-    cfg = _generation_config(temperature=RETRY_TEMPERATURE)
+def test_the_shared_response_schema_is_left_untouched_by_the_anthropic_copy():
+    anthropic_schema()
 
-    assert cfg.response_mime_type == "application/json"
-    assert cfg.response_schema is not None
+    assert "additionalProperties" not in RESPONSE_SCHEMA

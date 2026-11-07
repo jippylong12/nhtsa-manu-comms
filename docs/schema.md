@@ -47,7 +47,7 @@ erDiagram
         bigint communication_id FK
         text url UK
         text extracted_text
-        text extraction_method "pymupdf|vision-fallback"
+        text extraction_method "pymupdf|vision-fallback (yield flag)"
         integer page_count
         numeric chars_per_page
         numeric alpha_ratio
@@ -191,6 +191,14 @@ Two separate vectors exist because a generated column may only reference its own
 row: `communications.search_tsv` covers the NHTSA summary and bulletin number,
 `comm_documents.search_tsv` covers the LLM fields and the extracted text. The
 read API searches across both through the FK join.
+
+### Extraction columns
+
+`comm_documents.extraction_method` is `pymupdf` or `vision-fallback`. It is a yield
+flag the input planner reads (usable local text or garbled text); there is no
+separate vision path. `llm_model` holds the model that read the document:
+`gemini-3.1-flash-lite`, `gemini-3.5-flash-lite` (history) or `claude-haiku-5-5`
+(current). See [ADR 0002](adr/0002-haiku-pdf-direct-extraction.md).
 
 ### Tags: arrays plus GIN, not a tag table
 

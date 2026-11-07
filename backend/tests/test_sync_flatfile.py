@@ -185,3 +185,76 @@ async def test_when_every_fetch_fails_all_are_counted_not_raised_and_it_returns_
     assert stats.found == 3
     assert stats.fetch_failures == stats.found
     assert stats.errors == []
+
+
+_SUMMARY_ONLY = "summary only: NHTSA published no document"
+
+
+async def _seed_summary_only(conn):
+    """A tracked F 150 with one stored summary-only bulletin (no document row)."""
+    vehicle_id = await conn.fetchval(
+        "INSERT INTO vehicles (year, make, model, keywords) "
+        "VALUES (2099, 'FORD', 'F 150', ARRAY['brake']) RETURNING id"
+    )
+    await conn.execute(
+        "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
+        "VALUES ('900101', 'FORD', 'F 150', 2099, 'concise', $1)",
+        _WIN,
+    )
+    comm_id = await conn.fetchval(
+        "INSERT INTO communications (nhtsa_id, status, status_reason, processed_at) "
+        "VALUES ('900101', 'processed', $1, now()) RETURNING id",
+        _SUMMARY_ONLY,
+    )
+    vehicle = {
+        "id": vehicle_id,
+        "year": 2099,
+        "make": "FORD",
+        "model": "F 150",
+        "keywords": ["brake"],
+    }
+    return vehicle, comm_id
+
+
+async def _state(conn, comm_id):
+    row = await conn.fetchrow(
+        "SELECT status, status_reason, processed_at FROM communications WHERE id = $1", comm_id
+    )
+    docs = await conn.fetchval(
+        "SELECT count(*) FROM comm_documents WHERE communication_id = $1", comm_id
+    )
+    return row, docs
+
+
+@pytest.mark.asyncio
+async def test_a_late_document_reopens_a_summary_only_communication(conn, no_pacing):
+    vehicle, comm_id = await _seed_summary_only(conn)
+    client = _FakeClient({900101: _detail("900101")})
+
+    stats = await sync_job.sync_vehicle(conn, client, vehicle)
+
+    assert client.requested == [900101], "the summary-only bulletin is asked for again"
+    assert (stats.rechecked, stats.reopened) == (1, 1)
+    row, docs = await _state(conn, comm_id)
+    assert row["status"] == "pending"
+    assert row["status_reason"] is None
+    assert row["processed_at"] is None
+    assert docs == 1
+
+
+@pytest.mark.asyncio
+async def test_a_still_documentless_bulletin_stays_summary_only(conn, no_pacing):
+    vehicle, comm_id = await _seed_summary_only(conn)
+    detail = _detail("900101")
+    detail["associatedDocuments"] = []
+    client = _FakeClient({900101: detail})
+
+    stats = await sync_job.sync_vehicle(conn, client, vehicle)
+    await sync_job.sync_vehicle(conn, client, vehicle)
+
+    assert client.requested == [900101, 900101]
+    assert (stats.rechecked, stats.reopened) == (1, 0)
+    row, docs = await _state(conn, comm_id)
+    assert (row["status"], row["status_reason"]) == ("processed", _SUMMARY_ONLY)
+    assert row["processed_at"] is not None
+    assert docs == 0

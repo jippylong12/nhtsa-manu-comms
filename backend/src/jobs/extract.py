@@ -1,10 +1,7 @@
 """Job 2, first half: download PDFs and extract text locally.
 
-Extracting locally with PyMuPDF is what keeps the pipeline cheap. Sending PDFs
-straight to Gemini bills at image-token rates; the A1 spike measured that path
-at 2.0x the input tokens and, on a table-dense document, slightly *less*
-faithful (it invented a model-year range for a cell that was empty). So text
-first, vision only for documents that fail the yield heuristic.
+Text is still extracted locally for full-text search, the page count and the
+yield flag. The model reads the PDF itself (see docs/adr/0002).
 """
 
 import asyncio
@@ -80,8 +77,8 @@ async def prune_archive(dry_run: bool = False) -> tuple[int, int]:
     grows without bound: one file per communication, a few hundred KB each.
 
     A PDF stops being needed once its document has an ``llm_summary``. Before
-    that it is still live input, because a low-yield scan is flagged for the
-    vision fallback and ``llm._vision_parts`` reopens the file from here. Rows
+    that it is still live input, because the LLM stage reads the PDF itself
+    from here (``pdf_input.ensure_archived``). Rows
     without a summary are therefore left alone, which also means an interrupted
     run loses nothing.
 
@@ -367,12 +364,14 @@ async def _record_failure(pool, row, reason: str) -> None:
         )
 
 
-async def mark_documentless_communications(vehicle_id: int | None = None) -> int:
-    """Flag pending communications that have no attached PDF at all.
+async def mark_summary_only_communications(vehicle_id: int | None = None) -> int:
+    """Close pending communications that have no attached PDF at all as summary-only.
 
-    NHTSA lists some communications without publishing a document. They can
-    never be processed, so they are recorded as failed with a reason rather
-    than sitting in `pending` forever and skewing the drain metrics.
+    NHTSA lists some communications without publishing a document. There is
+    nothing to extract, so they become `processed` with the summary-only reason
+    (the corpus list shows them on the NHTSA summary) rather than sitting in
+    `pending` forever or counting as failures. Sync re-checks them for a late
+    document and reopens the row if one appears.
     """
     from src.db import get_pool
     from src.jobs.repository import vehicle_scope
@@ -382,7 +381,8 @@ async def mark_documentless_communications(vehicle_id: int | None = None) -> int
         result = await conn.execute(
             f"""
             UPDATE communications c
-            SET status = 'failed', status_reason = 'no associated documents published by NHTSA'
+            SET status = 'processed', processed_at = now(),
+                status_reason = 'summary only: NHTSA published no document'
             WHERE c.status = 'pending'
               AND NOT EXISTS (SELECT 1 FROM comm_documents d WHERE d.communication_id = c.id)
               AND {vehicle_scope('$1')}
@@ -391,5 +391,5 @@ async def mark_documentless_communications(vehicle_id: int | None = None) -> int
         )
     n = int(result.split()[-1]) if result else 0
     if n:
-        log.info("marked %d communication(s) with no documents as failed", n)
+        log.info("marked %d communication(s) with no documents as summary-only", n)
     return n

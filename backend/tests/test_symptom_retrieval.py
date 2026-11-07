@@ -339,3 +339,36 @@ async def test_revision_count_matches_the_full_family_in_the_database():
                 ),
             )
             assert m.nhtsa_id == newest["nhtsa_id"], f"{stem}: not the newest revision on file"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "number",
+    [
+        "PIT6202C",
+        "N242484500-02",
+        "24-NA-125",
+        "653.30",
+        "pit6202a",
+        None,
+        # Surrounding tabs and newlines: str.strip() removes them, btrim() alone does not.
+        "PIT6202C\t",
+        "\n pit6202c\r\n",
+        "\tN242484500-02 ",
+        " \t ",
+    ],
+)
+async def test_sql_revision_stem_agrees_with_python(number):
+    """The corpus list folds in SQL; the symptom search folds in Python. They
+    must group a communication number identically."""
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        sql_stem = await conn.fetchval(
+            f"SELECT {retrieval.REVISION_STEM_SQL} "
+            "FROM (SELECT $1::text AS communication_number, 'NID-1' AS nhtsa_id) c",
+            number,
+        )
+    # An unnumbered row is its own family, keyed by nhtsa_id, in SQL.
+    assert sql_stem == (revision_stem(number) or "NID-1")

@@ -195,7 +195,7 @@ METERED_BY_CALLER = {
     "symptom_search/compose.py": "metered by symptom_search/service.py",
 }
 
-SDK_CALL = re.compile(r"generate_content|embed_content|batches\.create")
+SDK_CALL = re.compile(r"generate_content|embed_content|batches\.create|messages\.create|messages\.stream|messages\.batches\.create")
 
 
 def test_every_module_that_calls_the_model_sdk_records_usage():

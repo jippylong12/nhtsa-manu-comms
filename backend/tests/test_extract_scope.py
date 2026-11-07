@@ -68,3 +68,39 @@ async def test_extract_only_selects_the_given_vehicles_documents(two_vehicles, m
     await process.run_extract(None, vehicle_id=two_vehicles["A"])
 
     assert requested == [f"https://example.test/{TAG}-A.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_a_communication_without_documents_is_processed_as_summary_only(
+    two_vehicles, monkeypatch
+):
+    """JIP-1577: no document published means the NHTSA summary is the content."""
+    settings = get_settings()
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+        comm = await conn.fetchval(
+            "INSERT INTO communications (nhtsa_id, status, summary) "
+            "VALUES ($1, 'pending', 'NHTSA summary only') RETURNING id",
+            f"{TAG}-NODOC",
+        )
+        await conn.execute(
+            "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1, $2)",
+            comm,
+            two_vehicles["A"],
+        )
+
+        async def fake_download(_client, url):
+            return None, "stubbed: no network in tests", False
+
+        monkeypatch.setattr(extract, "download", fake_download)
+        await process.run_extract(None, vehicle_id=two_vehicles["A"])
+
+        row = await conn.fetchrow(
+            "SELECT status, status_reason, processed_at FROM communications WHERE id = $1", comm
+        )
+    finally:
+        await conn.close()
+
+    assert row["status"] == "processed"
+    assert row["status_reason"] == "summary only: NHTSA published no document"
+    assert row["processed_at"] is not None

@@ -287,6 +287,12 @@ def test_the_estimate_is_a_range_not_a_point():
     assert summary["estimated_cost_low_usd"] < summary["estimated_cost_high_usd"]
 
 
+def test_duration_is_live_rate_with_no_queue_floor():
+    """100 bulletins at 0.8 s plus 100 documents at 0.7 s is 150 s; no batch floor."""
+    assert estimate.duration_range(0, 0).mid == 0
+    assert estimate.duration_range(100, 100).mid == pytest.approx(150)
+
+
 def test_small_amounts_are_described_without_false_precision():
     assert estimate.describe_cost(estimate.Range(0.0001, 0.0002)) == "under a cent"
     assert estimate.describe_cost(estimate.Range(0.02, 0.04)) == "about $0.03"
