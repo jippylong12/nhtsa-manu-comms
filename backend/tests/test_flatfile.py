@@ -13,9 +13,13 @@ downloading NHTSA's multi-megabyte zips; a real download is exercised once,
 out of band, by the M3 smoke run.
 """
 
+import asyncio
+
+import asyncpg
 import pytest
 
 from src.communications import flatfile
+from src.config import get_settings
 
 # --------------------------------------------------------------------------
 # Normalization (ADR 0001 section 5)
@@ -373,6 +377,9 @@ async def test_scan_vehicle_scans_every_window_and_vehicle_is_scanned_reports_it
         return [_WIN]
 
     monkeypatch.setattr(flatfile, "discover_windows", one_window)
+    # _vehicle reuses the replica's real 2020 Civic when it is tracked, and a
+    # bootstrapped replica has already scanned it: start from "never scanned".
+    await conn.execute("DELETE FROM vehicle_scans WHERE vehicle_id = $1", vehicle["id"])
     assert await flatfile.vehicle_is_scanned(conn, vehicle["id"]) is False
 
     report = await flatfile.scan_vehicle(conn, vehicle["id"])
@@ -407,6 +414,67 @@ async def test_a_cached_zip_for_the_current_etag_is_parsed_without_a_download(
 
     assert report[_WIN]["status"] == "ingested"
     assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+
+
+@pytest.mark.asyncio
+async def test_two_downloads_of_one_window_at_once_both_land_one_whole_cached_zip(
+    monkeypatch, tmp_path
+):
+    """Scan on add and a refresh run can download the same window together; a shared
+    ``.part`` file let them interleave writes and rename it out from under each other."""
+    monkeypatch.setenv("FLATFILE_CACHE_DIR", str(tmp_path / "cache"))
+    chunk = 64 * 1024  # larger than the file buffer, so every write reaches the file
+
+    async def slow_download(_client, _window, dest):
+        fill = b"A" if not getattr(slow_download, "started", False) else b"B"
+        slow_download.started = True
+        for _ in range(4):
+            dest.write(fill * chunk)
+            await asyncio.sleep(0)
+        dest.flush()
+        return '"E9"', None
+
+    monkeypatch.setattr(flatfile, "_download_window", slow_download)
+
+    results = await asyncio.gather(
+        flatfile._window_zip(object(), _WIN, None), flatfile._window_zip(object(), _WIN, None)
+    )
+
+    cache = tmp_path / "cache"
+    assert [p.name for p in cache.iterdir()] == [f"{_WIN}.E9.zip"]
+    assert all(path == cache / f"{_WIN}.E9.zip" for path, *_ in results)
+    data = (cache / f"{_WIN}.E9.zip").read_bytes()
+    assert data in (b"A" * chunk * 4, b"B" * chunk * 4)
+
+
+@pytest.mark.asyncio
+async def test_a_window_pass_waits_for_another_connections_pass_over_the_same_window(conn):
+    """Two passes over one window (scan on add vs a refresh run) must take turns: run
+    together, the second one's comm_vocab insert hit the first's primary key."""
+    vehicle = await _vehicle(conn)
+    other = await asyncpg.connect(get_settings().database_url)
+    try:
+        await other.execute("SELECT pg_advisory_lock($1::bigint)", flatfile._window_lock_key(_WIN))
+        task = asyncio.create_task(
+            flatfile.ingest_window(
+                conn,
+                _WIN,
+                flatfile.parse_rows(_CSV),
+                etag="E1",
+                last_modified=None,
+                vehicles=[vehicle],
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert not task.done(), "the pass must wait while another holds the window"
+        await other.execute(
+            "SELECT pg_advisory_unlock($1::bigint)", flatfile._window_lock_key(_WIN)
+        )
+        report = await asyncio.wait_for(task, 10)
+    finally:
+        await other.close()
+
+    assert report["per_vehicle"][vehicle["id"]] >= 1
 
 
 @pytest.mark.asyncio

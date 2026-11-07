@@ -153,8 +153,12 @@ Downloaded zips are cached in `backend/.flatfile_cache/` (gitignored, safe to de
 next run downloads again). Set `FLATFILE_CACHE_DIR` to put the cache elsewhere.
 
 You rarely need these by hand. The in-app refresh and `run_pipeline` both run the ETag
-check and scan before sync, so sync always sees a current `vehicle_bulletins`; a failed
-check leaves the previous index in place rather than failing the run. `run_pipeline` takes
+check and scan before sync, so sync always sees a current `vehicle_bulletins`. A failed
+window leaves that window's previous scan in place. The in-app refresh then carries on with
+a warning, except for a vehicle that has never been scanned: its run fails with "Could not
+read NHTSA's bulletin files" before sync. `run_pipeline` still runs sync on a failed scan
+but exits 1. Scans of the same window from different processes take turns (a Postgres
+advisory lock per window), so a scan on add and a refresh run never collide. `run_pipeline` takes
 `--skip-scan` to skip the scan stage (`--skip-sync` skips both scan and sync). Adding a
 vehicle also starts a background scan for it. The first refresh of a brand-new vehicle
 takes a minute or two, because it has to read every window once.

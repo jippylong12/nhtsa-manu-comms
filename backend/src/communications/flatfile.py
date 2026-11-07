@@ -42,10 +42,12 @@ Usage:
 import argparse
 import asyncio
 import csv
+import hashlib
 import io
 import logging
 import os
 import re
+import secrets
 import sys
 import zipfile
 from datetime import datetime
@@ -440,6 +442,12 @@ ON CONFLICT (source_window) DO UPDATE SET
 _ROWCOUNT_RE = re.compile(r"(\d+)\s*$")
 
 
+def _window_lock_key(window: str) -> int:
+    """A stable signed 64-bit advisory-lock key for one window."""
+    digest = hashlib.sha256(f"flatfile:{window}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
 def _affected(status: Optional[str]) -> int:
     """Row count out of an asyncpg command tag (``INSERT 0 5``, ``COPY 3``)."""
     match = _ROWCOUNT_RE.search(status or "")
@@ -468,6 +476,10 @@ async def ingest_window(
     """
     per_vehicle: dict[int, int] = {}
     async with conn.transaction():
+        # Passes over one window from different connections (the scan on add, a
+        # refresh run, the nightly) take turns: two concurrent rebuilds of the
+        # window's comm_vocab rows would otherwise collide on its primary key.
+        await conn.execute("SELECT pg_advisory_xact_lock($1::bigint)", _window_lock_key(window))
         await conn.execute(_STAGE_DDL)
         rows = _affected(
             await conn.copy_records_to_table(
@@ -530,7 +542,9 @@ async def _window_zip(
         return cached, etag, None, False
     cache = _cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
-    part = cache / f"{window}.part"
+    # A name of its own per download: two scans downloading the same window at once
+    # (scan on add and a refresh run) must not write into, or rename away, one file.
+    part = cache / f"{window}.{os.getpid()}.{secrets.token_hex(4)}.part"
     try:
         with open(part, "wb") as dest:
             dl_etag, last_modified = await _download_window(client, window, dest)
