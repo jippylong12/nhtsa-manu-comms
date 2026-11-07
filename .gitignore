@@ -50,3 +50,7 @@ backend/digest_preview.html
 
 # Extraction bake-off run state (JIP-1567)
 backend/.bakeoff/
+
+# Flat-file zip cache (NHTSA window zips keyed by etag)
+.flatfile_cache/
+backend/.flatfile_cache/

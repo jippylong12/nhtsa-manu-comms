@@ -3,7 +3,7 @@
 Pure mapping rules are unit-tested on ``choose_target``; the database behaviour
 (merge, dry-run, UNMAPPED, the empty-index guard) runs against the real schema
 inside the rolled-back ``conn`` fixture. Test vehicles use model year 2099 with
-``comm_products`` rows tagged ``source_window='TESTBF'`` so they can never
+``comm_vocab`` rows tagged ``source_window='TESTBF'`` so they can never
 collide with a real tracked vehicle on a database that already holds some.
 """
 
@@ -43,14 +43,13 @@ def test_choose_target_canonicalises_a_hyphenated_name():
 
 
 async def _seed_products(conn, make, models):
-    for i, model in enumerate(models):
+    for model in models:
         await conn.execute(
-            "INSERT INTO comm_products (nhtsa_id, make, model, model_year, source_window) "
-            "VALUES ($1, $2, $3, $4, 'TESTBF')",
-            f"TESTBF{make}{i}",
+            "INSERT INTO comm_vocab (model_year, make, model, source_window, bulletins) "
+            "VALUES ($1, $2, $3, 'TESTBF', 1)",
+            YEAR,
             make,
             model,
-            YEAR,
         )
 
 
@@ -204,8 +203,8 @@ async def test_an_unmapped_vehicle_is_reported_and_left_untouched(conn):
 
 @pytest.mark.asyncio
 async def test_apply_refuses_to_run_against_an_empty_index(conn, capsys):
-    # A temp table shadows the real comm_products for this connection only.
-    await conn.execute("CREATE TEMP TABLE comm_products (LIKE public.comm_products)")
+    # A temp table shadows the real comm_vocab for this connection only.
+    await conn.execute("CREATE TEMP TABLE comm_vocab (LIKE public.comm_vocab)")
     v = await _vehicle(conn, "FORD", "F-150 REGULAR CAB")
 
     assert await bf.run(conn, apply=True) == 2

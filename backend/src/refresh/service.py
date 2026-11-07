@@ -71,7 +71,7 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
     refresh that ignored it would leave the vehicle looking half-finished after
     reporting success.
 
-    The bulletin list now comes from the local `comm_products` index rather than a
+    The bulletin list now comes from the vehicle's scanned `vehicle_bulletins` rather than a
     live `get_vehicle_details` call, so the preview no longer touches NHTSA and can
     no longer 504.
     """
@@ -81,21 +81,20 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Every spelling the picker folds into this vehicle's model (see
-        # flatfile.resolve_models); a bulletin under two spellings counts once.
-        aliases = await flatfile.model_aliases(
-            conn, int(vehicle["year"]), str(vehicle["make"]), vehicle["model"]
-        )
+        # The scan already folded every spelling the picker folds into this
+        # vehicle's model (see flatfile.resolve_models), one row per bulletin.
         listed = [
             r["nhtsa_id"]
             for r in await conn.fetch(
-                "SELECT DISTINCT nhtsa_id FROM comm_products "
-                "WHERE model_year = $1 AND make = $2 AND model = ANY($3::text[])",
-                int(vehicle["year"]),
-                str(vehicle["make"]).upper(),
-                aliases,
+                "SELECT nhtsa_id FROM vehicle_bulletins WHERE vehicle_id = $1", vehicle_id
             )
         ]
+        if listed:
+            scan_incomplete = False
+        else:
+            # No bulletins yet: either the vehicle has none, or the windows that hold
+            # them are still unscanned (a scan on add writes one window at a time).
+            scan_incomplete = not await flatfile.vehicle_fully_scanned(conn, vehicle_id)
         known = await repo.existing_nhtsa_ids(conn, listed)
         unfinished = await conn.fetchval(
             f"""
@@ -109,6 +108,20 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
             vehicle_id,
         )
 
+    scan_pending = scan_incomplete
+    if scan_pending:
+        per_document = await estimate.cost_per_document()
+        return {
+            "vehicle_id": vehicle_id,
+            "listed_by_nhtsa": 0,
+            "new_bulletins": 0,
+            "unfinished_documents": unfinished,
+            "documents_to_process": unfinished,
+            "up_to_date": False,
+            "scan_pending": True,
+            **estimate.summarise(0, unfinished, per_document),
+        }
+
     new_bulletins = len(set(listed) - known)
     per_bulletin = await estimate.documents_per_bulletin()
     documents = round(new_bulletins * per_bulletin) + unfinished
@@ -121,6 +134,7 @@ async def preview(vehicle_id: int) -> Optional[dict[str, Any]]:
         "unfinished_documents": unfinished,
         "documents_to_process": documents,
         "up_to_date": documents == 0,
+        "scan_pending": False,
         **estimate.summarise(new_bulletins, documents, per_document),
     }
 
@@ -359,32 +373,46 @@ async def _vehicle_state(vehicle_id: int) -> dict[str, Any]:
     return {k: int(v) for k, v in dict(row).items()}
 
 
-async def _freshen_index() -> None:
-    """Re-ingest any flat-file windows whose NHTSA ETag changed. Never raises.
+async def _scan(vehicle_id: int) -> bool:
+    """Scan NHTSA's bulletin files for this vehicle. False means the run cannot go on.
 
-    The index is the cache both discovery and sync read from, and this keeps it
-    current at the head of the run. It is ETag-guarded, so an unchanged corpus
-    costs only eight HEAD requests; and a failure leaves the previous index in
-    place -- bounded staleness rather than breakage, which is the whole point of
-    the flat-file design -- so it must never fail the run.
+    A vehicle that has never been fully scanned (no scan at all, or a first scan that
+    stopped before every ingested window was read) has an incomplete bulletin list, so
+    a failed window would make sync find nothing new and report "up to date": that
+    must fail the run. A vehicle with a complete earlier scan keeps its previous list
+    (bounded staleness), so a failed window is a warning and the run continues.
     """
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            report = await flatfile.refresh_index(conn)
-        changed = {w: r.get("rows") for w, r in report.items() if r.get("status") == "ingested"}
-        if changed:
-            log.info("flat-file index refreshed: %s", changed)
-    except Exception as e:  # noqa: BLE001 - a stale index still serves; never fail the run
-        log.warning("flat-file index refresh skipped: %s: %s", type(e).__name__, e)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        scanned_before = await flatfile.vehicle_fully_scanned(conn, vehicle_id)
+        report = await flatfile.refresh_index(conn, vehicles=[vehicle_id])
+    failed = sorted(w for w, r in report.items() if r.get("status") == "error")
+    if not failed:
+        return True
+    if scanned_before:
+        log.warning(
+            "bulletin scan failed for window(s) %s; continuing with the previous scan",
+            ", ".join(failed),
+        )
+        return True
+    log.error("first bulletin scan failed for vehicle %s: %s", vehicle_id, ", ".join(failed))
+    return False
 
 
 async def _execute(run_id: int, vehicle_id: int) -> None:
     """The background worker. Never raises; every exit updates the run row."""
     try:
-        # ---- keep the flat-file index current (best effort) ------------
-        await _progress(run_id, stage="sync", note="Checking NHTSA flat files for updates", done=0)
-        await _freshen_index()
+        # ---- scan NHTSA's bulletin files for this vehicle ----------------
+        await _progress(
+            run_id, stage="sync", note="Scanning NHTSA's bulletin files for this vehicle", done=0
+        )
+        if not await _scan(vehicle_id):
+            await _finish(
+                run_id,
+                "failed",
+                error="Could not read NHTSA's bulletin files. Try again in a few minutes.",
+            )
+            return
 
         # ---- sync ------------------------------------------------------
         await _progress(run_id, stage="sync", note="Checking NHTSA for new bulletins", done=0)

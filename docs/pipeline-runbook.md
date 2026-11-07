@@ -112,7 +112,7 @@ replica (a clone, so `nhtsa_id`s and urls match). It spends no model money and r
 re-reading on production. It never wipes tables: it only UPDATEs the new-extraction columns
 (summary, structured fields, model/cost, embedding, status, severity) of rows that already
 exist, matched by `nhtsa_id` and document url. It never inserts or deletes, and never touches
-`usage_events`, `refresh_runs`, `comm_products`, `vehicles` or `communication_vehicles`.
+`usage_events`, `refresh_runs`, `vehicle_bulletins`, `vehicles` or `communication_vehicles`.
 
 1. Migrate production to schema v2 (migrations 0010 to 0012):
    ```bash
@@ -135,26 +135,39 @@ Exit 2: production lacks the v2 columns; run step 1. All updates run in one tran
 
 ## Flat-file index
 
-Add-vehicle discovery and sync read `comm_products`, the index built from NHTSA's
-daily manufacturer-communications flat files; `flatfile_ingests` records each
-window's ETag. From `backend/`:
+The picker reads `comm_vocab` (year/make/model per window) and sync reads
+`vehicle_bulletins` (the bulletins of each tracked vehicle, found by scanning NHTSA's daily
+manufacturer-communications flat files for tracked identities only). `vehicle_scans` records
+which window etag each vehicle was scanned at, and `flatfile_ingests` records each window's
+ETag. From `backend/`:
 
 ```bash
-python -m src.communications.flatfile --bootstrap   # ingest every window (ignores ETags)
-python -m src.communications.flatfile --refresh     # re-ingest only windows whose ETag changed
-python -m src.communications.flatfile --status      # per-window ingest state, no work
+python -m src.communications.flatfile --bootstrap             # rebuild every window and scan every tracked vehicle (ignores ETags)
+python -m src.communications.flatfile --refresh               # repair stale windows and stale vehicle scans
+python -m src.communications.flatfile --scan --vehicle N      # scan one tracked vehicle against every window it is stale for
+python -m src.communications.flatfile --status                # windows, vehicle scans, table and cache sizes, no work
 ```
 
-`--bootstrap` and `--refresh` take `--window 2020-2024` to restrict to one window.
-You rarely need `--refresh` by hand: an in-app refresh runs the same ETag check at
-the start of the run, and a failed check leaves the previous index in place
-rather than failing the run.
+`--bootstrap`, `--refresh` and `--scan` take `--window 2020-2024` to restrict to one window.
+Downloaded zips are cached in `backend/.flatfile_cache/` (gitignored, safe to delete: the
+next run downloads again). Set `FLATFILE_CACHE_DIR` to put the cache elsewhere.
+
+You rarely need these by hand. The in-app refresh and `run_pipeline` both run the ETag
+check and scan before sync, so sync always sees a current `vehicle_bulletins`. A failed
+window leaves that window's previous scan in place. The in-app refresh then carries on with
+a warning, except for a vehicle that has never been scanned: its run fails with "Could not
+read NHTSA's bulletin files" before sync. `run_pipeline` still runs sync on a failed scan
+but exits 1. Scans of the same window from different processes take turns (a Postgres
+advisory lock per window), so a scan on add and a refresh run never collide. `run_pipeline` takes
+`--skip-scan` to skip the scan stage (`--skip-sync` skips both scan and sync). Adding a
+vehicle also starts a background scan for it. The first refresh of a brand-new vehicle
+takes a minute or two, because it has to read every window once.
 
 ### One-time backfill to the plain nameplate
 
 Existing tracked vehicles keep their old model strings until the backfill maps
 them to the plain nameplate (and merges any that collide). It needs a populated
-index, so bootstrap first; `--apply` refuses to run when `comm_products` is empty.
+index, so bootstrap first; `--apply` refuses to run when `comm_vocab` is empty.
 
 ```bash
 python -m src.scripts.backfill_plain_nameplate --dry-run   # report only (the default)

@@ -1,8 +1,8 @@
 """Job 1: NHTSA discovery into canonical pending rows.
 
-Learns each tracked vehicle's communications from the `comm_products` flat-file
-index -- exact match on `(model_year, make, plain nameplate)` -- and inserts any
-communication not already in Postgres as a `pending` canonical row, plus a
+Learns each tracked vehicle's communications from its `vehicle_bulletins` -- the
+list the flat-file scan filled for the vehicle's identity and its folded aliases
+(see `flatfile.refresh_index`) -- and inserts any communication not already in Postgres as a `pending` canonical row, plus a
 `comm_documents` row per attached PDF and a `communication_vehicles` link. The
 per-communication detail (summary, documents) still comes from NHTSA's
 `/safetyIssues/byNhtsaId`, one call per new bulletin. It never downloads or reads
@@ -31,7 +31,6 @@ from typing import Any, Optional
 
 from dateutil import parser as dateutil_parser
 
-from src.communications.flatfile import model_aliases, normalize_model
 from src.communications.nhtsa_client import NHTSAClient
 from src.communications.schemas import get_comm_type
 from src.db import close_pool, get_pool
@@ -102,30 +101,18 @@ async def sync_vehicle(
     stats = SyncStats()
     label = f"{vehicle['year']} {vehicle['make']} {vehicle['model']}".strip()
 
-    # Which communications belong to this vehicle, straight from the local index:
-    # every name the picker folds into the vehicle's model (`F53` and `REDUNDANT F 250`
-    # for a vehicle keyed `F 250 SD`, see flatfile.resolve_models), so a bulletin
-    # NHTSA filed under a folded spelling is not stranded. `make` is already
-    # uppercase; a model nothing folds into matches exactly, as before. (A vehicle
-    # still keyed to a granular body style -- `F-150 REGULAR CAB` -- matches nothing
-    # until the M4 backfill re-keys it to the plain nameplate; that is expected.)
+    # Which communications belong to this vehicle: exactly what its flat-file scan
+    # listed. Alias folding (`F53` and `REDUNDANT F 250` for a vehicle keyed
+    # `F 250 SD`, see flatfile.resolve_models) and the one-row-per-bulletin dedup
+    # already happened at scan time, so a bulletin NHTSA filed under a folded
+    # spelling is not stranded. (A vehicle still keyed to a granular body style --
+    # `F-150 REGULAR CAB` -- has nothing listed until the M4 backfill re-keys it to
+    # the plain nameplate; that is expected.)
     try:
-        aliases = await model_aliases(
-            conn, int(vehicle["year"]), str(vehicle["make"]), vehicle["model"]
-        )
         products = await conn.fetch(
-            """
-            -- a bulletin filed under two spellings is one bulletin; keep the row
-            -- under the vehicle's own spelling when there is one
-            SELECT DISTINCT ON (nhtsa_id) nhtsa_id, summary
-            FROM comm_products
-            WHERE model_year = $1 AND make = $2 AND model = ANY($3::text[])
-            ORDER BY nhtsa_id, model = $4 DESC, model
-            """,
-            int(vehicle["year"]),
-            str(vehicle["make"]).upper(),
-            aliases,
-            normalize_model(vehicle["model"]),
+            "SELECT nhtsa_id, summary FROM vehicle_bulletins WHERE vehicle_id = $1 "
+            "ORDER BY nhtsa_id",
+            vehicle["id"],
         )
     except Exception as e:  # noqa: BLE001 - one vehicle failing is not fatal
         msg = f"{label} ({vehicle['id']}): index lookup failed: {type(e).__name__}: {e}"
@@ -140,7 +127,7 @@ async def sync_vehicle(
     if limit:
         comm_ids = comm_ids[:limit]
     stats.found = len(comm_ids)
-    log.info("%s (%s): %d communications listed", label, vehicle["id"], len(comm_ids))
+    log.info("%s (%s): %d bulletins in the scan", label, vehicle["id"], len(comm_ids))
 
     # Communications already stored still need a vehicle link (a comm shared by
     # two vehicles is one row and two links), but they do not need refetching

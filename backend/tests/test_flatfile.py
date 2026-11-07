@@ -1,20 +1,25 @@
 """The flat-file index: normalization, CSV hygiene, and ETag-driven ingest.
 
-The picker and sync both read `comm_products`, and both are only ever as correct
-as this ingest. The unit cases pin the normalization vocabulary and the row
+The picker reads `comm_vocab` and sync reads `vehicle_bulletins`, and both are only
+ever as correct as this ingest and scan. The unit cases pin the normalization vocabulary and the row
 hygiene JIP-428 specified (comma-packed years, 9999, junk `Model == Make` rows,
 hyphen/space variants); the DB cases pin the two behaviours the daily refresh
-depends on -- a window is re-ingested only when its ETag changed, and re-ingest
-replaces the window's rows rather than duplicating them.
+depends on -- a window is re-ingested only when its ETag changed or a vehicle has
+not been scanned against it, and re-ingest replaces the window's rows rather than
+duplicating them.
 
 The HTTP layer is monkeypatched so the ingest path runs end to end without
 downloading NHTSA's multi-megabyte zips; a real download is exercised once,
 out of band, by the M3 smoke run.
 """
 
+import asyncio
+
+import asyncpg
 import pytest
 
 from src.communications import flatfile
+from src.config import get_settings
 
 # --------------------------------------------------------------------------
 # Normalization (ADR 0001 section 5)
@@ -100,7 +105,7 @@ def test_parse_rows_handles_embedded_commas_and_quotes():
 
 
 # --------------------------------------------------------------------------
-# Ingest + ETag idempotency (against the real test database)
+# Ingest, scan and ETag idempotency (against the real test database)
 # --------------------------------------------------------------------------
 
 _WIN = "TESTWIN"
@@ -111,90 +116,164 @@ _CSV = [
     '"700002","HONDA","CIVIC","9999","summary b"',
 ]
 
+# A made-up make, so the vocabulary the aliases are folded from is exactly this slice.
+_ALIAS_CSV = [
+    '"TSB/Document ID","Make","Model","Model Year","Concise Summary"',
+    '"710001","TESTMAKE","F 250 SD","2020","real a"',
+    '"710002","TESTMAKE","F 250 SD","2020","real b"',
+    '"710002","TESTMAKE","REDUNDANT F 250","2020","same bulletin, junk spelling"',
+    '"710003","TESTMAKE","REDUNDANT F 250","2020","filed only under the junk spelling"',
+    '"710009","TESTMAKE","RANGER","2020","another nameplate"',
+]
 
-async def _seeded_products(conn):
-    return await conn.fetch(
-        "SELECT nhtsa_id, make, model, model_year, source_window "
-        "FROM comm_products WHERE source_window = $1 ORDER BY nhtsa_id, model_year",
-        _WIN,
+
+async def _vehicle(conn, year=2020, make="HONDA", model="CIVIC") -> dict:
+    """The tracked vehicle with this identity (reusing a real one if the replica has it)."""
+    vid = await conn.fetchval(
+        "SELECT id FROM vehicles WHERE active AND year=$1 AND make=$2 AND model=$3",
+        year,
+        make,
+        model,
+    ) or await conn.fetchval(
+        "INSERT INTO vehicles (year, make, model) VALUES ($1, $2, $3) RETURNING id",
+        year,
+        make,
+        model,
     )
+    return {"id": vid, "year": year, "make": make, "model": model}
+
+
+async def _vocab(conn):
+    return [
+        tuple(r)
+        for r in await conn.fetch(
+            "SELECT model_year, make, model, bulletins FROM comm_vocab "
+            "WHERE source_window = $1 ORDER BY make, model, model_year",
+            _WIN,
+        )
+    ]
+
+
+async def _bulletins(conn, vehicle_id):
+    """The vehicle's bulletins this test's window wrote (a real tracked vehicle can
+    already hold bulletins from the real windows; those are not under test)."""
+    return [
+        tuple(r)
+        for r in await conn.fetch(
+            "SELECT nhtsa_id, summary FROM vehicle_bulletins "
+            "WHERE vehicle_id = $1 AND source_window = $2 ORDER BY nhtsa_id",
+            vehicle_id,
+            _WIN,
+        )
+    ]
+
+
+class _Http:
+    """The HTTP layer, monkeypatched to serve ``csv`` under ``etag``."""
+
+    def __init__(self, csv):
+        self.csv = csv
+        self.etag = "E1"
+        self.downloads = 0
+
+
+@pytest.fixture
+def http(monkeypatch, tmp_path):
+    """Head, download and zip parsing patched; the cache points into tmp_path."""
+    monkeypatch.setenv("FLATFILE_CACHE_DIR", str(tmp_path / "cache"))
+    state = _Http(_CSV)
+
+    async def fake_head(_client, _window):
+        return state.etag, None
+
+    async def fake_download(_client, _window, dest):
+        state.downloads += 1
+        dest.write(b"PK")
+        return state.etag, None
+
+    monkeypatch.setattr(flatfile, "head_window", fake_head)
+    monkeypatch.setattr(flatfile, "_download_window", fake_download)
+    monkeypatch.setattr(flatfile, "_iter_csv_lines", lambda _path: iter(state.csv))
+    return state
 
 
 @pytest.mark.asyncio
-async def test_ingest_window_writes_rows_and_records_the_etag(conn):
-    rows = await flatfile.ingest_window(
+async def test_ingest_window_builds_the_vocabulary_and_the_vehicles_bulletins(conn):
+    vehicle = await _vehicle(conn)
+
+    report = await flatfile.ingest_window(
         conn,
         _WIN,
         flatfile.parse_rows(_CSV),
         etag="E1",
         last_modified=None,
+        vehicles=[vehicle],
     )
-    # 700001 -> (2020, 2021), 700002 -> (9999): three product rows.
-    assert rows == 3
 
-    products = await _seeded_products(conn)
-    assert [(r["nhtsa_id"], r["model"], r["model_year"]) for r in products] == [
-        ("700001", "CIVIC", 2020),
-        ("700001", "CIVIC", 2021),
-        ("700002", "CIVIC", 9999),
+    # 700001 -> (2020, 2021), 700002 -> (9999): three product rows.
+    assert report["rows"] == 3
+    assert report["vocab_rows"] == 3
+    assert report["per_vehicle"] == {vehicle["id"]: 1}
+    assert await _vocab(conn) == [
+        (2020, "HONDA", "CIVIC", 1),
+        (2021, "HONDA", "CIVIC", 1),
+        (9999, "HONDA", "CIVIC", 1),
     ]
+    # The vehicle is (2020, HONDA, CIVIC): only 700001 lists that year.
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+    scan = await conn.fetchrow(
+        "SELECT etag FROM vehicle_scans WHERE vehicle_id = $1 AND source_window = $2",
+        vehicle["id"],
+        _WIN,
+    )
+    assert scan["etag"] == "E1"
     recorded = await conn.fetchrow(
         "SELECT etag, row_count FROM flatfile_ingests WHERE source_window = $1", _WIN
     )
-    assert recorded["etag"] == "E1"
-    assert recorded["row_count"] == 3
+    assert (recorded["etag"], recorded["row_count"]) == ("E1", 3)
 
 
 @pytest.mark.asyncio
-async def test_refresh_skips_a_window_whose_etag_is_unchanged(conn, monkeypatch):
+async def test_refresh_skips_a_window_whose_etag_is_unchanged_and_fully_scanned(conn, http):
+    vehicle = await _vehicle(conn)
     await conn.execute(
         "INSERT INTO flatfile_ingests (source_window, etag, row_count) VALUES ($1, 'E1', 3)",
         _WIN,
     )
-    downloads = {"n": 0}
+    await conn.execute(
+        "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, $2, 'E1')",
+        vehicle["id"],
+        _WIN,
+    )
 
-    async def fake_head(_client, _window):
-        return "E1", None
-
-    async def fake_download(_client, _window, _dest):
-        downloads["n"] += 1
-        return "E1", None
-
-    monkeypatch.setattr(flatfile, "head_window", fake_head)
-    monkeypatch.setattr(flatfile, "_download_window", fake_download)
-
-    report = await flatfile.refresh_index(conn, client=object(), windows=[_WIN], force=False)
+    report = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
 
     assert report[_WIN]["status"] == "unchanged"
-    assert downloads["n"] == 0, "an unchanged ETag must not trigger a download"
-    assert (
-        await conn.fetchval("SELECT count(*) FROM comm_products WHERE source_window=$1", _WIN) == 0
-    )
+    assert report[_WIN]["scanned"] == []
+    assert http.downloads == 0, "an unchanged ETag must not trigger a download"
+    assert await _vocab(conn) == []
 
 
 @pytest.mark.asyncio
-async def test_refresh_reingests_a_window_whose_etag_changed(conn, monkeypatch):
+async def test_refresh_reingests_a_window_whose_etag_changed(conn, http):
+    vehicle = await _vehicle(conn)
     await conn.execute(
         "INSERT INTO flatfile_ingests (source_window, etag, row_count) VALUES ($1, 'E1', 0)",
         _WIN,
     )
+    http.etag = "E2"
 
-    async def fake_head(_client, _window):
-        return "E2", None
-
-    async def fake_download(_client, _window, _dest):
-        return "E2", None
-
-    monkeypatch.setattr(flatfile, "head_window", fake_head)
-    monkeypatch.setattr(flatfile, "_download_window", fake_download)
-    monkeypatch.setattr(flatfile, "_iter_csv_lines", lambda _path: iter(_CSV))
-
-    report = await flatfile.refresh_index(conn, client=object(), windows=[_WIN], force=False)
+    report = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
 
     assert report[_WIN]["status"] == "ingested"
     assert report[_WIN]["rows"] == 3
-    products = await _seeded_products(conn)
-    assert {r["nhtsa_id"] for r in products} == {"700001", "700002"}
+    assert report[_WIN]["scanned"] == [vehicle["id"]]
+    assert len(await _vocab(conn)) == 3
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
     assert (
         await conn.fetchval("SELECT etag FROM flatfile_ingests WHERE source_window=$1", _WIN)
         == "E2"
@@ -202,25 +281,218 @@ async def test_refresh_reingests_a_window_whose_etag_changed(conn, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reingest_replaces_rather_than_duplicates(conn, monkeypatch):
-    """A window ingested twice must leave exactly one copy of each product row --
-    the delete-by-window before the merge is what guarantees it."""
+async def test_reingest_replaces_rather_than_duplicates(conn, http):
+    """A window ingested twice must leave exactly one copy of each row."""
+    vehicle = await _vehicle(conn)
+    http.etag = "E2"
 
-    async def fake_head(_client, _window):
-        return "E2", None
+    await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]], force=True
+    )
+    await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]], force=True
+    )
 
-    async def fake_download(_client, _window, _dest):
-        return "E2", None
-
-    monkeypatch.setattr(flatfile, "head_window", fake_head)
-    monkeypatch.setattr(flatfile, "_download_window", fake_download)
-    monkeypatch.setattr(flatfile, "_iter_csv_lines", lambda _path: iter(_CSV))
-
-    await flatfile.refresh_index(conn, client=object(), windows=[_WIN], force=True)
-    await flatfile.refresh_index(conn, client=object(), windows=[_WIN], force=True)
-
+    assert len(await _vocab(conn)) == 3
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
     assert (
-        await conn.fetchval("SELECT count(*) FROM comm_products WHERE source_window=$1", _WIN) == 3
+        await conn.fetchval("SELECT count(*) FROM vehicle_scans WHERE source_window=$1", _WIN) >= 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_vehicle_with_no_scan_is_scanned_even_when_the_window_is_unchanged(conn, http):
+    vehicle = await _vehicle(conn)
+    await conn.execute(
+        "INSERT INTO flatfile_ingests (source_window, etag, row_count) VALUES ($1, 'E1', 3)",
+        _WIN,
+    )
+
+    report = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
+
+    assert report[_WIN]["status"] == "ingested", "an unscanned vehicle makes the window stale"
+    assert report[_WIN]["scanned"] == [vehicle["id"]]
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+
+
+@pytest.mark.asyncio
+async def test_a_second_refresh_with_the_same_etag_does_nothing(conn, http):
+    vehicle = await _vehicle(conn)
+    first = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
+    assert first[_WIN]["status"] == "ingested"
+    assert http.downloads == 1
+
+    second = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
+
+    assert second[_WIN]["status"] == "unchanged"
+    assert second[_WIN]["scanned"] == []
+    assert http.downloads == 1, "no second download"
+
+
+@pytest.mark.asyncio
+async def test_a_scan_folds_aliases_into_the_vehicles_bulletins(conn, http):
+    vehicle = await _vehicle(conn, make="TESTMAKE", model="F 250 SD")
+    ranger = await _vehicle(conn, make="TESTMAKE", model="RANGER")
+    http.csv = _ALIAS_CSV
+
+    await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"], ranger["id"]]
+    )
+
+    assert await _bulletins(conn, vehicle["id"]) == [
+        ("710001", "real a"),
+        ("710002", "real b"),  # under both spellings: one bulletin, the vehicle's own summary
+        ("710003", "filed only under the junk spelling"),
+    ]
+    assert await _bulletins(conn, ranger["id"]) == [("710009", "another nameplate")]
+
+
+@pytest.mark.asyncio
+async def test_a_bulletin_nhtsa_withdraws_disappears_on_the_next_scan(conn, http):
+    vehicle = await _vehicle(conn)
+    http.etag = "E1"
+    await flatfile.refresh_index(conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]])
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+
+    http.etag = "E2"
+    http.csv = [_CSV[0], '"700005","HONDA","CIVIC","2020","summary e"']
+    await flatfile.refresh_index(conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]])
+
+    assert await _bulletins(conn, vehicle["id"]) == [("700005", "summary e")]
+
+
+@pytest.mark.asyncio
+async def test_scan_vehicle_scans_every_window_and_vehicle_is_scanned_reports_it(
+    conn, http, monkeypatch
+):
+    vehicle = await _vehicle(conn)
+
+    async def one_window(_client):
+        return [_WIN]
+
+    monkeypatch.setattr(flatfile, "discover_windows", one_window)
+    # _vehicle reuses the replica's real 2020 Civic when it is tracked, and a
+    # bootstrapped replica has already scanned it: start from "never scanned".
+    await conn.execute("DELETE FROM vehicle_scans WHERE vehicle_id = $1", vehicle["id"])
+    assert await flatfile.vehicle_is_scanned(conn, vehicle["id"]) is False
+
+    report = await flatfile.scan_vehicle(conn, vehicle["id"])
+
+    assert report[_WIN]["scanned"] == [vehicle["id"]]
+    assert await flatfile.vehicle_is_scanned(conn, vehicle["id"]) is True
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+
+
+# --------------------------------------------------------------------------
+# The zip cache: backend/.flatfile_cache/<window>.<etag>.zip
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_cached_zip_for_the_current_etag_is_parsed_without_a_download(
+    conn, http, monkeypatch, tmp_path
+):
+    vehicle = await _vehicle(conn)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / f"{_WIN}.E1.zip").write_bytes(b"PK")
+
+    async def no_download(*_a, **_kw):
+        raise AssertionError("a cache hit must not download")
+
+    monkeypatch.setattr(flatfile, "_download_window", no_download)
+
+    report = await flatfile.refresh_index(
+        conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]]
+    )
+
+    assert report[_WIN]["status"] == "ingested"
+    assert await _bulletins(conn, vehicle["id"]) == [("700001", "summary a")]
+
+
+@pytest.mark.asyncio
+async def test_two_downloads_of_one_window_at_once_both_land_one_whole_cached_zip(
+    monkeypatch, tmp_path
+):
+    """Scan on add and a refresh run can download the same window together; a shared
+    ``.part`` file let them interleave writes and rename it out from under each other."""
+    monkeypatch.setenv("FLATFILE_CACHE_DIR", str(tmp_path / "cache"))
+    chunk = 64 * 1024  # larger than the file buffer, so every write reaches the file
+
+    async def slow_download(_client, _window, dest):
+        fill = b"A" if not getattr(slow_download, "started", False) else b"B"
+        slow_download.started = True
+        for _ in range(4):
+            dest.write(fill * chunk)
+            await asyncio.sleep(0)
+        dest.flush()
+        return '"E9"', None
+
+    monkeypatch.setattr(flatfile, "_download_window", slow_download)
+
+    results = await asyncio.gather(
+        flatfile._window_zip(object(), _WIN, None), flatfile._window_zip(object(), _WIN, None)
+    )
+
+    cache = tmp_path / "cache"
+    assert [p.name for p in cache.iterdir()] == [f"{_WIN}.E9.zip"]
+    assert all(path == cache / f"{_WIN}.E9.zip" for path, *_ in results)
+    data = (cache / f"{_WIN}.E9.zip").read_bytes()
+    assert data in (b"A" * chunk * 4, b"B" * chunk * 4)
+
+
+@pytest.mark.asyncio
+async def test_a_window_pass_waits_for_another_connections_pass_over_the_same_window(conn):
+    """Two passes over one window (scan on add vs a refresh run) must take turns: run
+    together, the second one's comm_vocab insert hit the first's primary key."""
+    vehicle = await _vehicle(conn)
+    other = await asyncpg.connect(get_settings().database_url)
+    try:
+        await other.execute("SELECT pg_advisory_lock($1::bigint)", flatfile._window_lock_key(_WIN))
+        task = asyncio.create_task(
+            flatfile.ingest_window(
+                conn,
+                _WIN,
+                flatfile.parse_rows(_CSV),
+                etag="E1",
+                last_modified=None,
+                vehicles=[vehicle],
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert not task.done(), "the pass must wait while another holds the window"
+        await other.execute(
+            "SELECT pg_advisory_unlock($1::bigint)", flatfile._window_lock_key(_WIN)
+        )
+        report = await asyncio.wait_for(task, 10)
+    finally:
+        await other.close()
+
+    assert report["per_vehicle"][vehicle["id"]] >= 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_etag_downloads_and_removes_the_old_cached_zip(conn, http, tmp_path):
+    vehicle = await _vehicle(conn)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / f"{_WIN}.OLD.zip").write_bytes(b"PK")
+    (cache / "OTHERWIN.OLD.zip").write_bytes(b"PK")
+    http.etag = '"E/3"'  # S3 sends the quotes; the slash must not escape the cache dir
+
+    await flatfile.refresh_index(conn, client=object(), windows=[_WIN], vehicles=[vehicle["id"]])
+
+    assert http.downloads == 1
+    assert sorted(p.name for p in cache.iterdir()) == ["OTHERWIN.OLD.zip", f"{_WIN}.E3.zip"]
+    assert (
+        await conn.fetchval("SELECT etag FROM flatfile_ingests WHERE source_window=$1", _WIN)
+        == '"E/3"'
     )
 
 

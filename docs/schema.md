@@ -13,8 +13,9 @@ erDiagram
     vehicles ||--o{ communication_vehicles : "tracked by"
     communications ||--o{ communication_vehicles : "applies to"
     communications ||--o{ comm_documents : "has PDFs"
-    communications ||..o{ comm_products : "nhtsa_id, by value"
-    flatfile_ingests ||--o{ comm_products : "source_window"
+    vehicles ||--o{ vehicle_bulletins : "scanned for"
+    vehicles ||--o{ vehicle_scans : "ledger"
+    flatfile_ingests ||..o{ comm_vocab : "source_window"
 
     vehicles {
         bigserial id PK
@@ -70,13 +71,26 @@ erDiagram
         timestamptz first_seen_at
     }
 
-    comm_products {
-        text nhtsa_id PK "joins communications.nhtsa_id by value, no FK"
+    comm_vocab {
+        integer model_year PK "9999 = unknown"
         text make PK "uppercase, as published"
         text model PK "normalize_model form"
-        integer model_year PK "9999 = unknown"
+        text source_window PK "e.g. 2020-2024"
+        integer bulletins "distinct nhtsa_ids for the triple in the window"
+    }
+
+    vehicle_bulletins {
+        bigint vehicle_id PK_FK
+        text nhtsa_id PK "joins communications.nhtsa_id by value, no FK"
         text summary "concise summary from the CSV"
-        text source_window "e.g. 2020-2024"
+        text source_window "window whose scan last wrote the row"
+    }
+
+    vehicle_scans {
+        bigint vehicle_id PK_FK
+        text source_window PK
+        text etag "window etag the scan read"
+        timestamptz scanned_at
     }
 
     flatfile_ingests {
@@ -88,13 +102,29 @@ erDiagram
     }
 ```
 
-`comm_products` is the flat-file index: one row per `(communication, make, model,
-year)` NHTSA lists in its daily flat files. Discovery (years, makes, models) and
-sync (which `nhtsa_id`s belong to a vehicle) both read it. `comm_products.nhtsa_id`
-joins `communications.nhtsa_id` by value only; there is no foreign key, because an
-index row exists before (and independently of) the communication being fetched.
-`flatfile_ingests` is the ETag ledger, one row per source window, which makes the
-refresh idempotent: a window is re-ingested only when its ETag changed.
+The flat-file index is lean: three small tables instead of a copy of NHTSA's catalogue.
+
+- `comm_vocab` answers "what can the picker offer": one row per `(year, make, model,
+  window)` with the number of distinct bulletins behind it (about 92k rows). Discovery
+  reads it, and the counts let `flatfile.resolve_models` fold spelling variants and
+  REDUNDANT/DUPLICATE copies of a nameplate.
+- `vehicle_bulletins` answers "which bulletins belong to this tracked vehicle": filled by
+  scanning the flat files for tracked identities only, with alias folding applied at scan
+  time (variants of the vehicle's model all land on the one vehicle). Sync, the refresh
+  preview and the identity check read it. `nhtsa_id` joins `communications.nhtsa_id` by
+  value only; there is no foreign key, because a bulletin is listed here before (and
+  independently of) the communication being fetched.
+- `vehicle_scans` is the staleness ledger, one row per `(vehicle, window)` with the window
+  etag the scan read. A pair is stale when its row is missing or `vehicle_scans.etag`
+  differs from `flatfile_ingests.etag`; `flatfile.refresh_index` repairs stale pairs.
+- `flatfile_ingests` is the ETag ledger, one row per source window, which makes the refresh
+  idempotent: a window is re-ingested only when its ETag changed.
+
+The database now grows with tracked vehicles, not with NHTSA: on the replica the index went
+from 1,508 MB (`comm_products`) to about 12 MB right after the migration (three windows
+ingested), and to about 30 MB once all eight windows are bootstrapped (`comm_vocab` 28 MB,
+`vehicle_bulletins` 1.6 MB for six vehicles). The downloaded zips live in a disk cache, not in Postgres (see
+the [runbook](pipeline-runbook.md#flat-file-index)).
 
 ## Vehicle identity
 
@@ -240,9 +270,10 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 
 | Migration | What it does |
 |-----------|--------------|
-| `0007` | Adds `comm_products` and `flatfile_ingests` (additive) |
+| `0007` | Adds the flat-file index tables (`comm_products`, since replaced by 0013) and `flatfile_ingests` (additive) |
 | `0008` | Relaxes `nhtsa_vehicle_id` (nullable, no unique), adds `vehicles_active_identity_uidx` |
 | `0009` | Drops `vehicles.trim` and the retired YMM-to-vehicleId cache table |
+| 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
 
 The data backfill to canonical models is a script
 (`python -m src.scripts.backfill_plain_nameplate`), not a migration; see the

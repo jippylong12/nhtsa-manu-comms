@@ -1,11 +1,11 @@
 """One-time backfill of tracked vehicles to the plain nameplate (ADR 0001, JIP-433).
 
 Rows written under the crash-test taxonomy (``F-150 REGULAR CAB``) match nothing in
-``comm_products``; this rewrites each active vehicle's ``model`` to the plain
+``comm_vocab``; this rewrites each active vehicle's ``model`` to the plain
 nameplate the flat-file index uses (``F 150``), merging vehicles that collapse to
 one identity.
 
-Mapping (per active vehicle): take the vocabulary V of ``comm_products.model`` for
+Mapping (per active vehicle): take the vocabulary V of ``comm_vocab.model`` for
 the vehicle's year and make, and ``c = normalize_model(model)``. Pick the first of:
 exact ``c`` in V; the longest ``v`` in V that ``c`` starts with (``v + " "``);
 the ``v`` whose compact form equals, or is a prefix of, ``compact_model(c)``
@@ -82,7 +82,7 @@ async def plan(conn: asyncpg.Connection) -> list[Row]:
         key = (v["year"], v["make"])
         if key not in vocab:
             rows = await conn.fetch(
-                "SELECT DISTINCT model FROM comm_products WHERE model_year=$1 AND make=$2",
+                "SELECT DISTINCT model FROM comm_vocab WHERE model_year=$1 AND make=$2",
                 *key,
             )
             vocab[key] = [r["model"] for r in rows]
@@ -237,9 +237,9 @@ _write = apply
 
 async def run(conn: asyncpg.Connection, apply: bool = False, as_json: bool = False) -> int:
     """Plan, report, and (with ``apply``) write. Returns the process exit code."""
-    if apply and not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM comm_products)"):
+    if apply and not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM comm_vocab)"):
         print(
-            "comm_products is empty: bootstrap the index first "
+            "comm_vocab is empty: bootstrap the index first "
             "(python -m src.communications.flatfile --bootstrap).",
             file=sys.stderr,
         )

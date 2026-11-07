@@ -142,6 +142,8 @@ export interface RefreshPreview {
     unfinishedDocuments: number;
     documentsToProcess: number;
     upToDate: boolean;
+    /** Never scanned: the first refresh scans NHTSA's files before it can count bulletins. */
+    scanPending: boolean;
     estimatedCostLowUsd: number;
     estimatedCostHighUsd: number;
     /** Ready to show, e.g. "about $0.03". */

@@ -227,7 +227,7 @@ async def test_other_vehicles_and_unrelated_tables_are_never_modified(conn):
     ledger_before = await conn.fetch("SELECT * FROM usage_events WHERE meta->>'ns' = $1", NS)
     theirs_before = await snapshot(conn, [theirs])
     links_before = await conn.fetchval("SELECT count(*) FROM communication_vehicles")
-    products_before = await conn.fetchval("SELECT count(*) FROM comm_products")
+    bulletins_before = await conn.fetchval("SELECT count(*) FROM vehicle_bulletins")
     vehicles_before = await conn.fetch("SELECT * FROM vehicles WHERE id = ANY($1)", [v, other])
 
     code, _ = await cs.apply_records(conn, payload, apply=True)
@@ -238,7 +238,7 @@ async def test_other_vehicles_and_unrelated_tables_are_never_modified(conn):
     assert await conn.fetch("SELECT * FROM usage_events WHERE meta->>'ns' = $1", NS) == ledger_before
     assert await conn.fetchval("SELECT count(*) FROM pipeline_runs WHERE id=$1", run) == 1
     assert await conn.fetchval("SELECT count(*) FROM communication_vehicles") == links_before
-    assert await conn.fetchval("SELECT count(*) FROM comm_products") == products_before
+    assert await conn.fetchval("SELECT count(*) FROM vehicle_bulletins") == bulletins_before
     assert await conn.fetch("SELECT * FROM vehicles WHERE id = ANY($1)", [v, other]) == vehicles_before
 
 

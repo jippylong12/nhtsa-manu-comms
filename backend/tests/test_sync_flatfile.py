@@ -1,11 +1,12 @@
 """Sync learns a vehicle's communications from the flat-file index (ADR 0001, M3).
 
-The discovery step no longer reads a live vehicle-details payload; it queries
-`comm_products` for the vehicle's plain nameplate and fetches each new bulletin's
-detail from `/safetyIssues/byNhtsaId`. These tests pin that seam: association is an
-exact match on `(year, make, normalized model)` so a bulletin filed under a
-different nameplate is not pulled in; already-stored bulletins are linked without
-refetching; and a per-bulletin fetch failure is counted, not fatal.
+The discovery step no longer reads a live vehicle-details payload; it reads the
+vehicle's `vehicle_bulletins` (filled by the flat-file scan, alias folding already
+applied) and fetches each new bulletin's detail from `/safetyIssues/byNhtsaId`.
+These tests pin that seam: association is exactly what the vehicle's scan listed,
+so a bulletin filed under a different nameplate is not pulled in; already-stored
+bulletins are linked without refetching; and a per-bulletin fetch failure is
+counted, not fatal.
 
 Everything runs against the real database inside a rolled-back transaction, with a
 fake client standing in for NHTSA -- the same seam sync uses in production.
@@ -60,22 +61,25 @@ def no_pacing(monkeypatch):
 
 
 async def _seed(conn):
-    """A tracked F 150 plus an index slice: three of its bulletins and one
-    RANGER bulletin that must not be associated to it."""
+    """A tracked F 150 with three scanned bulletins, plus a tracked RANGER whose
+    bulletin must not be associated to the F 150."""
     vehicle_id = await conn.fetchval(
         """
         INSERT INTO vehicles (year, make, model, keywords)
         VALUES (2099, 'FORD', 'F 150', ARRAY['brake']) RETURNING id
         """
     )
+    ranger_id = await conn.fetchval(
+        "INSERT INTO vehicles (year, make, model) VALUES (2099, 'FORD', 'RANGER') RETURNING id"
+    )
     await conn.executemany(
-        "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
-        "VALUES ($1, 'FORD', $2, 2099, $3, $4)",
+        "INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, summary, source_window) "
+        "VALUES ($1, $2, $3, $4)",
         [
-            ("900001", "F 150", "concise a", _WIN),
-            ("900002", "F 150", "concise b", _WIN),
-            ("900003", "F 150", "concise c", _WIN),
-            ("900009", "RANGER", "wrong nameplate", _WIN),  # must never be associated to the F 150
+            (vehicle_id, "900001", "concise a", _WIN),
+            (vehicle_id, "900002", "concise b", _WIN),
+            (vehicle_id, "900003", "concise c", _WIN),
+            (ranger_id, "900009", "wrong nameplate", _WIN),  # never associated to the F 150
         ],
     )
     # 900003 already exists in the corpus: sync should link it, not refetch it.
@@ -148,12 +152,17 @@ async def test_stored_bulletin_carries_the_index_summary_and_byNhtsaId_fields(co
 
 @pytest.mark.asyncio
 async def test_a_granular_bodystyle_nameplate_matches_nothing_until_migrated(conn, no_pacing):
-    """A vehicle still keyed to a crash-test body style (pre-M4) normalizes to
-    'F 150 REGULAR CAB', which no index row uses, so sync finds nothing -- the
-    expected state until the M4 backfill re-keys it to the plain nameplate."""
-    seeded = await _seed(conn)
+    """A vehicle still keyed to a crash-test body style (pre-M4) is 'F 150 REGULAR
+    CAB', which no flat-file row uses, so its scan lists nothing and sync finds
+    nothing -- the expected state until the M4 backfill re-keys it to the plain
+    nameplate."""
+    await _seed(conn)
+    granular_id = await conn.fetchval(
+        "INSERT INTO vehicles (year, make, model) VALUES (2099, 'FORD', 'F 150 REGULAR CAB') "
+        "RETURNING id"
+    )
     vehicle = {
-        "id": seeded["id"],
+        "id": granular_id,
         "year": 2099,
         "make": "FORD",
         "model": "F-150 REGULAR CAB",
@@ -197,8 +206,9 @@ async def _seed_summary_only(conn):
         "VALUES (2099, 'FORD', 'F 150', ARRAY['brake']) RETURNING id"
     )
     await conn.execute(
-        "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
-        "VALUES ('900101', 'FORD', 'F 150', 2099, 'concise', $1)",
+        "INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, summary, source_window) "
+        "VALUES ($1, '900101', 'concise', $2)",
+        vehicle_id,
         _WIN,
     )
     comm_id = await conn.fetchval(

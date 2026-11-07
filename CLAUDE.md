@@ -225,7 +225,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Contains: `VehicleService`, `CommunicationService` (static method classes)
 - Depends on: Database module, NHTSAClient, schemas
 - Used by: Router layer
-- Purpose: Async HTTP client for NHTSA government API. Discovery is Postgres-only (served from `comm_products`); the only NHTSA API call left is `/safetyIssues/byNhtsaId`, once per bulletin
+- Purpose: Async HTTP client for NHTSA government API. Discovery is Postgres-only (served from `comm_vocab`); the only NHTSA API call left is `/safetyIssues/byNhtsaId`, once per bulletin
 - Location: `backend/src/communications/nhtsa_client.py`
 - Contains: `NHTSAClient` class, response extraction helpers
 - Depends on: httpx, config settings
@@ -262,7 +262,7 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Responsibilities: Renders `<App />` into DOM root
 - Location: `backend/src/communications/flatfile.py`
 - Triggers: Manual `python -m src.communications.flatfile --bootstrap | --refresh | --status` (the in-app refresh also runs the `--refresh` ETag check itself)
-- Responsibilities: Ingests NHTSA's flat-file corpus into `comm_products`, tracking per-window ETags in `flatfile_ingests`
+- Responsibilities: Ingests NHTSA's flat-file corpus into `comm_vocab` and scans it for tracked vehicles into `vehicle_bulletins`, tracking per-window ETags in `flatfile_ingests` and per-vehicle scans in `vehicle_scans`
 - Location: `backend/src/scripts/backfill_plain_nameplate.py`
 - Triggers: One-time manual `python -m src.scripts.backfill_plain_nameplate --dry-run | --apply`
 - Responsibilities: Maps tracked vehicles to the plain nameplate (canonical `model`), merging identity collisions
@@ -286,7 +286,9 @@ See `docs/schema.md` for the full schema and `backend/migrations/` for the histo
 | `communications` | One row per `nhtsa_id`. `status` is the contract between sync and the processor |
 | `comm_documents` | One row per PDF: extracted text, LLM output, embedding |
 | `communication_vehicles` | The join that removes the per-vehicle duplication |
-| `comm_products` | Flat-file index: one row per (communication, make, model, year); what discovery and sync read |
+| `comm_vocab` | Flat-file vocabulary: distinct (year, make, model) per window with a bulletin count; what the picker reads |
+| `vehicle_bulletins` | The bulletins of each tracked vehicle, filled by scanning the flat files; what sync reads |
+| `vehicle_scans` | Which (vehicle, window) pairs were scanned and at which window etag; a stale etag triggers a rescan |
 | `flatfile_ingests` | ETag ledger per flat-file window |
 | `refresh_runs` | State of an in-app refresh; one active at a time |
 | `pipeline_runs` | Operational record of a CLI job execution |

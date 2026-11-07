@@ -1,9 +1,9 @@
 """Discovery is served from the flat-file index, and only from it (ADR 0001, M3).
 
 The three picker dropdowns are now bounded Postgres queries against
-`comm_products` -- no NHTSA call, so nothing in the interactive path can time out.
-These tests seed a small, isolated slice of the index (a far-future year no real
-corpus row uses, tagged with a private source_window) and assert the service
+`comm_vocab` -- no NHTSA call, so nothing in the interactive path can time out.
+These tests seed a small, isolated slice of the vocabulary (a far-future year no
+real corpus row uses, tagged with a private source_window) and assert the service
 returns plain nameplates from it: years exclude the 9999 unknown sentinel, makes
 are curated against TOP_MAKES, and models come back as the canonical nameplates.
 
@@ -22,9 +22,29 @@ _TAG = "TESTDISC"
 _YEAR = 2099  # newer than any real corpus row, so it sorts to the top deterministically
 
 
+async def _insert_vocab(conn, rows, tag):
+    """Seed comm_vocab from (nhtsa_id, make, model, model_year) rows.
+
+    The bulletin count of a triple is its distinct nhtsa_ids, as the ingest
+    computes it; the counts are what drive resolve_models' folding.
+    """
+    ids: dict[tuple[int, str, str], set[str]] = {}
+    for nid, make, model, year in rows:
+        ids.setdefault((year, make, model), set()).add(nid)
+    await conn.executemany(
+        "INSERT INTO comm_vocab (model_year, make, model, source_window, bulletins) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        [(year, make, model, tag, len(nids)) for (year, make, model), nids in ids.items()],
+    )
+
+
+async def _wipe_vocab(conn, tag):
+    await conn.execute("DELETE FROM comm_vocab WHERE source_window = $1", tag)
+
+
 @pytest_asyncio.fixture
 async def seeded():
-    """Populate an isolated slice of comm_products, removed before and after."""
+    """Populate an isolated slice of comm_vocab, removed before and after."""
     settings = get_settings()
     if not settings.database_url:
         pytest.skip("DATABASE_URL not configured")
@@ -40,17 +60,10 @@ async def seeded():
         ("800007", "FORD", "UNKNOWN", 9999),  # the unknown-year sentinel: must be excluded
     ]
 
-    async def wipe(conn):
-        await conn.execute("DELETE FROM comm_products WHERE source_window = $1", _TAG)
-
     conn = await asyncpg.connect(settings.database_url)
     try:
-        await wipe(conn)
-        await conn.executemany(
-            "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
-            "VALUES ($1, $2, $3, $4, 'x', $5)",
-            [(nid, mk, md, yr, _TAG) for nid, mk, md, yr in rows],
-        )
+        await _wipe_vocab(conn, _TAG)
+        await _insert_vocab(conn, rows, _TAG)
     finally:
         await conn.close()
 
@@ -58,7 +71,7 @@ async def seeded():
 
     conn = await asyncpg.connect(settings.database_url)
     try:
-        await wipe(conn)
+        await _wipe_vocab(conn, _TAG)
     finally:
         await conn.close()
 
@@ -121,17 +134,15 @@ async def _seed_dirty(rows: list[tuple[str, str, str]]):
     async def wipe():
         conn = await asyncpg.connect(settings.database_url)
         try:
-            await conn.execute("DELETE FROM comm_products WHERE source_window = $1", _DIRTY_TAG)
+            await _wipe_vocab(conn, _DIRTY_TAG)
         finally:
             await conn.close()
 
     await wipe()
     conn = await asyncpg.connect(settings.database_url)
     try:
-        await conn.executemany(
-            "INSERT INTO comm_products (nhtsa_id, make, model, model_year, summary, source_window) "
-            "VALUES ($1, $2, $3, $4, 'x', $5)",
-            [(nid, mk, md, _DIRTY_YEAR, _DIRTY_TAG) for nid, mk, md in rows],
+        await _insert_vocab(
+            conn, [(nid, mk, md, _DIRTY_YEAR) for nid, mk, md in rows], _DIRTY_TAG
         )
     finally:
         await conn.close()

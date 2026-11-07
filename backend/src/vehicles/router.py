@@ -1,7 +1,10 @@
 """API router for Vehicles feature."""
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, status
 
+from src.communications import flatfile
 from src.vehicles.schemas import (
     VehicleCreate,
     VehicleListResponse,
@@ -11,6 +14,9 @@ from src.vehicles.schemas import (
 from src.vehicles.service import VehicleService
 
 router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
+
+# Strong references to in-flight background scans; asyncio only holds a weak one.
+_scans: set[asyncio.Task] = set()
 
 
 @router.post(
@@ -32,6 +38,9 @@ async def create_vehicle(payload: VehicleCreate) -> VehicleResponse:
     except ValueError as e:
         # The year column is an integer; the API takes it as a string.
         raise HTTPException(status_code=400, detail=str(e)) from e
+    task = asyncio.create_task(flatfile.scan_vehicle_background(int(vehicle["vehicle_id"])))
+    _scans.add(task)
+    task.add_done_callback(_scans.discard)
     return VehicleResponse(**vehicle)
 
 
