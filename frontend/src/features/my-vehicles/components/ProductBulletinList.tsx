@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { ChevronDown, ExternalLink, FileText, Lock, Stethoscope, Wrench } from 'lucide-react';
+import { ExternalLink, FileText, Lock, Stethoscope, Wrench } from 'lucide-react';
 
 import { COMM_TYPE_LABELS, PRIORITY_COLORS } from '@/client';
 import type { CommPriority, CommType, MyBulletin, Severity } from '@/client';
@@ -88,7 +88,7 @@ function FullRow({ b }: { b: MyBulletin }) {
 
     return (
         <li
-            className={styles.row}
+            className={`${styles.row} ${expanded ? styles.rowExpanded : ''}`}
             style={{ borderLeftColor: PRIORITY_COLORS[SEVERITY_PRIORITY[b.severity]] }}
         >
             <button
@@ -114,11 +114,6 @@ function FullRow({ b }: { b: MyBulletin }) {
                         </div>
                     )}
                 </div>
-                <ChevronDown
-                    size={18}
-                    className={`${styles.toggle} ${expanded ? styles.toggleOpen : ''}`}
-                    aria-hidden="true"
-                />
             </button>
 
             {expanded && (
