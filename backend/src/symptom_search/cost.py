@@ -2,8 +2,13 @@
 
 A single symptom query costs one embedding call (to vectorise the query) plus,
 in the B2 API, one LLM composition call. Both are tracked here so a query's
-total cost can be logged and surfaced. Prices are Gemini list prices per input
-token; keep them in sync with ``src/jobs/embed.py`` and ``src/jobs/llm.py``.
+total cost can be logged and surfaced. The embedding is Gemini and the
+composition is Claude Haiku 5.5; both rates come from ``src/usage/pricing.py``.
+
+Budget this was tuned to: about $0.10 per 1,000 searches. Four 300-char
+summaries plus the prompt is roughly 700 input tokens and the one-sentence JSON
+answer about 60 output tokens, so one query is ~$0.0001 at Haiku list price
+(plus ~$0.000003 for the embedding).
 """
 
 from dataclasses import dataclass
@@ -13,8 +18,8 @@ from src.usage import pricing
 # Re-exported from the canonical rate table in src/usage/pricing.py so the
 # per-query figures shown to the user and the ledger totals cannot drift apart.
 PRICE_EMBED_IN = pricing.rate_for("gemini-embedding-001").input_per_token
-PRICE_LLM_IN = pricing.rate_for("gemini-3.5-flash-lite").input_per_token
-PRICE_LLM_OUT = pricing.rate_for("gemini-3.5-flash-lite").output_per_token
+PRICE_LLM_IN = pricing.rate_for("claude-haiku-5-5").input_per_token
+PRICE_LLM_OUT = pricing.rate_for("claude-haiku-5-5").output_per_token
 
 
 def approx_tokens(text: str) -> int:
@@ -29,8 +34,8 @@ def approx_tokens(text: str) -> int:
 
 
 def llm_cost(model: str, tokens_in: int, tokens_out: int) -> float:
-    """Cost of one composition call. Falls back to Flash-Lite pricing for an
-    unrecognised model rather than silently reporting zero."""
+    """Cost of one composition call. An unrecognised model falls back to the
+    rate table's FALLBACK row rather than silently reporting zero."""
     return pricing.cost_of(model, tokens_in, tokens_out)
 
 

@@ -1,7 +1,10 @@
 """Grounded answer composition for symptom search.
 
-One LLM call over the top-k retrieved communications composes a short answer
-that cites nhtsa_ids inline. Two guards bracket the call:
+One Claude Haiku 5.5 call over the top-k retrieved communications composes a
+one-sentence answer that cites nhtsa_ids inline. The prompt is kept deliberately
+small (4 candidates, 300-char summaries, one sentence out) so a query costs about
+a hundredth of a cent; see ``src/symptom_search/cost.py``. Two guards bracket
+the call:
 
   * A retrieval-confidence gate (before the call). If the best match's cosine
     similarity is below CONFIDENCE_THRESHOLD, a refusal is returned without
@@ -25,10 +28,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from google.genai import types
-
+from src.anthropic_client import client as anthropic_client
 from src.config import get_settings
-from src.gemini import client as gemini_client
 from src.symptom_search.cost import QueryCost
 from src.symptom_search.retrieval import Match
 
@@ -42,10 +43,14 @@ log = logging.getLogger("symptom_search.compose")
 # model's job (plus the citation guard), so this gate is set low enough to catch
 # only clearly-unrelated input and let the model judge everything else.
 CONFIDENCE_THRESHOLD = 0.55
-# How many retrieved communications are handed to the composer.
-TOP_K_FOR_ANSWER = 5
+# How many retrieved communications are handed to the composer. Retrieval
+# returns six for the results list; the composer only needs the best four.
+TOP_K_FOR_ANSWER = 4
 # Keep each document's summary bounded so the prompt stays small and cheap.
-SUMMARY_CHAR_CAP = 600
+SUMMARY_CHAR_CAP = 300
+# One sentence of answer plus the JSON envelope. Thinking is off for this call,
+# so nothing else counts against the ceiling and it can stay small and cheap.
+MAX_OUTPUT_TOKENS = 300
 
 REFUSAL_TEXT = (
     "I could not find any manufacturer communications for this vehicle that match "
@@ -63,7 +68,7 @@ _RESPONSE_SCHEMA = {
         "answer": {
             "type": "string",
             "description": (
-                "2-4 sentence plain-language answer. Reference each relevant "
+                "One plain-language sentence. Reference each relevant "
                 "communication inline as [nhtsa_id]. If none are relevant, say so."
             ),
         },
@@ -78,6 +83,7 @@ _RESPONSE_SCHEMA = {
         },
     },
     "required": ["answer", "relevant", "cited_ids"],
+    "additionalProperties": False,
 }
 
 _PROMPT = """You help a vehicle owner find out whether any manufacturer communications \
@@ -89,8 +95,8 @@ Rules:
 NHTSA ID, or fix that is not in the list.
 - Cite every communication you reference inline as [nhtsa_id], using the exact id shown \
 in brackets in the list.
-- If one or more candidates clearly address the described problem, give a short \
-(2-4 sentence) answer that names what matches and cites the id(s), and set relevant=true.
+- If one or more candidates clearly address the described problem, answer in ONE \
+sentence that names what matches and cites the id(s), and set relevant=true.
 - If NONE of the candidates actually address the described problem, set relevant=false \
 and say plainly that you found no matching communication. Do not stretch an unrelated \
 bulletin to fit.
@@ -115,7 +121,18 @@ class ComposeResult:
 
 
 class ComposeError(RuntimeError):
-    """The LLM composition call failed; retrieval still succeeded."""
+    """The LLM composition call failed; retrieval still succeeded.
+
+    ``tokens_in`` / ``tokens_out`` are non-zero when the model answered and was
+    billed before the failure (a response cut off at max_tokens, or a refusal).
+    ``compose`` records them on the cost before re-raising, so a billed call never
+    escapes the usage ledger.
+    """
+
+    def __init__(self, message: str, *, tokens_in: int = 0, tokens_out: int = 0):
+        super().__init__(message)
+        self.tokens_in = tokens_in
+        self.tokens_out = tokens_out
 
 
 def _format_context(matches: list[Match]) -> str:
@@ -161,23 +178,50 @@ def guard_citations(answer: str, retrieved_ids: set[str]) -> tuple[str, list[str
 
 
 def _generate(model: str, prompt: str) -> tuple[str, int, int]:
-    """Run the composition call. Isolated so tests can monkeypatch it."""
-    if not get_settings().gemini_api_key:
-        raise ComposeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
-    client = gemini_client()
-    resp = client.models.generate_content(
+    """Run the composition call. Isolated so tests can monkeypatch it.
+
+    Thinking is disabled (Haiku 5.5 allows that at effort ``high`` or below) and
+    effort is ``low``: this is a short grounded judgment over four summaries, not
+    a reasoning task, and every thinking token would be billed as output.
+    Structured output pins the JSON shape so the parse below never has to repair
+    prose. ``anthropic_client`` raises when the key is missing; that surfaces as
+    a ComposeError to the caller.
+    """
+    try:
+        client = anthropic_client()
+    except RuntimeError as e:
+        raise ComposeError(str(e)) from e
+    settings = get_settings()
+    # The shared client carries the extraction job's 300s ceiling and two retries.
+    # This call sits on a user-facing request, so it gets its own short ceiling and
+    # one retry; a stalled call fails the search in seconds, not minutes.
+    message = client.with_options(
+        timeout=float(settings.compose_timeout_seconds), max_retries=1
+    ).messages.create(
         model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=_RESPONSE_SCHEMA,
-            temperature=0.0,
-        ),
+        max_tokens=MAX_OUTPUT_TOKENS,
+        thinking={"type": "disabled"},
+        output_config={
+            "effort": "low",
+            "format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA},
+        },
+        messages=[{"role": "user", "content": prompt}],
     )
-    usage = resp.usage_metadata
-    tokens_in = (usage.prompt_token_count or 0) if usage else 0
-    tokens_out = (usage.candidates_token_count or 0) if usage else 0
-    return resp.text or "", tokens_in, tokens_out
+    tokens_in, tokens_out = message.usage.input_tokens, message.usage.output_tokens
+    if message.stop_reason == "max_tokens":
+        raise ComposeError(
+            "composition hit max_tokens before finishing",
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+    if message.stop_reason == "refusal":
+        raise ComposeError(
+            "composition was refused by the model's safety classifier",
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
+    text = next((b.text for b in message.content if b.type == "text"), "")
+    return text, tokens_in, tokens_out
 
 
 async def compose(
@@ -192,7 +236,7 @@ async def compose(
     ``cost`` accumulates the composition tokens/cost. Raises ``ComposeError``
     if the LLM call itself fails (retrieval has already succeeded by then).
     """
-    model = model or get_settings().gemini_model
+    model = model or get_settings().compose_model
 
     # Gate on the same top-k the composer actually reasons over. The 0.65
     # threshold was derived from top-k cosine in the B1 eval, so measuring it
@@ -211,7 +255,11 @@ async def compose(
 
     try:
         raw, tokens_in, tokens_out = await asyncio.to_thread(_generate, model, prompt)
-    except ComposeError:
+    except ComposeError as e:
+        # A call that was answered and billed, then failed (cut off, refused):
+        # the spend still has to reach the ledger. The caller reads it off cost.
+        if e.tokens_in or e.tokens_out:
+            cost.record_llm(model, e.tokens_in, e.tokens_out)
         raise
     except Exception as e:  # noqa: BLE001
         raise ComposeError(f"{type(e).__name__}: {e}") from e

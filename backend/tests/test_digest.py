@@ -18,8 +18,6 @@ from src.alerts import service as A
 from src.config import get_settings
 from src.jobs import digest as D
 
-pytestmark = pytest.mark.asyncio
-
 NS = "TESTDIGEST"
 BASE = datetime(2099, 1, 1, tzinfo=timezone.utc)
 

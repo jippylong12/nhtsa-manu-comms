@@ -25,7 +25,7 @@ lost. Backfilled rows carry `meta->>'backfilled_from_pipeline_run'`.
 | `llm_extract` | `jobs/llm.py` | each document extraction (live and batch), model `claude-haiku-5-5` |
 | `embed` | `jobs/embed.py` | each corpus embedding batch |
 | `search_embed` | `symptom_search/service.py` | embedding one user query |
-| `answer_compose` | `symptom_search/service.py` | the grounded-answer LLM call |
+| `answer_compose` | `symptom_search/service.py` | the grounded-answer LLM call (`claude-haiku-5-5` since 2026-11-07; Gemini Flash-Lite before) |
 | `extract`, `digest` | reserved / backfill | PDF text extraction, digest sends |
 
 An `llm_extract` row carries two `meta` keys besides `project`: `path` (`live` or

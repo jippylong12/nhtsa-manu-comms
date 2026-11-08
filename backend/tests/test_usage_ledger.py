@@ -195,7 +195,9 @@ METERED_BY_CALLER = {
     "symptom_search/compose.py": "metered by symptom_search/service.py",
 }
 
-SDK_CALL = re.compile(r"generate_content|embed_content|batches\.create|messages\.create|messages\.stream|messages\.batches\.create")
+SDK_CALL = re.compile(
+    r"generate_content|embed_content|batches\.create|messages\.create|messages\.stream|messages\.batches\.create"
+)
 
 
 def test_every_module_that_calls_the_model_sdk_records_usage():
@@ -222,6 +224,51 @@ def test_ledger_kinds_match_the_database_constraint():
     constraint = re.search(r"kind IN \(([^)]+)\)", sql, re.S).group(1)
     in_sql = set(re.findall(r"'([a-z_]+)'", constraint))
     assert in_sql == set(KINDS)
+
+
+async def test_a_composition_cut_off_at_max_tokens_is_still_metered(monkeypatch):
+    """The model answered and was billed, then the SDK reported stop_reason
+    max_tokens (or a refusal). compose raises; the spend must still be on the ledger.
+    """
+    _needs_db()
+    from src.config import get_settings
+    from src.db import get_pool
+    from src.symptom_search import compose as compose_mod
+    from src.symptom_search import service
+
+    def _cut_off(model: str, prompt: str):
+        raise compose_mod.ComposeError(
+            "composition hit max_tokens before finishing", tokens_in=700, tokens_out=200
+        )
+
+    monkeypatch.setattr(compose_mod, "_generate", _cut_off)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        before = await conn.fetchval(
+            "SELECT count(*) FROM usage_events WHERE kind = 'answer_compose'"
+        )
+
+    result = await service.search(await _silverado_24(), "the tailgate will not open")
+    assert result["answer_generated"] is False
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT tokens_in, tokens_out, cost_usd
+            FROM usage_events WHERE kind = 'answer_compose'
+            ORDER BY id DESC LIMIT 1
+            """
+        )
+        after = await conn.fetchval(
+            "SELECT count(*) FROM usage_events WHERE kind = 'answer_compose'"
+        )
+
+    assert after == before + 1, "a billed, cut-off composition escaped the ledger"
+    assert row["tokens_in"] == 700 and row["tokens_out"] == 200
+    assert float(row["cost_usd"]) == pytest.approx(
+        pricing.cost_of(get_settings().compose_model, 700, 200), rel=1e-6
+    )
 
 
 async def test_a_billed_composition_that_fails_to_parse_is_still_metered(monkeypatch):
@@ -265,6 +312,8 @@ async def test_a_billed_composition_that_fails_to_parse_is_still_metered(monkeyp
     # ...but the tokens it was billed for are on the ledger.
     assert after == before + 1, "a billed composition escaped the ledger"
     assert row["tokens_in"] == 700 and row["tokens_out"] == 200
+    # Priced at whatever model compose actually bills (Claude Haiku 5.5 today).
+    compose_model = get_settings().compose_model
     assert float(row["cost_usd"]) == pytest.approx(
-        pricing.cost_of("gemini-3.5-flash-lite", 700, 200), rel=1e-6
+        pricing.cost_of(compose_model, 700, 200), rel=1e-6
     )
