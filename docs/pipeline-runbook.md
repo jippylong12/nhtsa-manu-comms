@@ -286,8 +286,10 @@ python -m src.alerts --out-dir /tmp/alerts            # where the dry run writes
 ```
 
 It prints who would receive mail (or did), the destination address, item counts and the
-outcome, never a key. A brand-new subscriber with no watermark gets their cars' whole history in
-the first email. The watermark advances only after a successful send, so a failed send is
+outcome, never a key. A brand-new subscriber with no watermark gets only news processed after they
+subscribed; an admin with no subscription is baselined silently on the first `--send` pass
+(nothing is mailed, the pass time becomes their watermark), so a dry run before that pass
+shows no items for them. The watermark advances only after a successful send, so a failed send is
 retried in full on the next run.
 
 Sending needs `RESEND_API_KEY`, `DIGEST_FROM_EMAIL` (an address on a domain verified in

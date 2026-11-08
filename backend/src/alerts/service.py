@@ -6,6 +6,11 @@ the current revision of each bulletin and grouped by vehicle. The watermark only
 advances after a send succeeds, so a failed send repeats exactly the same items on
 the next run and one user's failure never stops the others.
 
+A user with no watermark yet is not "everything is new": the baseline is the creation of
+their earliest active subscription, or, for an admin with no subscription, the first pass
+that sees them (that pass sends nothing and stores the moment as their watermark). So a
+first alert only carries news that arrived after the user became a recipient.
+
 A dry run (`send=False`) renders one HTML file per user with news and never calls
 Resend or moves a watermark.
 """
@@ -99,7 +104,8 @@ async def recipients(conn, only_user_id: Optional[int] = None) -> list[dict]:
     """Subscribers with an active subscription, plus every admin; minus unsubscribed.
 
     Creates the user's `alert_state` row (with a fresh token) on first use. Each dict
-    carries id, email, unsubscribe_token and last_watermark.
+    carries id, email, unsubscribe_token, last_watermark and subscribed_since (when the
+    user's earliest active subscription was created; None for an admin without one).
     """
     await conn.execute(
         """
@@ -113,7 +119,10 @@ async def recipients(conn, only_user_id: Optional[int] = None) -> list[dict]:
     )
     rows = await conn.fetch(
         """
-        SELECT u.id, u.email, u.display_name, a.unsubscribe_token, a.last_watermark
+        SELECT u.id, u.email, u.display_name, a.unsubscribe_token, a.last_watermark,
+               (SELECT min(e.created_at) FROM entitlements e
+                WHERE e.user_id = u.id AND e.kind = 'subscription' AND e.status = 'active'
+               ) AS subscribed_since
         FROM users u
         JOIN alert_state a ON a.user_id = u.id
         WHERE a.unsubscribed_at IS NULL
@@ -136,6 +145,15 @@ def _recency(row) -> tuple:
 
 def _stem(row) -> str:
     return revision_stem(row["communication_number"]) or row["nhtsa_id"]
+
+
+def baseline_for(user: dict) -> Optional[datetime]:
+    """Where a user's news starts: their watermark, else when they subscribed, else None.
+
+    None means an admin with no watermark and no subscription: the caller baselines them
+    at the moment of the pass instead of treating their history as news.
+    """
+    return user["last_watermark"] or user.get("subscribed_since")
 
 
 async def build_for_user(
@@ -470,7 +488,11 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
     base = _base_url()
     summary = AlertRunSummary()
     for user in await recipients(conn, only_user_id):
-        since = since_override if since_override is not None else user["last_watermark"]
+        since = since_override if since_override is not None else baseline_for(user)
+        first_pass = since is None
+        if first_pass:
+            # An admin with no subscription: nothing counts as news until this moment.
+            since = generated_at
         destination = settings.alert_test_recipient or user["email"]
         alert = await build_for_user(conn, user, since, generated_at)
         outcome = UserOutcome(
@@ -482,6 +504,15 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
             outcome="skipped-no-news",
         )
         summary.outcomes.append(outcome)
+        if first_pass and send:
+            await conn.execute(
+                "UPDATE alert_state SET last_watermark = $1 WHERE user_id = $2 "
+                "AND last_watermark IS NULL",
+                generated_at,
+                user["id"],
+            )
+            log.info("user %s: first pass, baselined at %s, nothing sent", user["id"], generated_at)
+            continue
         if not alert.has_news:
             log.info("user %s: nothing new since %s", user["id"], since)
             continue

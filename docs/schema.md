@@ -303,9 +303,10 @@ Five tables sit beside the corpus. None of them changes `communications`,
   acknowledged and never processed again.
 - `alert_state` is one row per alert recipient: `last_watermark` (the newest
   `processed_at` already mailed), `last_sent_at`, `unsubscribed_at` and a random
-  `unsubscribe_token` that goes into the link in every email. A user with no watermark yet is
-  treated as "everything is new". Rows are created the first time the alert run sees the
-  user as a recipient.
+  `unsubscribe_token` that goes into the link in every email. A user with no watermark yet
+  starts from the time their subscription began (an admin with no subscription is baselined,
+  silently, on the first sending pass), so a first email never replays a car's history. Rows
+  are created the first time the alert run sees the user as a recipient.
 
 ## Alerts (migration 0015)
 

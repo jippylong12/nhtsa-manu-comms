@@ -182,11 +182,111 @@ async def test_an_unsubscribed_user_gets_nothing(conn, mailbox):
 async def test_the_admin_gets_his_alert_without_a_subscription(conn, mailbox):
     uid, email = await make_user(conn, "boss", admin=True)
     vid = await make_vehicle(conn, uid, "ALERTADMIN")
+    await set_watermark(conn, uid, BASE)
     await make_comm(conn, vid, "ALERT-AD1", 1)
 
     await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
 
     assert len(mailbox.to(email)) == 1
+
+
+async def subscribe_at(conn, user_id, when):
+    await conn.execute(
+        "UPDATE entitlements SET created_at = $2 WHERE user_id = $1 AND kind = 'subscription'",
+        user_id,
+        when,
+    )
+
+
+async def test_a_new_subscriber_with_no_watermark_only_gets_news_after_they_subscribed(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "fresh", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTFRESH")
+    await subscribe_at(conn, uid, BASE + timedelta(hours=10))
+    await make_comm(conn, vid, "ALERT-F-OLD", 2, number="FR1")  # before subscribing
+    await make_comm(conn, vid, "ALERT-F-NEW", 20, number="FR2")  # after subscribing
+
+    summary = await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "LLM summary ALERT-F-NEW" in mail["html"]
+    assert "LLM summary ALERT-F-OLD" not in mail["html"]
+    assert "Now ready" not in mail["html"] and "Now ready" not in mail["text"]
+    assert outcome_for(summary, uid).items == 1
+    assert outcome_for(summary, uid).ready_vehicles == 0
+    assert await watermark(conn, uid) == BASE + timedelta(hours=20)
+
+
+async def test_a_new_subscriber_whose_cars_only_have_older_bulletins_gets_no_email(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "stale", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTSTALE")
+    await subscribe_at(conn, uid, BASE + timedelta(hours=10))
+    await make_comm(conn, vid, "ALERT-ST1", 2)
+    await make_comm(conn, vid, "ALERT-ST2", 9)
+
+    summary = await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    assert mailbox.to(email) == []
+    assert outcome_for(summary, uid).outcome == "skipped-no-news"
+    assert await watermark(conn, uid) is None  # not moved backwards or forwards
+
+
+async def test_a_car_first_processed_after_the_subscription_is_now_ready_once(conn, mailbox):
+    uid, email = await make_user(conn, "newcar", subscription="active")
+    old_car = await make_vehicle(conn, uid, "ALERTOLDCAR")
+    new_car = await make_vehicle(conn, uid, "ALERTNEWCAR")
+    await subscribe_at(conn, uid, BASE + timedelta(hours=10))
+    await make_comm(conn, old_car, "ALERT-NC-OLD", 2, number="NC1")
+    await make_comm(conn, old_car, "ALERT-NC-OLD2", 30, number="NC2")  # old car, new news
+    await make_comm(conn, new_car, "ALERT-NC-NEW", 25, number="NC3")  # car ready after T
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert f"/app/vehicles/{new_car}" in mail["html"]
+    assert f"/app/vehicles/{old_car}" not in mail["html"]
+
+
+async def test_an_admin_without_a_subscription_is_baselined_silently_on_the_first_pass(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "baseline", admin=True)
+    vid = await make_vehicle(conn, uid, "ALERTBASE")
+    await make_comm(conn, vid, "ALERT-B-OLD", 2, number="BS1")  # all history, before this pass
+
+    first = await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    assert mailbox.to(email) == []
+    assert outcome_for(first, uid).outcome == "skipped-no-news"
+    assert await watermark(conn, uid) == RUN_AT
+
+    await make_comm(conn, vid, "ALERT-B-NEW", 24 * 31, number="BS2")  # processed after the pass
+    later = RUN_AT + timedelta(days=2)
+    await A.run_alerts(send=True, generated_at=later, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "LLM summary ALERT-B-NEW" in mail["html"]
+    assert "LLM summary ALERT-B-OLD" not in mail["html"]
+
+
+async def test_a_dry_run_never_baselines_an_admin_or_lists_their_history(
+    conn, mailbox, tmp_path
+):
+    uid, email = await make_user(conn, "drybase", admin=True)
+    vid = await make_vehicle(conn, uid, "ALERTDRYBASE")
+    await make_comm(conn, vid, "ALERT-DB1", 2)
+
+    summary = await A.run_alerts(
+        send=False, generated_at=RUN_AT, out_dir=tmp_path, only_user_id=uid, conn=conn
+    )
+
+    assert outcome_for(summary, uid).items == 0
+    assert outcome_for(summary, uid).outcome == "skipped-no-news"
+    assert await watermark(conn, uid) is None
+    assert not (tmp_path / f"alert_user_{uid}.html").exists()
 
 
 async def test_a_send_failure_keeps_that_watermark_and_the_next_user_still_gets_theirs(

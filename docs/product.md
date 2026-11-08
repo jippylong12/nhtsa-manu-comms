@@ -139,8 +139,16 @@ added or finished processing since the last email).
 
 **The watermark.** It is per user (`alert_state.last_watermark`) and advances only after a
 successful send, so a failed send is retried in full on the next run, never skipped. A user
-with no watermark yet is treated as "everything is new", so a brand-new subscriber's first
-email lists their cars' whole history.
+with no watermark yet starts from a baseline, never from the beginning of time: the moment
+their earliest active subscription was created (`entitlements.created_at`). So a brand-new
+subscriber's first email lists only news processed after they subscribed, and "Now ready"
+names only cars whose first bulletin was processed after that moment. An admin with no
+subscription has no such moment, so the first alert pass that sees them sends nothing and
+stores that pass's time as their watermark; their first real alert carries only news after it.
+On production this means the admin's own alerts start from the first pass after deploy (the
+old single-recipient watermark is not carried across, because the `users` table is empty when
+migration 0015 runs). A user with no news after their baseline gets no email and their
+watermark stays where it was.
 
 **Unsubscribe.** Every email carries a link to `/unsubscribe/{token}`, which calls the
 public `GET /api/public/unsubscribe/{token}` (idempotent; an unknown token is a 404). A
