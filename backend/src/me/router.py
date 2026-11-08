@@ -10,6 +10,8 @@ from src.me.schemas import (
     AlertsStatus,
     AlertsUpdate,
     MeResponse,
+    MyBulletinFull,
+    MyBulletinLocked,
     MyBulletinsResponse,
     MyVehicle,
     MyVehicleCreate,
@@ -95,3 +97,18 @@ async def my_bulletins(
     if result is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return MyBulletinsResponse(**result)
+
+
+@router.get(
+    "/vehicles/{vehicle_id}/bulletins/{nhtsa_id}",
+    response_model=MyBulletinFull | MyBulletinLocked,
+    summary="One bulletin of my vehicle: full detail, or identity only when locked",
+)
+async def my_bulletin_detail(
+    vehicle_id: int, nhtsa_id: str, user: dict = Depends(current_user)
+) -> MyBulletinFull | MyBulletinLocked:
+    """404 unless the vehicle is linked to the caller and the id is one of its bulletins."""
+    result = await service.my_bulletin_detail(user["id"], vehicle_id, nhtsa_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="bulletin not found")
+    return result

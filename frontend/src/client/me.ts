@@ -1,7 +1,14 @@
 /* Me API - who is signed in, their vehicles, and their bulletins */
 
 import { request } from './api';
-import type { AlertsStatus, Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle } from './types';
+import type {
+    AlertsStatus,
+    Me,
+    MyBulletinDetail,
+    MyBulletinsParams,
+    MyBulletinsResponse,
+    MyVehicle,
+} from './types';
 
 export const meApi = {
     /** GET /api/me; 401 (ApiError) when nobody is signed in. */
@@ -34,4 +41,8 @@ export const meApi = {
         const qs = q.toString();
         return request<MyBulletinsResponse>(`/me/vehicles/${id}/bulletins${qs ? `?${qs}` : ''}`);
     },
+
+    /** GET /api/me/vehicles/{id}/bulletins/{nhtsaId}: full detail, or `locked: true` identity only. */
+    bulletin: (id: number, nhtsaId: string) =>
+        request<MyBulletinDetail>(`/me/vehicles/${id}/bulletins/${encodeURIComponent(nhtsaId)}`),
 };

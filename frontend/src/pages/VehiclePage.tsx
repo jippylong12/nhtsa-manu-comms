@@ -240,7 +240,11 @@ export function VehiclePage() {
       )}
 
       {full && view === 'symptoms' ? (
-        <SymptomSearchView vehicles={[symptomVehicle]} initialVehicleId={vehicle.vehicleId} />
+        <SymptomSearchView
+          vehicles={[symptomVehicle]}
+          initialVehicleId={vehicle.vehicleId}
+          productPage
+        />
       ) : (
         <div className={styles.layout}>
           <div className={styles.main}>

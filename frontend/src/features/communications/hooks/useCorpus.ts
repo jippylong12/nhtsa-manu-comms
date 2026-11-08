@@ -2,9 +2,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 
-import { corpusApi } from '@/client';
-import type { CorpusFilters } from '@/client';
-import { corpusKeys } from '../../queryKeys';
+import { corpusApi, meApi } from '@/client';
+import type { CorpusCommunicationDetail, CorpusFilters } from '@/client';
+import { corpusKeys, meKeys } from '../../queryKeys';
 
 export function useCorpusCommunicationsQuery(filters: CorpusFilters = {}) {
     return useQuery({
@@ -13,10 +13,22 @@ export function useCorpusCommunicationsQuery(filters: CorpusFilters = {}) {
     });
 }
 
-export function useCorpusDetailQuery(nhtsaId: string | null) {
-    return useQuery({
-        queryKey: corpusKeys.detail(nhtsaId ?? ''),
-        queryFn: () => corpusApi.get(nhtsaId as string),
+/**
+ * One communication's detail. The admin corpus endpoint reads any id; on a product
+ * page pass `vehicleId` so the read goes through the sample-aware /api/me endpoint
+ * instead. A locked row comes back as null: there is nothing more to show.
+ */
+export function useCorpusDetailQuery(nhtsaId: string | null, vehicleId?: number) {
+    return useQuery<CorpusCommunicationDetail | null>({
+        queryKey:
+            vehicleId === undefined
+                ? corpusKeys.detail(nhtsaId ?? '')
+                : meKeys.bulletin(vehicleId, nhtsaId ?? ''),
+        queryFn: async () => {
+            if (vehicleId === undefined) return corpusApi.get(nhtsaId as string);
+            const found = await meApi.bulletin(vehicleId, nhtsaId as string);
+            return found.locked ? null : found;
+        },
         enabled: !!nhtsaId,
     });
 }

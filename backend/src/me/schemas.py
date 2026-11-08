@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from src.corpus.schemas import CommunicationDetail
 from src.public.schemas import SeverityCounts
 from src.vehicles.schemas import CamelModel
 
@@ -90,3 +91,19 @@ class MyBulletinsResponse(CamelModel):
     per_page: int
     access: Literal["full", "sample"]
     sample_counts: SeverityCounts
+
+
+class MyBulletinFull(CommunicationDetail):
+    """A readable bulletin: the same detail the corpus endpoint returns."""
+
+    locked: Literal[False] = False
+
+
+class MyBulletinLocked(CamelModel):
+    """A bulletin the sample rule locks: identity fields only."""
+
+    nhtsa_id: str
+    communication_type: str | None = None
+    communication_date: datetime | None = None
+    severity: str
+    locked: Literal[True] = True

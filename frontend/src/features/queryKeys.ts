@@ -30,6 +30,8 @@ export const meKeys = {
     all: ['me'] as const,
     bulletins: (vehicleId: number, params: Record<string, unknown>) =>
         [...meKeys.all, 'vehicles', vehicleId, 'bulletins', params] as const,
+    bulletin: (vehicleId: number, nhtsaId: string) =>
+        [...meKeys.all, 'vehicles', vehicleId, 'bulletin', nhtsaId] as const,
 };
 
 // The one-shot unsubscribe call behind an alert email link.
