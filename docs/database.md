@@ -1,8 +1,10 @@
 # Database (Railway Postgres + pgvector)
 
 Everything the app stores lives in one Postgres database with `pgvector`, hosted
-on Railway. Only the database is hosted; the sync and processor jobs run locally
-on Marcus's machine.
+on Railway. The database is hosted; so is the app: the `api` and `nightly` services
+run on Railway too (see [deploy.md](deploy.md)) and read the database through the private
+`DATABASE_URL` set in their Railway variables. Local commands (the runbook's one-off
+scripts, migrations by hand) use the public connection string in `backend/.env`.
 
 There was briefly a second store. Phase A introduced this one as the canonical
 home for the processed corpus but left MongoDB backing the vehicles and

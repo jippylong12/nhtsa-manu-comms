@@ -1,17 +1,15 @@
 ## Project
 
-**NHTSA Comms Tracker — UI/UX Beautification**
+**NHTSA Comms — Product: lookup, accounts, paywall, daily alerts**
 
-A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The app already works — it fetches, stores, filters, and displays vehicle communications from the NHTSA API. This milestone is about making it *feel* professional: rethinking layout, navigation, data presentation, and interaction patterns. The target aesthetic is Linear/Notion — clean, dense, keyboard-friendly, minimal chrome.
-
-**Core Value:** Users can efficiently scan, filter, and consume 600+ manufacturer communications without the UI getting in the way.
+A visitor looks up a year, make and model and sees serious, medium and small counts of NHTSA manufacturer communications; a free account reads a sample (newest 1 serious, 2 medium, 3 small), $3 once unlocks one car, and $5 a month unlocks every car on the account and adds daily email alerts. Stripe takes payments, Firebase Authentication handles sign-in, Resend sends the email; the original tracker survives as the admin console at `/admin`. See `docs/product.md`.
 
 ### Constraints
 
 - **Stack**: Keep React + Vite + TypeScript. No CSS framework (Tailwind, etc.) — continue with CSS custom properties approach.
-- **Backend**: No backend changes in this milestone. Frontend-only.
-- **Theme**: Keep existing dark theme. Refine, don't replace.
+- **Theme**: Keep the existing dark theme. Refine, don't replace.
 - **Compatibility**: Must work well across desktop, tablet, and mobile.
+- **Money and mail**: Nothing that spends money (refresh, vehicle writes, usage) is reachable without the admin gate; tests fake Firebase and Stripe.
 
 ## Technology Stack
 
@@ -50,11 +48,15 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 | pydantic-settings | >=2.1.0 | Environment-based configuration (`backend/src/config.py`) |
 | python-dotenv | >=1.0.0 | `.env` file loading |
 | anthropic | >=1.0,<2 | Claude API client for document extraction |
+| firebase-admin | >=6.5 | Verifies Firebase ID tokens on the API |
+| stripe | >=9.8 | Checkout, Customer Portal, signed webhook, price setup |
 | Package | Version | Purpose |
 |---------|---------|---------|
 | @tanstack/react-query | ^5.90.16 | Server state management, caching, SSE handling |
 | date-fns | ^4.1.0 | Date formatting utilities |
 | lucide-react | ^0.562.0 | Icon library |
+| react-router-dom | ^7.18.5 | Routes: landing, `/app`, `/admin`, unsubscribe |
+| firebase | ^11.10.0 | Web sign-in; supplies the ID token the API verifies |
 | @vitejs/plugin-react | ^5.1.1 | React JSX transform for Vite |
 ## Configuration
 - Backend uses `pydantic-settings` with `.env` file support (`backend/src/config.py`)
@@ -196,6 +198,8 @@ A holistic UI/UX overhaul of the NHTSA Manufacturer Communications Tracker. The 
 - Server-Sent Events (SSE) for real-time fetch progress
 - Vite dev server proxies `/api` to FastAPI backend at `:8000`
 - camelCase JSON serialization via Pydantic alias generators (snake_case internally, camelCase over the wire)
+- Product modules beside the tracker modules, all under `backend/src/`: `auth` (Firebase token verification, `current_user` and `admin_user` dependencies), `billing` (Checkout, Portal, signed idempotent webhook, `access_for` entitlements), `public` (unauthenticated lookup and unsubscribe), `me` (the signed-in user's cars, bulletins with the sample rule, alerts setting) and `alerts` (per-user alert emails, `python -m src.alerts`). The vehicle write, refresh and usage routes are admin-only.
+- Hosting: one Docker image, FastAPI serves the built SPA and `/api/*` on one domain. Two Railway services use it: `api` (migrates, then uvicorn) and `nightly` (cron `0 9 * * *`, `python -m src.jobs.run_pipeline --send-digest`). `READ_ONLY` stays in the code and defaults to false. See `docs/deploy.md`.
 ## Component Diagram
 ```mermaid
 ```
@@ -293,6 +297,11 @@ See `docs/schema.md` for the full schema and `backend/migrations/` for the histo
 | `refresh_runs` | State of an in-app refresh; one active at a time |
 | `pipeline_runs` | Operational record of a CLI job execution |
 | `usage_events` | Billing record: one row per billable model call |
+| `users` | One row per Firebase account; `is_admin` set from `ADMIN_FIREBASE_UIDS` |
+| `user_vehicles` | An account's saved cars (at most 10) |
+| `entitlements` | Paid access: an unlock for one car or a subscription for all; only `active` grants |
+| `stripe_events` | Handled Stripe event ids (webhook idempotency) |
+| `alert_state` | Per-user alert watermark, last send, unsubscribe state and token |
 
 ## Project Management
 
