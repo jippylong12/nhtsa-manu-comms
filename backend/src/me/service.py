@@ -368,17 +368,31 @@ async def my_bulletin_detail(user_id: int, vehicle_id: int, nhtsa_id: str) -> di
     None when the vehicle is not linked to the caller or the id is not a current
     bulletin of it. A readable row returns the corpus detail plus `locked: False`; a
     locked row returns its identity fields and `locked: True` and nothing else.
+
+    A reader with full access may also open any other communication linked to the
+    vehicle (a superseded revision, or one still pending or failed): symptom search
+    resolves a match to the newest revision of its family across every status, which
+    the processed-only fold does not contain. Under the sample rule only the fold counts.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
         folded = await _folded_for(conn, user_id, vehicle_id)
-    if folded is None:
-        return None
-    _, rows, readable = folded
-    row = next((r for r in rows if r["nhtsa_id"] == nhtsa_id), None)
-    if row is None:
-        return None
-    if nhtsa_id not in readable:
+        if folded is None:
+            return None
+        access, rows, readable = folded
+        row = next((r for r in rows if r["nhtsa_id"] == nhtsa_id), None)
+        if row is None and not (
+            access == "full"
+            and await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM communication_vehicles cv "
+                "JOIN communications c ON c.id = cv.communication_id "
+                "WHERE cv.vehicle_id = $1 AND c.nhtsa_id = $2)",
+                vehicle_id,
+                nhtsa_id,
+            )
+        ):
+            return None
+    if row is not None and nhtsa_id not in readable:
         return {
             "nhtsa_id": row["nhtsa_id"],
             "communication_type": row["communication_type"],

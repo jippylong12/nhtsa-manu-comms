@@ -184,6 +184,55 @@ async def test_an_nhtsa_id_that_is_not_a_bulletin_of_the_vehicle_is_404(db):
     assert (await _get(USER_A, vid, "does-not-exist")).status_code == 404
 
 
+async def _newest_revision_pending(conn, vid) -> None:
+    """A newer revision of `serious-new` (same number stem plus `A`) still pending.
+
+    Symptom search resolves a match to the newest revision of its family across every
+    status, so this is the id its card shows, while the processed-only fold the bulletin
+    list uses never contains it.
+    """
+    cid = await conn.fetchval(
+        """
+        INSERT INTO communications (nhtsa_id, communication_number, communication_type,
+            communication_date, summary, status, severity)
+        VALUES ($1, 'TSseriousnew00A', 'TSB', '2090-02-01', $2, 'pending', 'serious')
+        RETURNING id
+        """,
+        PREFIX + "serious-new-rev", SECRET,
+    )
+    await conn.execute(
+        "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1, $2)",
+        cid, vid,
+    )
+
+
+async def test_an_entitled_reader_opens_a_symptom_match_outside_the_processed_fold(db):
+    vid = await _seed(db)
+    user_id = await _link(db, USER_A, vid)
+    await db.execute(
+        "INSERT INTO entitlements (user_id, kind, status) VALUES ($1, 'subscription', 'active')",
+        user_id,
+    )
+    await _newest_revision_pending(db, vid)
+    r = await _get(USER_A, vid, "serious-new-rev")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["locked"] is False
+    assert body["nhtsaId"] == PREFIX + "serious-new-rev"
+    assert body["status"] == "pending"
+
+
+async def test_a_sample_reader_cannot_open_a_row_outside_the_processed_fold(db):
+    vid = await _seed(db)
+    await _link(db, USER_A, vid)
+    await _newest_revision_pending(db, vid)
+    r = await _get(USER_A, vid, "serious-new-rev")
+    assert r.status_code == 404
+    assert SECRET not in r.text
+    # The superseded, locked revision stays locked rather than opening through this path.
+    assert set((await _get(USER_A, vid, "serious-old")).json()) == LOCKED_KEYS
+
+
 async def test_anonymous_is_401(db):
     vid = await _seed(db)
     r = await _get(None, vid, "serious-new")
