@@ -3,6 +3,8 @@
 import logging
 
 from src.billing.entitlements import access_for
+from src.communications.flatfile import normalize_model
+from src.config import get_settings
 from src.corpus import service as corpus_service
 from src.db import get_pool
 from src.public import service as public_service
@@ -72,9 +74,28 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
 
     Raises ValueError for a bad identity and VehicleLimitReached past MAX_VEHICLES.
     """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Refuse before creating anything: a capped account must not be able to
+        # create tracked vehicles (which the nightly pipeline ingests) by collecting 409s.
+        at_cap = await conn.fetchval(
+            """
+            SELECT count(*) >= $2 AND NOT EXISTS (
+                SELECT 1 FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id
+                WHERE uv.user_id = $1 AND v.year = $3 AND v.make = $4 AND v.model = $5
+            )
+            FROM user_vehicles WHERE user_id = $1
+            """,
+            user_id,
+            MAX_VEHICLES,
+            year,
+            make.strip().upper(),
+            normalize_model(model),
+        )
+    if at_cap:
+        raise VehicleLimitReached()
     vehicle = await VehicleService.create_vehicle(year=str(year), make=make, model=model)
     vehicle_id = vehicle["vehicle_id"]
-    pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Serialise this user's adds so two requests cannot both slip under the cap.
@@ -97,6 +118,10 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
             )
         result = await _my_vehicle(conn, user_id, vehicle_id)
     if sum(result["counts"].values()) == 0:
+        if get_settings().read_only:
+            # Read-only mode unmounts the refresh routes; a user add must not start one either.
+            logger.info("read-only: ingest not started (vehicle %s)", vehicle_id)
+            return result
         try:
             await refresh_service.start(vehicle_id)
         except refresh_service.RefreshConflict:

@@ -220,3 +220,29 @@ async def test_a_user_id_in_the_request_is_ignored(db):
         me_b = await c.get("/api/me", headers=_as(USER_B))
     assert len(me_a.json()["vehicles"]) == 1
     assert me_b.json()["vehicles"] == []
+
+
+async def test_a_capped_account_cannot_create_vehicles_by_collecting_409s(db, refresh_calls):
+    async with _http() as c:
+        for i in range(10):
+            assert (
+                await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body(f"CAR{i}"))
+            ).status_code == 201
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("OVERCAP"))
+    assert r.status_code == 409
+    # The refused identity was never created, so the nightly pipeline has nothing to ingest.
+    assert await db.fetchval(
+        "SELECT count(*) FROM vehicles WHERE make = $1 AND model = 'OVERCAP'", MAKE
+    ) == 0
+    assert len(refresh_calls) == 10
+
+
+async def test_read_only_mode_links_a_new_vehicle_without_starting_a_refresh(
+    db, refresh_calls, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "read_only", True)
+    async with _http() as c:
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("ROCAR"))
+    assert r.status_code == 201
+    assert r.json()["availability"] == "processing"
+    assert refresh_calls == []
