@@ -259,6 +259,36 @@ def _empty_details() -> dict:
     }
 
 
+async def _folded_for(
+    conn, user_id: int, vehicle_id: int
+) -> tuple[str, list[dict], set[str]] | None:
+    """`(access, folded rows newest first, readable nhtsa_ids)` for a linked vehicle, else None.
+
+    The one place the sample rule is applied: the readable set is chosen across the
+    whole revision-folded list. The bulletin list and the single-bulletin detail both
+    read it, so they can never disagree about which rows are locked.
+    """
+    linked = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id "
+        "WHERE uv.user_id = $1 AND uv.vehicle_id = $2 AND v.active)",
+        user_id,
+        vehicle_id,
+    )
+    if not linked:
+        return None
+    access = await access_for(conn, user_id, vehicle_id)
+    rows, _ = await corpus_service.list_communications(
+        vehicle_id=vehicle_id,
+        status="processed",
+        revisions="latest",
+        page=1,
+        per_page=_ALL_ROWS,
+    )
+    _newest_first(rows)
+    readable = {r["nhtsa_id"] for r in rows} if access == "full" else sample_ids(rows)
+    return access, rows, readable
+
+
 async def my_bulletins(
     user_id: int,
     vehicle_id: int,
@@ -276,25 +306,10 @@ async def my_bulletins(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        linked = await conn.fetchval(
-            "SELECT EXISTS (SELECT 1 FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id "
-            "WHERE uv.user_id = $1 AND uv.vehicle_id = $2 AND v.active)",
-            user_id,
-            vehicle_id,
-        )
-        if not linked:
+        folded = await _folded_for(conn, user_id, vehicle_id)
+        if folded is None:
             return None
-        access = await access_for(conn, user_id, vehicle_id)
-
-        rows, _ = await corpus_service.list_communications(
-            vehicle_id=vehicle_id,
-            status="processed",
-            revisions="latest",
-            page=1,
-            per_page=_ALL_ROWS,
-        )
-        _newest_first(rows)
-        readable = {r["nhtsa_id"] for r in rows} if access == "full" else sample_ids(rows)
+        access, rows, readable = folded
         sample_counts = dict.fromkeys(SAMPLE_QUOTA, 0)
         for r in rows:
             if r["nhtsa_id"] in readable and r["severity"] in sample_counts:
@@ -345,3 +360,47 @@ async def my_bulletins(
         "access": access,
         "sample_counts": sample_counts,
     }
+
+
+async def my_bulletin_detail(user_id: int, vehicle_id: int, nhtsa_id: str) -> dict | None:
+    """One bulletin of a linked vehicle under the sample rule.
+
+    None when the vehicle is not linked to the caller or the id is not a current
+    bulletin of it. A readable row returns the corpus detail plus `locked: False`; a
+    locked row returns its identity fields and `locked: True` and nothing else.
+
+    A reader with full access may also open any other communication linked to the
+    vehicle (a superseded revision, or one still pending or failed): symptom search
+    resolves a match to the newest revision of its family across every status, which
+    the processed-only fold does not contain. Under the sample rule only the fold counts.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        folded = await _folded_for(conn, user_id, vehicle_id)
+        if folded is None:
+            return None
+        access, rows, readable = folded
+        row = next((r for r in rows if r["nhtsa_id"] == nhtsa_id), None)
+        if row is None and not (
+            access == "full"
+            and await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM communication_vehicles cv "
+                "JOIN communications c ON c.id = cv.communication_id "
+                "WHERE cv.vehicle_id = $1 AND c.nhtsa_id = $2)",
+                vehicle_id,
+                nhtsa_id,
+            )
+        ):
+            return None
+    if row is not None and nhtsa_id not in readable:
+        return {
+            "nhtsa_id": row["nhtsa_id"],
+            "communication_type": row["communication_type"],
+            "communication_date": row["communication_date"],
+            "severity": row["severity"],
+            "locked": True,
+        }
+    detail = await corpus_service.get_communication(nhtsa_id)
+    if detail is None:
+        return None
+    return {**detail, "locked": False}

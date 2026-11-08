@@ -3,13 +3,18 @@
 Mounted at /api/corpus. It sat alongside a second, Mongo-backed
 /api/communications for a while; that one is gone and this is the only way to
 read a communication.
+
+The list and detail routes return full summaries, symptoms, remedies and documents
+for any vehicle, with no sample rule, so they are admin-only; product pages read
+bulletins through /api/me/vehicles/{id}/bulletins. The tag vocabulary stays open.
 """
 
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.auth.deps import admin_user
 from src.corpus import service
 from src.corpus.schemas import (
     CommunicationDetail,
@@ -31,7 +36,8 @@ def _csv(value: Optional[str]) -> Optional[list[str]]:
 @router.get(
     "/communications",
     response_model=CommunicationListResponse,
-    summary="List processed communications with filters and full-text search",
+    summary="List processed communications with filters and full-text search (admin only)",
+    dependencies=[Depends(admin_user)],
 )
 async def list_communications(
     vehicle_id: Optional[int] = Query(None, description="Vehicle id"),
@@ -101,7 +107,8 @@ async def tag_vocabulary(
 @router.get(
     "/communications/{nhtsa_id}",
     response_model=CommunicationDetail,
-    summary="Get one processed communication with its documents",
+    summary="Get one processed communication with its documents (admin only)",
+    dependencies=[Depends(admin_user)],
 )
 async def get_communication(nhtsa_id: str) -> CommunicationDetail:
     comm = await service.get_communication(nhtsa_id)

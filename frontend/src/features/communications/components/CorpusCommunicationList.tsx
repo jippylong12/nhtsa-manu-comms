@@ -39,6 +39,9 @@ interface Props {
   anchorPrefix?: string;
   // nhtsaIds to visually mark as cited in the composed answer.
   highlightIds?: string[];
+  // Product pages pass the vehicle so row details are read through the sample-aware
+  // /api/me endpoint; without it (the admin dashboard) details come from the corpus.
+  detailVehicleId?: number;
 }
 
 // "Pending" was pipeline bookkeeping in the user's face: it only means anything
@@ -101,6 +104,7 @@ interface RowProps {
   activeSystems?: string[];
   anchorId?: string;
   cited?: boolean;
+  detailVehicleId?: number;
 }
 
 function CorpusRow({
@@ -110,12 +114,14 @@ function CorpusRow({
   activeSystems = [],
   anchorId,
   cited = false,
+  detailVehicleId,
 }: RowProps) {
   const [expanded, setExpanded] = useState(false);
   // Detail (full document list, remedy, applicability) is fetched lazily on
   // first expand, so the list view stays a single request.
   const { data: detail, isLoading: detailLoading } = useCorpusDetailQuery(
-    expanded ? comm.nhtsaId : null
+    expanded ? comm.nhtsaId : null,
+    detailVehicleId
   );
 
   const commType = (comm.communicationType || 'OTHER') as CommType;
@@ -334,6 +340,7 @@ export function CorpusCommunicationList({
   activeSystems,
   anchorPrefix,
   highlightIds,
+  detailVehicleId,
 }: Props) {
   const highlighted = new Set(highlightIds ?? []);
   if (isLoading) {
@@ -369,6 +376,7 @@ export function CorpusCommunicationList({
           activeSystems={activeSystems}
           anchorId={anchorPrefix ? `${anchorPrefix}-${comm.nhtsaId}` : undefined}
           cited={highlighted.has(comm.nhtsaId)}
+          detailVehicleId={detailVehicleId}
         />
       ))}
     </div>

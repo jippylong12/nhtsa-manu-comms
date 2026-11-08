@@ -37,7 +37,9 @@ async def test_read_only_hides_every_write_and_spend_route(read_only_client):
 
 async def test_read_only_keeps_reads_and_reports_the_flag(read_only_client):
     assert (await read_only_client.get("/api/vehicles")).status_code == 200
-    assert (await read_only_client.get("/api/corpus/communications")).status_code == 200
+    # The corpus list is admin-only now (it bypasses the sample rule); tags stay open.
+    assert (await read_only_client.get("/api/corpus/communications")).status_code == 401
+    assert (await read_only_client.get("/api/corpus/tags")).status_code == 200
     health = (await read_only_client.get("/api/health")).json()
     assert health["readOnly"] is True
     assert health["status"] == "healthy"

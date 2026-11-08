@@ -23,6 +23,9 @@ import styles from './SymptomSearchView.module.css';
 interface Props {
   vehicles: Vehicle[];
   initialVehicleId: number | null;
+  // Product pages set this so match details are read through the sample-aware
+  // /api/me endpoint; the admin dashboard leaves it off and reads the corpus.
+  productPage?: boolean;
 }
 
 const EXAMPLES = [
@@ -88,7 +91,7 @@ function GroundedAnswer({ answer }: { answer: string }) {
   return <p className={styles.answerText}>{nodes}</p>;
 }
 
-export function SymptomSearchView({ vehicles, initialVehicleId }: Props) {
+export function SymptomSearchView({ vehicles, initialVehicleId, productPage = false }: Props) {
   const [vehicleId, setVehicleId] = useState<number | null>(
     initialVehicleId ?? vehicles[0]?.vehicleId ?? null
   );
@@ -269,6 +272,7 @@ export function SymptomSearchView({ vehicles, initialVehicleId }: Props) {
                   communications={data.matches.map(toSummary)}
                   anchorPrefix="match"
                   highlightIds={data.citedIds}
+                  detailVehicleId={productPage && vehicleId ? vehicleId : undefined}
                 />
               </>
             )}

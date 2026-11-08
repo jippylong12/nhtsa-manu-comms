@@ -62,6 +62,8 @@ applied per severity. Every other row is returned as a locked row: its severity 
 visible, its content is not. A `search` on the bulletins endpoint never matches locked rows,
 so searching cannot leak what is locked.
 
+The legacy `/api/corpus/communications` list and detail endpoints bypass this rule, so they are admin-only; product pages read one bulletin through `GET /api/me/vehicles/{id}/bulletins/{nhtsa_id}`, which applies it. With full access that route also opens any other communication linked to the car (a superseded revision, or one still pending or failed), because symptom search can show the newest revision of a family whatever its status; under the sample rule only the folded list counts, and anything else is a 404.
+
 Full access (`access_for` in the billing module) is granted when any of these is true: the
 user is an admin; the user has an active subscription; the user has an active unlock for
 that car. `past_due` and `canceled` entitlements grant nothing.
@@ -137,8 +139,16 @@ added or finished processing since the last email).
 
 **The watermark.** It is per user (`alert_state.last_watermark`) and advances only after a
 successful send, so a failed send is retried in full on the next run, never skipped. A user
-with no watermark yet is treated as "everything is new", so a brand-new subscriber's first
-email lists their cars' whole history.
+with no watermark yet starts from a baseline, never from the beginning of time: the moment
+their earliest active subscription was created (`entitlements.created_at`). So a brand-new
+subscriber's first email lists only news processed after they subscribed, and "Now ready"
+names only cars whose first bulletin was processed after that moment. An admin with no
+subscription has no such moment, so the first alert pass that sees them sends nothing and
+stores that pass's time as their watermark; their first real alert carries only news after it.
+On production this means the admin's own alerts start from the first pass after deploy (the
+old single-recipient watermark is not carried across, because the `users` table is empty when
+migration 0015 runs). A user with no news after their baseline gets no email and their
+watermark stays where it was.
 
 **Unsubscribe.** Every email carries a link to `/unsubscribe/{token}`, which calls the
 public `GET /api/public/unsubscribe/{token}` (idempotent; an unknown token is a 404). A

@@ -419,6 +419,18 @@ export interface MyBulletin {
     documents?: { url: string }[] | null;
 }
 
+/** A bulletin the sample rule locks: identity fields only. */
+export interface MyBulletinLocked {
+    nhtsaId: string;
+    communicationType?: string | null;
+    communicationDate?: string | null;
+    severity: Severity;
+    locked: true;
+}
+
+/** GET /api/me/vehicles/{id}/bulletins/{nhtsaId}: the corpus detail, or the locked shape. */
+export type MyBulletinDetail = (CorpusCommunicationDetail & { locked: false }) | MyBulletinLocked;
+
 export interface MyBulletinsParams {
     severity?: Severity;
     search?: string;
