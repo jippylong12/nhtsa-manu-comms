@@ -6,6 +6,8 @@ comes from the signed payload. Card data and the signing secret are never logged
 A canceled subscription is terminal in Stripe, so a late or retried event never revives it.
 """
 
+import asyncio
+import contextvars
 import json
 import logging
 from datetime import datetime, timezone
@@ -14,6 +16,7 @@ from typing import Any, Awaitable, Callable
 import asyncpg
 import stripe
 
+from src.billing import stripe_client
 from src.config import get_settings
 from src.db import get_pool
 
@@ -33,6 +36,12 @@ _STATUS = {
     "incomplete_expired": "canceled",
 }
 _BIGINT_MAX = 2**63 - 1
+
+
+# The subscription's period end, looked up before the transaction opens (see `process`).
+_looked_up_period_end: contextvars.ContextVar[datetime | None] = contextvars.ContextVar(
+    "looked_up_period_end", default=None
+)
 
 
 class BadSignature(Exception):
@@ -55,6 +64,16 @@ def _period_end(sub: dict) -> datetime | None:
     try:
         return datetime.fromtimestamp(int(epoch), tz=timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _lookup_period_end(subscription_id: str) -> datetime | None:
+    """Best effort: the period end of a just-started subscription, or None on any failure."""
+    try:
+        sub = stripe_client.client().Subscription.retrieve(subscription_id)
+        return _period_end(sub)
+    except Exception as e:  # a missing key, a Stripe error or an odd object must not fail the hook
+        log.warning("subscription %s: period end lookup failed (%s)", subscription_id, type(e).__name__)
         return None
 
 
@@ -93,12 +112,14 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
     inserted = await conn.fetchval(
         """
         INSERT INTO entitlements (user_id, kind, vehicle_id, status, stripe_customer_id,
-                                  stripe_checkout_session_id, stripe_subscription_id)
-        VALUES ($1, $2, $3, 'active', $4, $5, $6)
+                                  stripe_checkout_session_id, stripe_subscription_id,
+                                  current_period_end)
+        VALUES ($1, $2, $3, 'active', $4, $5, $6, $7)
         ON CONFLICT DO NOTHING
         RETURNING id
         """,
         user_id, kind, vehicle_id, session.get("customer"), session_id, subscription_id,
+        _looked_up_period_end.get(),
     )
     log.info(
         "checkout %s: user=%s kind=%s vehicle=%s entitlement=%s",
@@ -155,6 +176,7 @@ HANDLERS: dict[str, Handler] = {
     "checkout.session.completed": _checkout_completed,
     # A delayed payment method (bank debit) completes the session unpaid, then pays here.
     "checkout.session.async_payment_succeeded": _checkout_completed,
+    "customer.subscription.created": _subscription_updated,
     "customer.subscription.updated": _subscription_updated,
     "customer.subscription.deleted": _subscription_deleted,
     "invoice.payment_failed": _payment_failed,
@@ -180,6 +202,16 @@ async def process(event: dict) -> dict:
     event_id, etype = event.get("id"), event.get("type")
     if not event_id:
         raise BadSignature("event without an id")
+    obj = (event.get("data") or {}).get("object") or {}
+    period_end = None
+    if (
+        etype in ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+        and (obj.get("metadata") or {}).get("kind") == "subscription"
+        and isinstance(obj.get("subscription"), str)
+    ):
+        # A network call: made before the transaction so no connection is held while it runs.
+        period_end = await asyncio.to_thread(_lookup_period_end, obj["subscription"])
+    _looked_up_period_end.set(period_end)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -195,6 +227,6 @@ async def process(event: dict) -> dict:
             if handler is None:
                 log.info("event %s (%s): ignored", event_id, etype)
                 return {"received": True}
-            await handler(conn, (event.get("data") or {}).get("object") or {})
+            await handler(conn, obj)
             log.info("event %s (%s): handled", event_id, etype)
     return {"received": True}

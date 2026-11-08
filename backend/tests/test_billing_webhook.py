@@ -307,3 +307,84 @@ async def test_a_delayed_payment_unlocks_once_when_it_succeeds(db):
     (row,) = await _rows(db, uid)
     assert (row["kind"], row["vehicle_id"], row["status"]) == ("unlock", vid, "active")
     assert await entitlements.access_for(db, uid, vid) == "full"
+
+
+class _FakeStripe:
+    """The stripe seam with only `Subscription.retrieve`, recording the ids asked for."""
+
+    def __init__(self, result=None, error: Exception | None = None):
+        self.asked: list[str] = []
+        outer = self
+
+        class Subscription:
+            @staticmethod
+            def retrieve(sub_id):
+                outer.asked.append(sub_id)
+                if error is not None:
+                    raise error
+                return result
+
+        self.Subscription = Subscription
+
+
+def _seam(monkeypatch, fake: _FakeStripe) -> None:
+    from src.billing import stripe_client
+
+    monkeypatch.setattr(stripe_client, "client", lambda: fake)
+
+
+async def test_subscription_checkout_stores_the_period_end_from_stripe(db, monkeypatch):
+    fake = _FakeStripe({"id": "x", "items": {"data": [{"current_period_end": 1900000000}]}})
+    _seam(monkeypatch, fake)
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        sid = PREFIX + "s10"
+        r = await _post(
+            c, _event(PREFIX + "e10", "checkout.session.completed", _checkout(sid, uid, None, "subscription"))
+        )
+    assert r.status_code == 200
+    assert fake.asked == ["sub_" + sid]
+    (row,) = await _rows(db, uid)
+    assert row["status"] == "active"
+    assert int(row["current_period_end"].timestamp()) == 1900000000
+
+
+async def test_a_failed_subscription_lookup_still_writes_the_entitlement(db, monkeypatch):
+    _seam(monkeypatch, _FakeStripe(error=RuntimeError("STRIPE_SECRET_KEY is not set")))
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        sid = PREFIX + "s11"
+        r = await _post(
+            c, _event(PREFIX + "e11", "checkout.session.completed", _checkout(sid, uid, None, "subscription"))
+        )
+    assert r.status_code == 200
+    (row,) = await _rows(db, uid)
+    assert (row["kind"], row["status"], row["current_period_end"]) == ("subscription", "active", None)
+    assert row["stripe_subscription_id"] == "sub_" + sid
+    assert await entitlements.access_for(db, uid, vid) == "full"
+
+
+async def test_subscription_created_sets_status_and_period_end(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        sub = await _subscribe(c, uid, "s12")
+        r = await _post(
+            c, _event(
+                PREFIX + "e12", "customer.subscription.created",
+                {"id": sub, "status": "active", "items": {"data": [{"current_period_end": 1900000000}]}},
+            ),
+        )
+    assert r.status_code == 200
+    (row,) = await _rows(db, uid)
+    assert row["status"] == "active"
+    assert int(row["current_period_end"].timestamp()) == 1900000000
+
+
+async def test_subscription_created_for_an_unknown_subscription_changes_nothing(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        r = await _post(
+            c, _event(PREFIX + "e13", "customer.subscription.created", {"id": "sub_nope", "status": "active"})
+        )
+    assert r.status_code == 200
+    assert await _rows(db, uid) == []
