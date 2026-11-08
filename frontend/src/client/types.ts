@@ -449,3 +449,10 @@ export interface LookupResponse {
     latestDate: string | null;
     example: LookupExample | null;
 }
+
+// Billing (POST /api/billing/checkout, POST /api/billing/portal)
+export type CheckoutKind = 'unlock' | 'subscription';
+
+export interface BillingUrlResponse {
+    url: string;
+}

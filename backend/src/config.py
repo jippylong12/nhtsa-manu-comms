@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # plain comma-separated string as well as a JSON list.
     admin_firebase_uids: Annotated[list[str], NoDecode] = []
     app_base_url: str = "http://localhost:5175"
+    # Stripe billing (src/billing). The two prices are Price ids, not amounts.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_unlock: str = ""
+    stripe_price_monthly: str = ""
 
     @field_validator("admin_firebase_uids", mode="before")
     @classmethod

@@ -27,3 +27,22 @@ async def access_for(
         vehicle_id,
     )
     return "full" if full else "sample"
+
+
+async def list_for_user(conn: asyncpg.Connection, user_id: int) -> list[dict]:
+    """The user's entitlements, oldest first."""
+    rows = await conn.fetch(
+        "SELECT kind, vehicle_id, status, current_period_end FROM entitlements "
+        "WHERE user_id = $1 ORDER BY id",
+        user_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def customer_id_for(conn: asyncpg.Connection, user_id: int) -> str | None:
+    """The Stripe customer id on any of the user's entitlements, newest first, or None."""
+    return await conn.fetchval(
+        "SELECT stripe_customer_id FROM entitlements "
+        "WHERE user_id = $1 AND stripe_customer_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+        user_id,
+    )

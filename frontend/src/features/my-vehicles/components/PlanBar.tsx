@@ -1,8 +1,9 @@
 /* The two ways to open a car: side card on desktop, sticky bar on mobile. */
 
-import { Lock } from 'lucide-react';
+import { Loader2, Lock } from 'lucide-react';
 
-import type { SeverityCounts } from '@/client';
+import type { CheckoutKind, SeverityCounts } from '@/client';
+import { MONTHLY_PRICE_LABEL, UNLOCK_PRICE_LABEL } from '../../billing/prices';
 import styles from './PlanBar.module.css';
 
 interface Props {
@@ -10,9 +11,13 @@ interface Props {
     sampleCounts: SeverityCounts;
     onUnlock: () => void;
     onSubscribe: () => void;
+    /** Which checkout session is being created; both buttons wait while it is set. */
+    pending?: CheckoutKind | null;
+    /** The server's message when the last attempt failed, shown as written. */
+    error?: string | null;
 }
 
-export function PlanBar({ counts, sampleCounts, onUnlock, onSubscribe }: Props) {
+export function PlanBar({ counts, sampleCounts, onUnlock, onSubscribe, pending = null, error = null }: Props) {
     return (
         <aside className={styles.plan} aria-label="Unlock this car">
             <p className={styles.sample}>
@@ -21,13 +26,22 @@ export function PlanBar({ counts, sampleCounts, onUnlock, onSubscribe }: Props) 
                 {sampleCounts.small} of {counts.small} small
             </p>
             <div className={styles.buttons}>
-                <button type="button" className={`btn btn-primary ${styles.btn}`} onClick={onUnlock}>
-                    Unlock this car · $3
+                <button type="button" className={`btn btn-primary ${styles.btn}`} disabled={pending !== null} aria-busy={pending === 'unlock'} onClick={onUnlock}>
+                    {pending === 'unlock' ? <Loader2 size={16} className={styles.spin} aria-hidden="true" /> : null}
+                    {pending === 'unlock' ? 'Opening checkout…' : `Unlock this car · ${UNLOCK_PRICE_LABEL}`}
                 </button>
-                <button type="button" className={`btn btn-secondary ${styles.btn}`} onClick={onSubscribe}>
-                    Subscribe · $5/month, every car + daily alerts
+                <button type="button" className={`btn btn-secondary ${styles.btn}`} disabled={pending !== null} aria-busy={pending === 'subscription'} onClick={onSubscribe}>
+                    {pending === 'subscription' ? <Loader2 size={16} className={styles.spin} aria-hidden="true" /> : null}
+                    {pending === 'subscription'
+                        ? 'Opening checkout…'
+                        : `Subscribe · ${MONTHLY_PRICE_LABEL}, every car + daily alerts`}
                 </button>
             </div>
+            {error && (
+                <p className={styles.error} role="alert">
+                    {error}
+                </p>
+            )}
         </aside>
     );
 }

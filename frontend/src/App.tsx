@@ -8,6 +8,7 @@ import { LandingPage } from './pages/LandingPage';
 import { AppHome } from './pages/AppHome';
 import { VehiclePage } from './pages/VehiclePage';
 import { AccountPage } from './pages/AccountPage';
+import { BillingSuccessPage } from './pages/BillingSuccessPage';
 import { UnsubscribePage } from './pages/UnsubscribePage';
 import { AdminDashboard } from './pages/AdminDashboard';
 
@@ -41,6 +42,14 @@ const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <AccountPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/app/billing/success',
+        element: (
+          <RequireAuth>
+            <BillingSuccessPage />
           </RequireAuth>
         ),
       },

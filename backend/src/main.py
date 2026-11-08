@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.billing.router import router as billing_router
 from src.communications.router import router as communications_router
 from src.config import Settings, get_settings
 from src.corpus.router import router as corpus_router
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(vehicles_read_router, prefix="/api")
     app.include_router(communications_router, prefix="/api")
     app.include_router(corpus_router, prefix="/api")
+    app.include_router(billing_router, prefix="/api")
     app.include_router(me_router, prefix="/api")
     app.include_router(public_router, prefix="/api")
     app.include_router(symptom_search_router, prefix="/api")

@@ -12,6 +12,8 @@ import {
   useMeQuery,
   useRemoveVehicle,
 } from '../features/my-vehicles/hooks/useMyVehicles';
+import { PastDueBanner } from '../features/billing/components/PastDueBanner';
+import { isPastDue } from '../features/billing/plan';
 import { useToast } from '../features/my-vehicles/hooks/useToast';
 import styles from './AppHome.module.css';
 
@@ -43,6 +45,8 @@ export function AppHome() {
 
   return (
     <div className={styles.page}>
+      {isPastDue(meQuery.data) && <PastDueBanner />}
+
       <div className={styles.head}>
         <h1 className={styles.heading}>My vehicles</h1>
         <button type="button" className={`btn btn-primary ${styles.add}`} onClick={() => setModalOpen(true)}>

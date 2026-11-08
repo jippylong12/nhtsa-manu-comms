@@ -14,7 +14,9 @@ import {
 } from '../features/my-vehicles/components/ProductBulletinList';
 import { accessLabel, availabilityLabel, vehicleName } from '../features/my-vehicles/access';
 import { useMeQuery, useMyBulletinsQuery } from '../features/my-vehicles/hooks/useMyVehicles';
-import { useToast } from '../features/my-vehicles/hooks/useToast';
+import { PastDueBanner } from '../features/billing/components/PastDueBanner';
+import { useCheckout } from '../features/billing/hooks/useBilling';
+import { isPastDue } from '../features/billing/plan';
 import styles from './VehiclePage.module.css';
 
 const PER_PAGE = 50;
@@ -37,7 +39,7 @@ export function VehiclePage() {
   const { id } = useParams();
   const vehicleId = Number(id);
   const [params, setParams] = useSearchParams();
-  const { toast, showToast } = useToast();
+  const checkout = useCheckout();
   const meQuery = useMeQuery();
   const vehicle = meQuery.data?.vehicles.find((v) => v.vehicleId === vehicleId);
   const ready = vehicle?.availability === 'ready';
@@ -142,8 +144,6 @@ export function VehiclePage() {
     updatedAt: vehicle.addedAt,
   };
 
-  const comingSoon = () => showToast('Checkout arrives in the next milestone');
-
   const list = (
     <>
       {!ready && <BulletinListSkeleton />}
@@ -204,6 +204,8 @@ export function VehiclePage() {
       <Link to="/app" className={styles.back}>
         <ArrowLeft size={16} /> My vehicles
       </Link>
+
+      {isPastDue(meQuery.data) && <PastDueBanner />}
 
       <header className={styles.header}>
         <h1 className={styles.title}>{vehicleName(vehicle)}</h1>
@@ -283,14 +285,15 @@ export function VehiclePage() {
               <PlanBar
                 counts={counts}
                 sampleCounts={data.sampleCounts}
-                onUnlock={comingSoon}
-                onSubscribe={comingSoon}
+                onUnlock={() => checkout.mutate({ kind: 'unlock', vehicleId })}
+                onSubscribe={() => checkout.mutate({ kind: 'subscription' })}
+                pending={checkout.isPending || checkout.isSuccess ? checkout.variables.kind : null}
+                error={checkout.isError ? checkout.error.message : null}
               />
             </div>
           )}
         </div>
       )}
-      {toast}
     </div>
   );
 }

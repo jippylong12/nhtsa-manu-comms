@@ -17,6 +17,7 @@ dependencies = [
     "resend>=2.0.0",
     "anthropic>=1.0,<2",
     "firebase-admin>=6.5",
+    "stripe>=9.8",
 ]
 
 [project.optional-dependencies]
