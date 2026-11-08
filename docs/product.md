@@ -62,7 +62,7 @@ applied per severity. Every other row is returned as a locked row: its severity 
 visible, its content is not. A `search` on the bulletins endpoint never matches locked rows,
 so searching cannot leak what is locked.
 
-The legacy `/api/corpus/communications` list and detail endpoints bypass this rule, so they are admin-only; product pages read one bulletin through `GET /api/me/vehicles/{id}/bulletins/{nhtsa_id}`, which applies it.
+The legacy `/api/corpus/communications` list and detail endpoints bypass this rule, so they are admin-only; product pages read one bulletin through `GET /api/me/vehicles/{id}/bulletins/{nhtsa_id}`, which applies it. With full access that route also opens any other communication linked to the car (a superseded revision, or one still pending or failed), because symptom search can show the newest revision of a family whatever its status; under the sample rule only the folded list counts, and anything else is a 404.
 
 Full access (`access_for` in the billing module) is granted when any of these is true: the
 user is an admin; the user has an active subscription; the user has an active unlock for
