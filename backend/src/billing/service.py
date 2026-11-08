@@ -76,6 +76,10 @@ async def create_checkout(user: dict, kind: str, vehicle_id: int | None) -> str:
         params["customer"] = customer
     else:
         params["customer_email"] = user["email"]
+        if kind == "unlock":
+            # Payment mode makes a guest (no Customer) by default, which leaves the
+            # buyer without a portal and the next checkout without `customer=`.
+            params["customer_creation"] = "always"
     return stripe.checkout.Session.create(**params)["url"]
 
 

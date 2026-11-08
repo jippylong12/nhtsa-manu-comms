@@ -266,3 +266,44 @@ async def test_handler_failure_rolls_back_the_event_and_is_5xx(db, monkeypatch):
         )
     assert r.status_code == 500
     assert not await _seen(db, PREFIX + "e11")
+
+
+async def test_invoice_payment_failed_reads_the_subscription_from_parent_on_newer_api(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        sub = await _subscribe(c, uid, "s12")
+        invoice = {"id": "in_2", "parent": {"subscription_details": {"subscription": sub}}}
+        await _post(c, _event(PREFIX + "e12", "invoice.payment_failed", invoice))
+    (row,) = await _rows(db, uid)
+    assert row["status"] == "past_due"
+
+
+async def test_a_late_event_never_revives_a_canceled_subscription(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        sub = await _subscribe(c, uid, "s13")
+        await _post(c, _event(PREFIX + "e13a", "customer.subscription.deleted", {"id": sub}))
+        await _post(
+            c,
+            _event(PREFIX + "e13b", "customer.subscription.updated", {"id": sub, "status": "active"}),
+        )
+        await _post(c, _event(PREFIX + "e13c", "invoice.payment_failed", {"id": "in_3", "subscription": sub}))
+    (row,) = await _rows(db, uid)
+    assert row["status"] == "canceled"
+    assert await entitlements.access_for(db, uid, vid) == "sample"
+
+
+async def test_a_delayed_payment_unlocks_once_when_it_succeeds(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        sid = PREFIX + "s14"
+        unpaid = _checkout(sid, uid, vid, payment_status="unpaid")
+        await _post(c, _event(PREFIX + "e14a", "checkout.session.completed", unpaid))
+        assert await _rows(db, uid) == []
+        paid = _checkout(sid, uid, vid)
+        r = await _post(c, _event(PREFIX + "e14b", "checkout.session.async_payment_succeeded", paid))
+        await _post(c, _event(PREFIX + "e14c", "checkout.session.async_payment_succeeded", paid))
+    assert r.status_code == 200
+    (row,) = await _rows(db, uid)
+    assert (row["kind"], row["vehicle_id"], row["status"]) == ("unlock", vid, "active")
+    assert await entitlements.access_for(db, uid, vid) == "full"

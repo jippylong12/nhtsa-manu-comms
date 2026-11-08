@@ -3,6 +3,7 @@
 The event row and the entitlement write share one transaction, so a handler failure
 rolls the event back and Stripe's retry reprocesses it. Everything a handler trusts
 comes from the signed payload. Card data and the signing secret are never logged.
+A canceled subscription is terminal in Stripe, so a late or retried event never revives it.
 """
 
 import json
@@ -112,7 +113,7 @@ async def _subscription_updated(conn: asyncpg.Connection, sub: dict) -> None:
         return
     result = await conn.execute(
         "UPDATE entitlements SET status = $2, current_period_end = COALESCE($3, current_period_end) "
-        "WHERE stripe_subscription_id = $1",
+        "WHERE stripe_subscription_id = $1 AND status <> 'canceled'",
         sub["id"], status, _period_end(sub),
     )
     log.info("subscription %s: status=%s (%s)", sub["id"], status, result)
@@ -126,12 +127,25 @@ async def _subscription_deleted(conn: asyncpg.Connection, sub: dict) -> None:
     log.info("subscription %s: canceled (%s)", sub.get("id"), result)
 
 
-async def _payment_failed(conn: asyncpg.Connection, invoice: dict) -> None:
+def _invoice_subscription(invoice: dict) -> str | None:
+    """`invoice.subscription` (older API versions), else `parent.subscription_details.subscription`."""
     sub = invoice.get("subscription")
+    if not sub:
+        details = (invoice.get("parent") or {}).get("subscription_details") or {}
+        sub = details.get("subscription")
+    if isinstance(sub, dict):
+        sub = sub.get("id")
+    return sub or None
+
+
+async def _payment_failed(conn: asyncpg.Connection, invoice: dict) -> None:
+    sub = _invoice_subscription(invoice)
     if not sub:
         return
     result = await conn.execute(
-        "UPDATE entitlements SET status = 'past_due' WHERE stripe_subscription_id = $1", sub
+        "UPDATE entitlements SET status = 'past_due' "
+        "WHERE stripe_subscription_id = $1 AND status <> 'canceled'",
+        sub,
     )
     log.info("invoice %s: subscription %s past_due (%s)", invoice.get("id"), sub, result)
 
@@ -139,6 +153,8 @@ async def _payment_failed(conn: asyncpg.Connection, invoice: dict) -> None:
 Handler = Callable[[asyncpg.Connection, dict], Awaitable[None]]
 HANDLERS: dict[str, Handler] = {
     "checkout.session.completed": _checkout_completed,
+    # A delayed payment method (bank debit) completes the session unpaid, then pays here.
+    "checkout.session.async_payment_succeeded": _checkout_completed,
     "customer.subscription.updated": _subscription_updated,
     "customer.subscription.deleted": _subscription_deleted,
     "invoice.payment_failed": _payment_failed,

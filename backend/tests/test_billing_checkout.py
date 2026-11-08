@@ -134,6 +134,7 @@ async def test_unlock_creates_a_payment_session_for_the_unlock_price(db, fake_st
     assert call["client_reference_id"] == str(uid)
     assert call["customer_email"] == f"{USER_A}@example.com"
     assert "customer" not in call
+    assert call["customer_creation"] == "always"
     assert call["allow_promotion_codes"] is True
     assert call["success_url"] == (
         "https://app.test/app/billing/success?session_id={CHECKOUT_SESSION_ID}"
@@ -181,6 +182,7 @@ async def test_subscription_creates_a_subscription_session_for_the_monthly_price
     assert call["line_items"] == [{"price": "price_monthly_test", "quantity": 1}]
     assert call["metadata"] == {"kind": "subscription", "vehicle_id": "", "user_id": str(uid)}
     assert call["cancel_url"] == "https://app.test/app/account"
+    assert "customer_creation" not in call  # Stripe rejects it in subscription mode
 
 
 async def test_a_second_subscription_is_409(db, fake_stripe):
@@ -204,6 +206,7 @@ async def test_an_existing_stripe_customer_is_reused(db, fake_stripe):
     (call,) = fake_stripe.checkout_calls
     assert call["customer"] == "cus_123"
     assert "customer_email" not in call
+    assert "customer_creation" not in call
 
 
 async def _other_vehicle(conn) -> int:
