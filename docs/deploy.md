@@ -8,18 +8,19 @@ and `/api/*` from one domain on port 8000. Two Railway services use that image.
 | Service | Start command | Notes |
 |---------|---------------|-------|
 | `api` | image CMD, `backend/start.sh` (runs `python -m src.db.migrate`, then `exec uvicorn`) | `railway.json` sets the Dockerfile builder, healthcheck `/api/health`, restart on failure |
-| `nightly` | `python -m src.jobs.run_pipeline --send-digest` | same image, cron schedule `0 9 * * *` (UTC), does not migrate |
+| `nightly` | `python -m src.jobs.run_pipeline --send-digest` (the last stage sends the alert emails) | same image, cron schedule `0 9 * * *` (UTC), does not migrate |
 
 Railway cron runs the start command to completion and expects the process to exit; a new run is
 skipped while the previous one is still running. Set the cron schedule and start command in the
 `nightly` service settings (service-level overrides of `railway.json`).
 
-## Early read-only deploy
+## Read-only mode
 
-Set `READ_ONLY=true` on `api`. Vehicles can be listed and read, the corpus and symptom search work,
-but the add, edit and remove vehicle routes, the refresh routes and `/api/admin/usage` are not
-mounted (404), and `GET /api/health` reports `"readOnly": true`. The frontend reads that flag and
-hides Refresh, Add Vehicle and the remove control. When auth lands (M1) the flag goes back to false.
+`READ_ONLY=true` is an early-deploy switch: the add, edit and remove vehicle routes, the refresh
+routes and `/api/admin/usage` are not mounted (404), `GET /api/health` reports
+`"readOnly": true`, and the frontend hides Refresh, Add Vehicle and the remove control. The
+flag stays in the code and defaults to false. For the product, set it to `false` or leave it
+unset: Firebase sign-in and the admin gate now protect everything that spends money.
 
 ## Frontend build variables
 
@@ -47,18 +48,19 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `GEMINI_EMBEDDING_MODEL` | optional | optional | no | Embedding model |
 | `GEMINI_TIMEOUT_SECONDS` | optional | optional | no | Per-call ceiling (default 120) |
 | `EMBEDDING_DIMENSIONS` | optional | optional | no | Vector size (default 1536) |
-| `RESEND_API_KEY` | no | yes | yes | Sends the digest |
-| `DIGEST_FROM_EMAIL` | no | yes | no | Digest sender |
-| `DIGEST_TO_EMAIL` | no | yes | no | Digest recipient |
-| `APP_BASE_URL` | no | yes | no | Links in the digest and emails (planned, M1) |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | yes | no | yes | Verifies Firebase ID tokens (planned, M1) |
-| `ADMIN_FIREBASE_UIDS` | yes | no | no | Admin accounts (planned, M1) |
-| `STRIPE_SECRET_KEY` | yes | no | yes | Stripe API (planned, M1) |
-| `STRIPE_WEBHOOK_SECRET` | yes | no | yes | Stripe webhook check (planned, M1) |
-| `STRIPE_PRICE_UNLOCK` | yes | no | no | Stripe price id (planned, M1) |
-| `STRIPE_PRICE_MONTHLY` | yes | no | no | Stripe price id (planned, M1) |
+| `RESEND_API_KEY` | no | yes | yes | Sends the alert emails |
+| `DIGEST_FROM_EMAIL` | no | yes | no | Alert sender (an address on a domain verified in Resend) |
+| `DIGEST_TO_EMAIL` | no | yes | no | Digest recipient (legacy; alerts go to each subscriber's own email) |
+| `ALERT_TEST_RECIPIENT` | no | optional | no | Redirects every alert to this one address (replica proofs only); leave unset in production |
+| `APP_BASE_URL` | no | yes | no | Public origin used for the unsubscribe link in alert emails |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | yes | no | yes | Verifies Firebase ID tokens |
+| `ADMIN_FIREBASE_UIDS` | yes | no | no | Admin accounts |
+| `STRIPE_SECRET_KEY` | yes | no | yes | Stripe API |
+| `STRIPE_WEBHOOK_SECRET` | yes | no | yes | Stripe webhook check |
+| `STRIPE_PRICE_UNLOCK` | yes | no | no | Stripe price id |
+| `STRIPE_PRICE_MONTHLY` | yes | no | no | Stripe price id |
 | `CORS_ORIGINS` | optional | no | no | JSON list; the SPA is same-origin in production, leave the default |
-| `READ_ONLY` | yes (`true` for the early deploy) | no | no | Read-only mode, see above |
+| `READ_ONLY` | optional (leave unset or `false`) | no | no | Read-only mode, see above |
 | `FRONTEND_DIST` | optional | no | no | Built frontend directory (default `../frontend/dist`; the image sets `/app/frontend/dist`) |
 | `PDF_ARCHIVE_DIR` | no | yes | no | Where PDFs are archived: a Railway volume mount or `/tmp` |
 | `PDF_DOWNLOAD_CONCURRENCY` | no | optional | no | Parallel PDF downloads (default 3) |

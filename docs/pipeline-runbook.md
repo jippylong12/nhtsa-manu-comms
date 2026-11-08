@@ -1,35 +1,35 @@
 # Pipeline Runbook
 
-The NHTSA Comms pipeline is two decoupled jobs plus a digest, coupled only by
-the `communications.status` column (`pending -> processed | failed`). It runs on
-Marcus's machine, **on demand** — there is no nightly daemon installed. A
-launchd plist is provided for reference if unattended runs are ever wanted (see
-[Optional scheduling](#optional-scheduling)).
+The NHTSA Comms pipeline is two decoupled jobs plus the alerts stage, coupled only by
+the `communications.status` column (`pending -> processed | failed`). In production it runs
+nightly as a Railway cron service (see [Scheduling](#scheduling)); the same commands run on
+demand from Marcus's machine. A launchd plist is kept as the local alternative.
 
-All commands run from `backend/` with `DATABASE_URL` (and, for the digest,
-Claude, Gemini and Resend keys) in `backend/.env`.
+All commands run from `backend/` with `DATABASE_URL` (and, for alerts, Claude, Gemini and
+Resend keys) in `backend/.env`. Tests fake Firebase and Stripe, so no test needs either
+account.
 
 ## The one command
 
 ```bash
 cd backend
-python -m src.jobs.run_pipeline            # sync -> process -> digest (dry-run digest)
-python -m src.jobs.run_pipeline --send-digest   # ... and actually send the email
+python -m src.jobs.run_pipeline            # sync -> process -> alerts (dry-run alerts)
+python -m src.jobs.run_pipeline --send-digest   # ... and actually send the alert emails (alias --send-alerts)
 ```
 
 This runs, in order:
 
 1. **sync** — look up each tracked vehicle's communications in the flat-file index, fetch the new ones from NHTSA by ID, insert them as `pending`.
 2. **process** — extract PDF text locally, read each PDF with Claude Haiku 5.5 (structured extraction), embed.
-3. **digest** — email a summary of newly processed items (dry-run unless `--send-digest`).
+3. **alerts** — email each eligible user the bulletins processed since their own watermark (dry-run unless `--send-digest`; see [Alerts](#alerts)).
 
 Useful flags:
 
 | Flag | Effect |
 |------|--------|
 | `--sync-only` | discovery only, no processing |
-| `--skip-sync` | process + digest only (drain an existing backlog) |
-| `--send-digest` | actually send the digest (default is a dry-run render) |
+| `--skip-sync` | process + alerts only (drain an existing backlog) |
+| `--send-digest` (alias `--send-alerts`) | actually send the alert emails (default is a dry-run render) |
 | `--sync-llm` | read documents live (synchronous Messages API, full price) instead of through the Batch API (half price, but a batch can take 25+ minutes) |
 
 Individual stages can also be run alone:
@@ -37,7 +37,7 @@ Individual stages can also be run alone:
 ```bash
 python -m src.jobs.sync --all
 python -m src.jobs.process --all           # or --stage extract|llm|embed
-python -m src.jobs.digest                  # dry run; --send to send
+python -m src.alerts                       # dry run; --send to send (see Alerts)
 python -m src.jobs.process --status        # counts only, no work
 ```
 
@@ -244,10 +244,16 @@ A PID lockfile at `backend/.pipeline.lock` prevents two runs at once. A run that
 finds a live lock exits with code 2. A stale lock (the holding process is gone)
 is removed automatically.
 
-## Optional scheduling
+## Scheduling
 
-Marcus runs the pipeline manually, so nothing is scheduled by default. To run it
-nightly anyway:
+**Railway cron (the production schedule).** The `nightly` service runs
+`python -m src.jobs.run_pipeline --send-digest` at `0 9 * * *` (UTC) from the same Docker
+image as the API. It runs to completion and exits; a run is skipped while the previous one
+is still going. Service settings and variables are in [deploy.md](deploy.md). A run that
+fails exits non-zero, which Railway shows as a failed run, and the log ends with
+`RUN COMPLETED WITH FAILURES`.
+
+**launchd (the local alternative).** To run the pipeline nightly from a Mac instead:
 
 1. Edit `backend/deploy/com.nhtsa-comms.pipeline.plist`: replace
    `ABSOLUTE_REPO_PATH` and `PYTHON_PATH`, set the desired `Hour`/`Minute`.
@@ -262,23 +268,151 @@ nightly anyway:
    rm ~/Library/LaunchAgents/com.nhtsa-comms.pipeline.plist
    ```
 
-launchd (not cron) is the right tool on macOS: it survives reboots and catches
-up missed runs. Failure visibility for unattended runs comes from the non-zero
-exit plus the `RUN COMPLETED WITH FAILURES` log line; the digest email can also
-be used to notice a silent stall (no email for several days = check the logs).
+Use one schedule per database, not both.
 
-## Email digest
+## Alerts
 
-The digest emails newly processed communications, grouped by vehicle, since the
-last watermark. It requires three env vars to actually send:
+Alerts email each eligible user the bulletins processed since their own watermark: users
+with an active subscription who have not unsubscribed, plus every admin. The rules (watermark,
+revision folding, "Now ready", unsubscribe) are in [product.md](product.md#alerts).
+
+```bash
+cd backend
+python -m src.alerts                                  # dry run for everyone: writes one HTML file per user with news, sends nothing
+python -m src.alerts --send                           # send, and advance each sent user's watermark
+python -m src.alerts --only-email you@example.com     # restrict to one user by email
+python -m src.alerts --only-user-id 3                 # restrict to one user by id
+python -m src.alerts --out-dir /tmp/alerts            # where the dry run writes its HTML (default: current directory)
+```
+
+It prints who would receive mail (or did), the destination address, item counts and the
+outcome, never a key. A brand-new subscriber with no watermark gets their cars' whole history in
+the first email. The watermark advances only after a successful send, so a failed send is
+retried in full on the next run.
+
+Sending needs `RESEND_API_KEY`, `DIGEST_FROM_EMAIL` (an address on a domain verified in
+Resend) and `APP_BASE_URL` (the public origin, for the unsubscribe link). `DIGEST_TO_EMAIL` is
+legacy and no longer decides who is mailed. `ALERT_TEST_RECIPIENT=you@example.com` sends every
+alert to that one address instead of the user's, for proofs on the replica; leave it unset in
+production. `python -m src.jobs.digest` still works as a shim that runs the alert pass for
+the admin only.
+
+## Prefill and Stripe setup
+
+Track and read the popular cars before launch (the list is `top50.json`; how to edit it and
+what a run costs: [product.md](product.md#the-prefill)):
+
+```bash
+cd backend
+python -m src.scripts.prefill --dry-run                          # default: print the plan and the estimate
+python -m src.scripts.prefill --only 4 --dry-run                 # first 4 entries only
+python -m src.scripts.prefill --apply --cap-usd 15 --yes         # create, scan, sync, read; stops at the cap
+python -m src.scripts.prefill --list my.json --apply             # another list file; asks "Proceed? [y/N]" first
+```
+
+Exit `0` done, `1` failure or declined, `3` the cap was reached. Run the same command again to
+finish a stopped run.
+
+Create the two Stripe prices (idempotent: a price that already has its lookup key is reused):
+
+```bash
+cd backend
+python -m src.scripts.stripe_setup --dry-run     # default: print what would be created
+python -m src.scripts.stripe_setup --apply       # create or reuse; prints the two .env lines
+```
+
+It needs `STRIPE_SECRET_KEY` in `backend/.env` (a test key for test mode).
+
+## Before real money and real mail
+
+Do these in order. Nothing here runs by itself.
+
+**1. Stripe test prices.** Put your Stripe test secret key in `backend/.env` (no key is there
+today):
 
 ```
-RESEND_API_KEY=...
-DIGEST_FROM_EMAIL=digest@your-verified-domain    # Resend requires a verified sender domain
-DIGEST_TO_EMAIL=you@example.com
+STRIPE_SECRET_KEY=sk_test_...
 ```
 
-Without `--send-digest` it writes `digest_preview.html` for review and sends
-nothing. A run with zero new items sends nothing regardless. The watermark only
-advances after a successful send, so a failed send is retried in full on the
-next run — never duplicated, never skipped.
+Then create the prices and copy the two ids it prints into `backend/.env`:
+
+```bash
+cd backend && python -m src.scripts.stripe_setup --apply
+```
+
+```
+STRIPE_PRICE_UNLOCK=price_...
+STRIPE_PRICE_MONTHLY=price_...
+```
+
+This is the real test-mode prices step (JIP-1591) and it must happen before a real checkout.
+
+**2. Stripe webhook.** Locally, forward Stripe events to the API and put the secret it prints
+(`whsec_...`) in `backend/.env`:
+
+```bash
+stripe listen --forward-to localhost:8000/api/billing/webhook
+```
+
+```
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+In production, in the Stripe dashboard add the endpoint
+`https://<domain>/api/billing/webhook` and subscribe it to exactly the events the API
+handles: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `invoice.payment_failed`. Copy that endpoint's signing
+secret into the `api` service's `STRIPE_WEBHOOK_SECRET`.
+
+**3. Resend.** In `backend/.env` (and the `nightly` service variables):
+
+```
+RESEND_API_KEY=re_...
+DIGEST_FROM_EMAIL=alerts@<a-domain-verified-in-Resend>
+APP_BASE_URL=https://<public-domain>
+```
+
+If a send fails with "API key is invalid", rotate the key in the Resend dashboard and update
+the variable. `APP_BASE_URL` is the public origin used for the unsubscribe link in every
+email. Prove it once against the local replica (not production), so the mail goes only to you:
+
+```bash
+cd backend && set -a && source .env && set +a && DATABASE_URL="$TEST_DATABASE_URL" ALERT_TEST_RECIPIENT=you@example.com python -m src.alerts --send --only-email you@example.com
+```
+
+**4. Firebase.** Create a Firebase project with a web app and enable the sign-in methods you
+want. Set, on the `api` service:
+
+```
+FIREBASE_SERVICE_ACCOUNT_JSON=<base64 of the service-account JSON file>
+ADMIN_FIREBASE_UIDS=<your Firebase uid>[,<another uid>]
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
+```
+
+Produce the base64 value with `base64 -i service-account.json | tr -d '\n'`. The
+`VITE_FIREBASE_*` values are read at build time, so redeploy after changing them. Your uid is
+shown in the Firebase console under Authentication. Add the production domain under
+Authentication, Settings, Authorized domains.
+
+**5. Production.** In this order:
+
+1. Set the variables of the [environment matrix](deploy.md#environment-matrix) on `api` and
+   `nightly` (`READ_ONLY` unset or `false`; `DATABASE_URL` the private connection string).
+2. Deploy `api` (its start script migrates first).
+3. Migrate by hand once to be certain, from your machine with the production `DATABASE_URL` in
+   `backend/.env`:
+   ```bash
+   cd backend && set -a && source .env && set +a && python -m src.db.migrate
+   ```
+4. Prefill the top-50 cars; read the dry-run estimate first, then apply:
+   ```bash
+   cd backend && set -a && source .env && set +a && python -m src.scripts.prefill --dry-run
+   cd backend && set -a && source .env && set +a && python -m src.scripts.prefill --apply --cap-usd 15
+   ```
+   `15` is the default cap; the apply prompts `Proceed? [y/N]` (add `--yes` to skip it).
+5. Create the `nightly` service from the same image with start command
+   `python -m src.jobs.run_pipeline --send-digest` and cron schedule `0 9 * * *`.

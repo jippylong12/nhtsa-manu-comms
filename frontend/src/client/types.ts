@@ -334,3 +334,139 @@ export interface SymptomSearchResponse {
     cost: QueryCost;
 }
 
+
+// --- Me ---
+
+export interface Entitlement {
+    kind: 'unlock' | 'subscription';
+    vehicleId: number | null;
+    status: 'active' | 'canceled' | 'past_due';
+    currentPeriodEnd: string | null;
+}
+
+export interface Me {
+    id: number;
+    email: string;
+    displayName: string | null;
+    isAdmin: boolean;
+    entitlements: Entitlement[];
+    vehicles: MyVehicle[];
+    alerts: AlertsStatus;
+}
+
+// Daily alert email state (GET /api/me, POST /api/me/alerts)
+export interface AlertsStatus {
+    enabled: boolean;
+    lastSentAt: string | null;
+    /** Active subscription or admin; only eligible accounts can turn alerts on. */
+    eligible: boolean;
+}
+
+// GET /api/public/unsubscribe/{token}
+export interface UnsubscribeResponse {
+    status: 'unsubscribed' | 'already';
+}
+
+// A vehicle on the signed-in user's account (GET /api/me, POST /api/me/vehicles)
+export type MyVehicleAvailability = 'ready' | 'processing';
+export type MyVehicleAccess = 'full' | 'sample';
+export type Severity = 'serious' | 'medium' | 'small';
+
+export interface SeverityCounts {
+    serious: number;
+    medium: number;
+    small: number;
+}
+
+export interface MyVehicle {
+    vehicleId: number;
+    year: number;
+    make: string;
+    model: string;
+    availability: MyVehicleAvailability;
+    counts: SeverityCounts;
+    access: MyVehicleAccess;
+    addedAt: string;
+}
+
+export interface MyVehicleCreate {
+    year: number;
+    make: string;
+    model: string;
+}
+
+// One folded bulletin. A locked row carries only the identity fields; every
+// other key is absent from the wire.
+export interface MyBulletin {
+    nhtsaId: string;
+    communicationNumber?: string | null;
+    communicationType?: string | null;
+    communicationDate?: string | null;
+    severity: Severity;
+    supersededCount?: number;
+    locked: boolean;
+    summary?: string | null;
+    llmSummary?: string | null;
+    symptoms?: string[] | null;
+    systems?: string[] | null;
+    components?: string[] | null;
+    remedy?: string | null;
+    applicability?: string | null;
+    applicabilityYears?: number[] | null;
+    applicabilityModels?: string[] | null;
+    applicabilityConditions?: string | null;
+    audience?: string | null;
+    documents?: { url: string }[] | null;
+}
+
+export interface MyBulletinsParams {
+    severity?: Severity;
+    search?: string;
+    page?: number;
+    perPage?: number;
+}
+
+export interface MyBulletinsResponse {
+    items: MyBulletin[];
+    total: number;
+    page: number;
+    perPage: number;
+    access: MyVehicleAccess;
+    sampleCounts: SeverityCounts;
+}
+
+// Public lookup (GET /api/public/lookup)
+export type LookupAvailability = 'ready' | 'processing' | 'unknown';
+
+export interface LookupCounts {
+    serious: number;
+    medium: number;
+    small: number;
+}
+
+export interface LookupExample {
+    vehicleId: number | null;
+    year: number;
+    make: string;
+    model: string;
+    counts: LookupCounts;
+    latestDate: string | null;
+}
+
+export interface LookupResponse {
+    vehicleId: number | null;
+    year: number;
+    make: string;
+    model: string;
+    availability: LookupAvailability;
+    counts: LookupCounts;
+    latestDate: string | null;
+    example: LookupExample | null;
+}
+
+// Billing (POST /api/billing/checkout, POST /api/billing/portal)
+export type CheckoutKind = 'unlock' | 'subscription';
+
+export interface BillingUrlResponse {
+    url: string;
+}

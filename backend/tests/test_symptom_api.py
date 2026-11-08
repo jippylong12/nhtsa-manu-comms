@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.auth import deps
 from src.symptom_search import router as router_mod
 from src.symptom_search import service
 
@@ -56,13 +57,21 @@ def _stub_service(monkeypatch):
     async def _exists(vehicle_id):
         return vehicle_id == 218944
 
-    async def _search(vehicle_id, description, model=None):
+    async def _search(vehicle_id, description, model=None, user_id=None):
         return _CANNED
+
+    # Sign in as the admin fake: the entitlement gate has its own tests.
+    async def _admin():
+        return {"id": 1, "is_admin": True}
+
+    app.dependency_overrides[deps.current_user] = _admin
 
     monkeypatch.setattr(service, "vehicle_exists", _exists)
     monkeypatch.setattr(service, "search", _search)
     # Ensure a clean limiter per test.
     monkeypatch.setattr(router_mod._limiter, "allow", lambda key: True)
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_happy_path_returns_camelcase_payload():

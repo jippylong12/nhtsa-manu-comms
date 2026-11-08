@@ -2,7 +2,9 @@
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from src.auth.deps import admin_user
 
 from src.communications import flatfile
 from src.vehicles.schemas import (
@@ -15,7 +17,9 @@ from src.vehicles.service import VehicleService
 
 # Split so read-only mode (READ_ONLY=true) can leave the write router unmounted.
 read_router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
-write_router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
+write_router = APIRouter(
+    prefix="/vehicles", tags=["Vehicles"], dependencies=[Depends(admin_user)]
+)
 
 # Strong references to in-flight background scans; asyncio only holds a weak one.
 _scans: set[asyncio.Task] = set()

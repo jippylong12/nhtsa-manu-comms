@@ -30,18 +30,29 @@ async function handleResponse<T>(response: Response): Promise<T> {
     return JSON.parse(text);
 }
 
+type AuthTokenProvider = () => Promise<string | null>;
+
+let authTokenProvider: AuthTokenProvider | null = null;
+
+/** Register where request() gets the Firebase ID token; null clears it. */
+function setAuthTokenProvider(provider: AuthTokenProvider | null): void {
+    authTokenProvider = provider;
+}
+
 async function request<T>(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
-    const response = await fetch(url, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
-        ...options,
-    });
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(options.headers as Record<string, string> | undefined),
+    };
+    const token = authTokenProvider ? await authTokenProvider() : null;
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await fetch(url, { ...options, headers });
     return handleResponse<T>(response);
 }
 
@@ -57,5 +68,5 @@ function getHealth(): Promise<Health> {
 }
 
 // Export utilities
-export { ApiError, request, getHealth, API_BASE };
-export type { Health };
+export { ApiError, request, getHealth, setAuthTokenProvider, API_BASE };
+export type { Health, AuthTokenProvider };

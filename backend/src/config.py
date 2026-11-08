@@ -1,9 +1,11 @@
 """Application configuration using Pydantic Settings."""
 
+import json
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -96,6 +98,32 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     digest_from_email: str = ""
     digest_to_email: str = ""
+    # When set, every alert goes to this address instead of the user's (replica proofs).
+    alert_test_recipient: str = ""
+
+    # Accounts (Firebase Authentication; the frontend signs in, the API verifies the ID token).
+    # Base64 of the service-account JSON file.
+    firebase_service_account_json: str = ""
+    # Firebase uids that become admins at first sign-in. NoDecode so the env var can be a
+    # plain comma-separated string as well as a JSON list.
+    admin_firebase_uids: Annotated[list[str], NoDecode] = []
+    app_base_url: str = "http://localhost:5175"
+    # Stripe billing (src/billing). The two prices are Price ids, not amounts.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_unlock: str = ""
+    stripe_price_monthly: str = ""
+
+    @field_validator("admin_firebase_uids", mode="before")
+    @classmethod
+    def _split_admin_uids(cls, value):
+        """Accept a JSON list or a comma-separated string."""
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                return json.loads(text)
+            return [part.strip() for part in text.split(",") if part.strip()]
+        return value
 
 
 @lru_cache

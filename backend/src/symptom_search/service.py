@@ -47,6 +47,7 @@ async def search(
     description: str,
     *,
     model: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> dict:
     """Run a symptom query end to end and return the API payload as a dict."""
     description = (description or "").strip()
@@ -62,7 +63,7 @@ async def search(
         get_settings().gemini_embedding_model,
         tokens_in=cost.embed_tokens,
         query_id=query_id,
-        meta={"vehicle_id": vehicle_id},
+        meta={"vehicle_id": vehicle_id, "user_id": user_id},
     )
 
     result = await retrieve(vehicle_id, description, k=RETRIEVE_K, embedding=embedding, cost=cost)
@@ -99,6 +100,7 @@ async def search(
             query_id=query_id,
             meta={
                 "vehicle_id": vehicle_id,
+                "user_id": user_id,
                 "refused": refused,
                 "answer_generated": answer_generated,
             },

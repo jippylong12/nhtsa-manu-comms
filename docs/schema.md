@@ -16,6 +16,11 @@ erDiagram
     vehicles ||--o{ vehicle_bulletins : "scanned for"
     vehicles ||--o{ vehicle_scans : "ledger"
     flatfile_ingests ||..o{ comm_vocab : "source_window"
+    users ||--o{ user_vehicles : "tracks"
+    vehicles ||--o{ user_vehicles : "tracked by"
+    users ||--o{ entitlements : "owns"
+    vehicles |o--o{ entitlements : "unlocks (unlock only)"
+    users ||--o| alert_state : "alert settings"
 
     vehicles {
         bigserial id PK
@@ -99,6 +104,47 @@ erDiagram
         timestamptz last_modified
         integer row_count
         timestamptz ingested_at
+    }
+
+    users {
+        bigserial id PK
+        text firebase_uid UK
+        text email
+        text display_name
+        boolean is_admin
+        timestamptz last_seen_at
+    }
+
+    user_vehicles {
+        bigint user_id PK_FK
+        bigint vehicle_id PK_FK
+        timestamptz created_at
+    }
+
+    entitlements {
+        bigserial id PK
+        bigint user_id FK
+        text kind "unlock|subscription"
+        bigint vehicle_id FK "null for a subscription"
+        text status "active|canceled|past_due"
+        text stripe_customer_id
+        text stripe_checkout_session_id UK
+        text stripe_subscription_id UK
+        timestamptz current_period_end
+    }
+
+    stripe_events {
+        text event_id PK
+        text type
+        timestamptz received_at
+    }
+
+    alert_state {
+        bigint user_id PK_FK
+        timestamptz last_watermark
+        timestamptz last_sent_at
+        timestamptz unsubscribed_at
+        text unsubscribe_token UK
     }
 ```
 
@@ -237,24 +283,54 @@ containment queries (`symptoms @> ARRAY['no start']`) without a join. A
 normalised tag table would be the right call once tags need their own metadata
 or user curation; that is a Phase B/C concern, not a Phase A one.
 
-## Deliberately deferred to Phase C
+## Accounts, billing and alerts (migration 0014)
 
-The following are **not** in this schema, by design:
+Five tables sit beside the corpus. None of them changes `communications`,
+`comm_documents` or `vehicles`. Together they answer who may see what and who gets mailed.
 
-* **Users and authentication.** No `users` table, no ownership column anywhere.
-  Phase A is single-tenant: the corpus is Marcus's, implicitly.
-* **Per-user vehicle subscriptions.** `vehicles.active` is a personal on/off
-  switch, not a subscription. Phase C introduces `users` and a
-  `user_vehicles` (or equivalent) table, at which point `vehicles` becomes a
-  shared catalog rather than a personal list.
-* **Lazy ingest / per-user fan-out.** Phase A syncs every tracked vehicle
-  eagerly. Phase C's lazy ingest needs request-time bookkeeping this schema does
-  not model.
-* **Alert delivery state.** The Phase A digest tracks a single watermark. Phase C
-  needs per-user, per-channel delivery records for alerts and digests.
+- `users` is one row per Firebase account, created at first sign-in and keyed by
+  `firebase_uid`. `is_admin` is set at sign-in when the uid is listed in
+  `ADMIN_FIREBASE_UIDS`; admins see everything and are exempt from the symptom-search limit.
+- `user_vehicles` is the account's saved cars, a join to the shared `vehicles` catalog. An
+  account holds at most 10; the API enforces it, the table does not. Removing a car deletes
+  only this link, never the vehicle or its bulletins.
+- `entitlements` holds what a user paid for. `kind = 'unlock'` carries a `vehicle_id` and
+  opens that one car; `kind = 'subscription'` has a null `vehicle_id` and opens every car on
+  the account. Only `status = 'active'` grants anything: `past_due` and `canceled` rows are
+  kept for history and the account page. The two Stripe id columns are unique, so a webhook
+  replay cannot create a second row for the same checkout or subscription.
+- `stripe_events` records every Stripe event id the webhook has handled. An id seen once is
+  acknowledged and never processed again.
+- `alert_state` is one row per alert recipient: `last_watermark` (the newest
+  `processed_at` already mailed), `last_sent_at`, `unsubscribed_at` and a random
+  `unsubscribe_token` that goes into the link in every email. A user with no watermark yet is
+  treated as "everything is new". Rows are created the first time the alert run sees the
+  user as a recipient.
 
-The join table is what makes that migration cheap: adding users means adding a
-table beside `communication_vehicles`, not reshaping `communications`.
+## Alerts (migration 0015)
+
+0015 carries the admin's old single-recipient watermark into `alert_state` (only when an
+admin user and the old row both exist) and drops the old table. Re-running it is a no-op.
+
+Historical note: the Phase A watermark table `digest_state` was replaced by `alert_state` in
+0015.
+
+## Added by the product project
+
+The items below were listed here as deferred to a later phase. They shipped on
+2026-11-07 (milestones M1 to M5 of the product project); see [product.md](product.md) for
+how they behave.
+
+| Was deferred | Now (all 2026-11-07) | Where |
+|--------------|-----|-------|
+| Users and authentication | `users`, Firebase sign-in, admin flag (M1) | 0014 |
+| Per-user vehicle subscriptions | `user_vehicles`; `vehicles` is a shared catalog and `active` is no longer a personal switch for accounts | 0014 |
+| Lazy ingest | A car added by an account that is new to the catalog is created, scanned and synced on demand (M3) | API, no schema |
+| Alert delivery state | Per-user `alert_state` (M5) | 0014, 0015 |
+| Payments | `entitlements` and `stripe_events` (M4) | 0014 |
+
+Still not modelled: per-channel delivery records (email is the only channel) and a
+history of sent alerts; `alert_state` keeps only the latest send.
 
 ## Applying migrations
 
@@ -274,6 +350,8 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 | `0008` | Relaxes `nhtsa_vehicle_id` (nullable, no unique), adds `vehicles_active_identity_uidx` |
 | `0009` | Drops `vehicles.trim` and the retired YMM-to-vehicleId cache table |
 | 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
+| 0014 | Accounts: `users`, `user_vehicles`, `entitlements`, `stripe_events`, `alert_state` |
+| 0015 | Alerts: moves the admin watermark into `alert_state`, drops the old digest watermark table |
 
 The data backfill to canonical models is a script
 (`python -m src.scripts.backfill_plain_nameplate`), not a migration; see the
