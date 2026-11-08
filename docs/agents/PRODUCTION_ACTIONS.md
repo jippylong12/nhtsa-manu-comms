@@ -1,0 +1,12 @@
+# Production actions ledger
+
+Data tasks Marcus must run by hand in production, in order. Only two kinds of rows belong here: backfill or repair jobs that change production data, and store releases. Migrations (the Railway `api` service runs `python -m src.db.migrate` on every start), deploys, live checks and decisions do not belong; behavior that works locally is verified locally.
+
+Rules: closeout (`/revo:closeout`) adds a row when a merged project needs one and flips an autopilot's `Awaiting merge` to `Pending`; only Marcus's own output or word sets a row to `Ran` or `Confirmed`. Never run a production command from a Claude session. Commands run from `backend/` with `DATABASE_URL` set to the production database and the pyenv interpreter `/Users/marcus.salinas/.pyenv/versions/3.11.6/bin/python`.
+
+Row template: `| id | project | status | what it does | command(s), dry run first | undo | added |`
+
+| id | project | status | what it does | command(s), dry run first | undo | added |
+|---|---|---|---|---|---|---|
+| PA-001 | P-JIP-476 NHTSA Comms — Product | Pending | Prefill the top-50 year/make/models (10 nameplates × 2020–2024) so the public lookup answers `ready` for them. About $10 of model spend through Batch, roughly 7,960 bulletin fetches; proven on the replica with a 4-vehicle slice for $0.2954 (JIP-1586). Run overnight. | `python -m src.scripts.prefill --list src/seed/top50.json --dry-run` then `python -m src.scripts.prefill --list src/seed/top50.json --apply --cap-usd 15` (idempotent; a rerun collects open batches, never resubmits) | None needed: created vehicles stay tracked (prefill semantics); to stop spend early, Ctrl-C and rerun later with the same cap | 2026-11-08 |
+| PA-002 | P-JIP-476 NHTSA Comms — Product | Pending | Create the two live Stripe prices ($3 unlock, $5/month subscription) and put their ids in the Railway `api` variables `STRIPE_PRICE_UNLOCK` and `STRIPE_PRICE_MONTHLY`. Test-mode prices were never created either (no `sk_test_` key in `backend/.env`, JIP-1591). | `STRIPE_SECRET_KEY=sk_test_… python -m src.scripts.stripe_setup --dry-run` then `--apply` for test mode; repeat with the live key for production. Prints the price ids. | Archive the prices in the Stripe dashboard | 2026-11-08 |
