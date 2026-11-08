@@ -26,6 +26,57 @@ async def list_entitlements(user_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+class NotEligibleForAlerts(Exception):
+    """Alerts are a subscriber feature; this user has no active subscription and is no admin."""
+
+
+async def _alerts(conn, user: dict) -> dict:
+    """Alert state for one user, creating the `alert_state` row on first need."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO alert_state (user_id) VALUES ($1)
+        ON CONFLICT (user_id) DO UPDATE SET user_id = alert_state.user_id
+        RETURNING unsubscribed_at, last_sent_at
+        """,
+        user["id"],
+    )
+    eligible = bool(user["is_admin"]) or bool(
+        await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM entitlements WHERE user_id = $1 "
+            "AND kind = 'subscription' AND status = 'active')",
+            user["id"],
+        )
+    )
+    return {
+        "enabled": row["unsubscribed_at"] is None,
+        "last_sent_at": row["last_sent_at"],
+        "eligible": eligible,
+    }
+
+
+async def get_alerts(user: dict) -> dict:
+    """`{enabled, last_sent_at, eligible}` for GET /api/me."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await _alerts(conn, user)
+
+
+async def set_alerts(user: dict, enabled: bool) -> dict:
+    """Turn alerts on (clears `unsubscribed_at`) or off. On needs eligibility; off never does."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await _alerts(conn, user)
+        if enabled and not status["eligible"]:
+            raise NotEligibleForAlerts
+        await conn.execute(
+            "UPDATE alert_state SET unsubscribed_at = "
+            "CASE WHEN $2 THEN NULL ELSE COALESCE(unsubscribed_at, now()) END WHERE user_id = $1",
+            user["id"],
+            enabled,
+        )
+        return await _alerts(conn, user)
+
+
 MAX_VEHICLES = 10
 SAMPLE_QUOTA = {"serious": 1, "medium": 2, "small": 3}
 _ALL_ROWS = 1_000_000

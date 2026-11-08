@@ -27,6 +27,16 @@ class MyVehicle(CamelModel):
     added_at: datetime
 
 
+class AlertsStatus(CamelModel):
+    enabled: bool
+    last_sent_at: datetime | None = None
+    eligible: bool
+
+
+class AlertsUpdate(CamelModel):
+    enabled: bool
+
+
 class MeResponse(CamelModel):
     id: int
     email: str
@@ -34,6 +44,7 @@ class MeResponse(CamelModel):
     is_admin: bool
     entitlements: list[EntitlementResponse]
     vehicles: list[MyVehicle]
+    alerts: AlertsStatus
 
 
 class MyVehicleCreate(CamelModel):

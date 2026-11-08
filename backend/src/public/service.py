@@ -1,5 +1,6 @@
 """Business logic for the public lookup: what a visitor sees before signing up."""
 
+import re
 import time
 from typing import Any
 
@@ -128,3 +129,32 @@ async def lookup(year: int, make: str, model: str) -> dict[str, Any]:
         total = sum(result["counts"].values())
         result["availability"] = "ready" if total else "processing"
         return result
+
+
+_TOKEN_SHAPE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+
+
+async def unsubscribe(token: str) -> str | None:
+    """Mark the token's owner unsubscribed. `unsubscribed`, `already`, or None when unknown."""
+    if not _TOKEN_SHAPE.match(token):
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            WITH owner AS (
+                SELECT user_id, unsubscribed_at FROM alert_state
+                WHERE unsubscribe_token = $1 FOR UPDATE
+            ), upd AS (
+                UPDATE alert_state a SET unsubscribed_at = now()
+                FROM owner WHERE a.user_id = owner.user_id AND owner.unsubscribed_at IS NULL
+                RETURNING a.user_id
+            )
+            SELECT (SELECT unsubscribed_at IS NOT NULL FROM owner) AS was_off,
+                   EXISTS (SELECT 1 FROM owner) AS found
+            """,
+            token,
+        )
+    if not row["found"]:
+        return None
+    return "already" if row["was_off"] else "unsubscribed"

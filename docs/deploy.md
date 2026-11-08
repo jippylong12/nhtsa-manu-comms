@@ -47,7 +47,8 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `EMBEDDING_DIMENSIONS` | optional | optional | no | Vector size (default 1536) |
 | `RESEND_API_KEY` | no | yes | yes | Sends the digest |
 | `DIGEST_FROM_EMAIL` | no | yes | no | Digest sender |
-| `DIGEST_TO_EMAIL` | no | yes | no | Digest recipient |
+| `DIGEST_TO_EMAIL` | no | yes | no | Digest recipient (legacy; alerts go to each subscriber's own email) |
+| `ALERT_TEST_RECIPIENT` | no | optional | no | Redirects every alert to this one address (replica proofs only); leave unset in production |
 | `APP_BASE_URL` | no | yes | no | Links in the digest and emails (planned, M1) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | yes | no | yes | Verifies Firebase ID tokens (planned, M1) |
 | `ADMIN_FIREBASE_UIDS` | yes | no | no | Admin accounts (planned, M1) |

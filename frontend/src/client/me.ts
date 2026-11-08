@@ -1,11 +1,18 @@
 /* Me API - who is signed in, their vehicles, and their bulletins */
 
 import { request } from './api';
-import type { Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle } from './types';
+import type { AlertsStatus, Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle } from './types';
 
 export const meApi = {
     /** GET /api/me; 401 (ApiError) when nobody is signed in. */
     get: () => request<Me>('/me'),
+
+    /** POST /api/me/alerts: 402 (ApiError) when turning on without a subscription. */
+    setAlerts: (enabled: boolean) =>
+        request<AlertsStatus>('/me/alerts', {
+            method: 'POST',
+            body: JSON.stringify({ enabled }),
+        }),
 
     /** POST /api/me/vehicles: link a vehicle to the account, ingesting it when new. */
     addVehicle: (year: number, make: string, model: string) =>

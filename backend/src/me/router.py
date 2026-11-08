@@ -6,7 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.auth.deps import current_user
 from src.me import service
-from src.me.schemas import MeResponse, MyBulletinsResponse, MyVehicle, MyVehicleCreate
+from src.me.schemas import (
+    AlertsStatus,
+    AlertsUpdate,
+    MeResponse,
+    MyBulletinsResponse,
+    MyVehicle,
+    MyVehicleCreate,
+)
 
 router = APIRouter(prefix="/me", tags=["Me"])
 
@@ -24,7 +31,19 @@ async def get_me(user: dict = Depends(current_user)) -> MeResponse:
         is_admin=user["is_admin"],
         entitlements=await service.list_entitlements(user["id"]),
         vehicles=await service.list_my_vehicles(user["id"]),
+        alerts=await service.get_alerts(user),
     )
+
+
+@router.post("/alerts", response_model=AlertsStatus, summary="Turn daily alerts on or off")
+async def set_alerts(payload: AlertsUpdate, user: dict = Depends(current_user)) -> AlertsStatus:
+    """Off is always allowed; on needs an active subscription (or admin), else 402."""
+    try:
+        return await service.set_alerts(user, payload.enabled)
+    except service.NotEligibleForAlerts:
+        raise HTTPException(
+            status_code=402, detail="Subscribe to get daily alerts"
+        ) from None
 
 
 @router.post(

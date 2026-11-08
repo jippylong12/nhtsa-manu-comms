@@ -31,3 +31,8 @@ export const meKeys = {
     bulletins: (vehicleId: number, params: Record<string, unknown>) =>
         [...meKeys.all, 'vehicles', vehicleId, 'bulletins', params] as const,
 };
+
+// The one-shot unsubscribe call behind an alert email link.
+export const alertKeys = {
+    unsubscribe: (token: string) => ['unsubscribe', token] as const,
+};

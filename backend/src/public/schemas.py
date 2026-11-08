@@ -30,3 +30,7 @@ class LookupResponse(CamelModel):
     counts: SeverityCounts
     latest_date: datetime | None = None
     example: LookupExample | None = None
+
+
+class UnsubscribeResponse(CamelModel):
+    status: Literal["unsubscribed", "already"]

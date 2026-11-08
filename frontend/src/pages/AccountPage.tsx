@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 
 import { useAuth } from '../auth/AuthContext';
+import { useSetAlerts } from '../features/alerts/hooks/useAlerts';
 import { PastDueBanner } from '../features/billing/components/PastDueBanner';
 import { useCheckout, usePortal } from '../features/billing/hooks/useBilling';
 import {
@@ -36,6 +37,7 @@ export function AccountPage() {
   const meQuery = useMeQuery();
   const checkout = useCheckout();
   const portal = usePortal();
+  const setAlerts = useSetAlerts();
   const me = meQuery.data;
   const subscribed = subscriptionOf(me) !== undefined;
   const checkingOut = checkout.isPending || checkout.isSuccess;
@@ -118,12 +120,28 @@ export function AccountPage() {
               Alerts
             </h2>
             <label className={styles.toggleRow}>
-              <input type="checkbox" disabled aria-describedby="alerts-note" />
+              <input
+                type="checkbox"
+                role="switch"
+                checked={me.alerts.enabled && me.alerts.eligible}
+                disabled={!me.alerts.eligible || setAlerts.isPending}
+                aria-describedby="alerts-note"
+                onChange={(e) => setAlerts.mutate(e.target.checked)}
+              />
               <span>Daily email when a new bulletin lands for one of your cars</span>
             </label>
             <p id="alerts-note" className={styles.note}>
-              Coming next
+              {!me.alerts.eligible
+                ? 'Subscribe to get daily alerts'
+                : me.alerts.lastSentAt
+                  ? `Last sent ${format(new Date(me.alerts.lastSentAt), 'MMM d, yyyy')}`
+                  : 'No alert sent yet'}
             </p>
+            {setAlerts.isError && (
+              <p className={styles.inlineError} role="alert">
+                {setAlerts.error.message}
+              </p>
+            )}
           </section>
 
           <section className={styles.card} aria-labelledby="vehicles-title">

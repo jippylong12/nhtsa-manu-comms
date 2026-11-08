@@ -351,6 +351,20 @@ export interface Me {
     isAdmin: boolean;
     entitlements: Entitlement[];
     vehicles: MyVehicle[];
+    alerts: AlertsStatus;
+}
+
+// Daily alert email state (GET /api/me, POST /api/me/alerts)
+export interface AlertsStatus {
+    enabled: boolean;
+    lastSentAt: string | null;
+    /** Active subscription or admin; only eligible accounts can turn alerts on. */
+    eligible: boolean;
+}
+
+// GET /api/public/unsubscribe/{token}
+export interface UnsubscribeResponse {
+    status: 'unsubscribed' | 'already';
 }
 
 // A vehicle on the signed-in user's account (GET /api/me, POST /api/me/vehicles)

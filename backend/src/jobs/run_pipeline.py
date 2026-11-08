@@ -1,4 +1,4 @@
-"""End-to-end pipeline runner: sync -> processor -> digest, in one command.
+"""End-to-end pipeline runner: sync -> processor -> alerts, in one command.
 
 Intended to be run by hand (`python -m src.jobs.run_pipeline`), not by a
 daemon. A launchd plist is provided in `deploy/` and documented in the runbook
@@ -15,10 +15,10 @@ Safety:
   needs to clean up after a crash.
 
 Usage:
-    python -m src.jobs.run_pipeline                 # sync + process (dry-run digest)
-    python -m src.jobs.run_pipeline --send-digest   # also send the digest email
+    python -m src.jobs.run_pipeline                 # sync + process (dry-run alerts)
+    python -m src.jobs.run_pipeline --send-digest   # also send the alert emails (alias: --send-alerts)
     python -m src.jobs.run_pipeline --sync-only
-    python -m src.jobs.run_pipeline --skip-sync     # process + digest only (skips the scan too)
+    python -m src.jobs.run_pipeline --skip-sync     # process + alerts only (skips the scan too)
     python -m src.jobs.run_pipeline --skip-scan     # sync without scanning NHTSA's bulletin files first
 """
 
@@ -30,9 +30,9 @@ import pathlib
 from datetime import datetime, timezone
 from typing import Optional
 
+from src.alerts import service as alerts
 from src.communications import flatfile
 from src.db import close_pool, get_pool
-from src.jobs import digest as digest_job
 from src.jobs import extract as extract_stage
 from src.jobs import process as processor
 from src.jobs import sync as sync_job
@@ -177,12 +177,12 @@ async def _run(args, now: datetime) -> int:
                 # Reclaiming disk is housekeeping; never fail a run over it.
                 log.warning("archive prune skipped: %s: %s", type(e).__name__, e)
 
-        log.info("=== STAGE: digest ===")
+        log.info("=== STAGE: alerts ===")
         try:
-            await digest_job.run_digest(send=args.send_digest, generated_at=now)
+            await alerts.run_alerts(send=args.send_digest, generated_at=now)
         except Exception as e:  # noqa: BLE001
-            log.exception("digest stage failed")
-            failures.append(f"digest: {type(e).__name__}: {e}")
+            log.exception("alerts stage failed")
+            failures.append(f"alerts: {type(e).__name__}: {e}")
 
     status = await processor.status()
     log.info("pipeline status: %s", status)
@@ -196,11 +196,11 @@ async def _run(args, now: datetime) -> int:
     return 0
 
 
-def main() -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the full NHTSA Comms pipeline once.")
     parser.add_argument("--sync-only", action="store_true", help="run sync, skip processing")
     parser.add_argument(
-        "--skip-sync", action="store_true", help="skip scan and sync, process + digest"
+        "--skip-sync", action="store_true", help="skip scan and sync, process + alerts"
     )
     parser.add_argument(
         "--skip-scan", action="store_true", help="skip the bulletin-file scan before sync"
@@ -211,10 +211,18 @@ def main() -> int:
         help="do not prune archived PDFs for already-summarised documents",
     )
     parser.add_argument(
-        "--send-digest", action="store_true", help="send the digest (default: dry run)"
+        "--send-digest",
+        "--send-alerts",
+        dest="send_digest",
+        action="store_true",
+        help="send the alert emails (default: dry run)",
     )
     parser.add_argument("--sync-llm", action="store_true", help="use the synchronous Messages API instead of the Batch API")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
 
     now = datetime.now(timezone.utc)
     run_id = now.strftime("%Y%m%d-%H%M%S")

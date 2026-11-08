@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     digest_from_email: str = ""
     digest_to_email: str = ""
+    # When set, every alert goes to this address instead of the user's (replica proofs).
+    alert_test_recipient: str = ""
 
     # Accounts (Firebase Authentication; the frontend signs in, the API verifies the ID token).
     # Base64 of the service-account JSON file.
