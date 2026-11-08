@@ -352,3 +352,32 @@ export interface Me {
     entitlements: Entitlement[];
     vehicles: Vehicle[];
 }
+
+// Public lookup (GET /api/public/lookup)
+export type LookupAvailability = 'ready' | 'processing' | 'unknown';
+
+export interface LookupCounts {
+    serious: number;
+    medium: number;
+    small: number;
+}
+
+export interface LookupExample {
+    vehicleId: number | null;
+    year: number;
+    make: string;
+    model: string;
+    counts: LookupCounts;
+    latestDate: string | null;
+}
+
+export interface LookupResponse {
+    vehicleId: number | null;
+    year: number;
+    make: string;
+    model: string;
+    availability: LookupAvailability;
+    counts: LookupCounts;
+    latestDate: string | null;
+    example: LookupExample | null;
+}

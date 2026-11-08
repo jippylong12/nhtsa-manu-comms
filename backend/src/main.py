@@ -15,6 +15,7 @@ from src.config import Settings, get_settings
 from src.corpus.router import router as corpus_router
 from src.db import close_pool
 from src.me.router import router as me_router
+from src.public.router import router as public_router
 from src.refresh.router import router as refresh_router
 from src.symptom_search.router import router as symptom_search_router
 from src.usage.router import router as usage_router
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(communications_router, prefix="/api")
     app.include_router(corpus_router, prefix="/api")
     app.include_router(me_router, prefix="/api")
+    app.include_router(public_router, prefix="/api")
     app.include_router(symptom_search_router, prefix="/api")
     if not settings.read_only:
         app.include_router(vehicles_write_router, prefix="/api")

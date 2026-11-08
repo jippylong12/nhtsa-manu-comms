@@ -8,3 +8,4 @@ export { corpusApi } from './corpus';
 export { refreshApi } from './refresh';
 export { symptomSearchApi } from './symptomSearch';
 export { meApi } from './me';
+export { publicApi } from './public';

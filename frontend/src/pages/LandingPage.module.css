@@ -1,0 +1,122 @@
+.page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+.value {
+  margin: 0;
+  font-size: var(--font-size-md);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.result {
+  min-height: 1px;
+}
+
+.status {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+}
+
+.retry {
+  min-height: 44px;
+}
+
+.how {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.howTitle {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.stepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.stepTitle {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.stepBody {
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.footer {
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+@media (max-width: 599px) {
+  .steps {
+    grid-template-columns: 1fr;
+  }
+}
