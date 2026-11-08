@@ -1,11 +1,12 @@
 /* Public landing page: pick a car, see its severity counts, sign up for the rest. */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
 import { SignInDialog } from '../auth/SignInDialog';
 import { CountsCard } from '../features/lookup/CountsCard';
+import { useAddVehicle } from '../features/my-vehicles/hooks/useMyVehicles';
 import { useLookup } from '../features/lookup/useLookup';
 import { VehiclePicker, type PickerValue } from '../features/lookup/VehiclePicker';
 import styles from './LandingPage.module.css';
@@ -29,6 +30,10 @@ export function LandingPage() {
     model: params.get('model') ?? '',
   };
 
+  const addVehicle = useAddVehicle();
+  const pendingAdd = useRef(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   const lookup = useLookup(value.year, value.make, value.model);
   const selected = !!value.year && !!value.make && !!value.model;
 
@@ -40,12 +45,38 @@ export function LandingPage() {
     setParams(p, { replace: true });
   }
 
+  const { mutateAsync: addVehicleAsync } = addVehicle;
+  const { year, make, model } = value;
+  const addAndOpen = useCallback(async () => {
+    if (!year || !make || !model) {
+      navigate('/app');
+      return;
+    }
+    try {
+      const added = await addVehicleAsync({ year, make, model });
+      navigate(`/app/vehicles/${added.vehicleId}`);
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'We could not add that car.');
+    }
+  }, [year, make, model, addVehicleAsync, navigate]);
+
+  // The sign-in dialog resolves before or after `user` changes; either way the
+  // add runs once, as soon as there is a user and the visitor asked for it.
+  useEffect(() => {
+    if (user && pendingAdd.current) {
+      pendingAdd.current = false;
+      queueMicrotask(() => void addAndOpen());
+    }
+  }, [user, addAndOpen]);
+
   function handleSeeAll() {
+    setAddError(null);
     if (!user) {
+      pendingAdd.current = true;
       setSignInOpen(true);
       return;
     }
-    navigate('/app');
+    void addAndOpen();
   }
 
   return (
@@ -72,6 +103,9 @@ export function LandingPage() {
           </div>
         )}
         {selected && lookup.data && <CountsCard data={lookup.data} onSeeAll={handleSeeAll} />}
+        {addError && (
+          <p className={styles.error} role="alert">{addError}</p>
+        )}
       </div>
 
       <section className={styles.how} aria-labelledby="how-title">

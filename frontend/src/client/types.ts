@@ -350,7 +350,75 @@ export interface Me {
     displayName: string | null;
     isAdmin: boolean;
     entitlements: Entitlement[];
-    vehicles: Vehicle[];
+    vehicles: MyVehicle[];
+}
+
+// A vehicle on the signed-in user's account (GET /api/me, POST /api/me/vehicles)
+export type MyVehicleAvailability = 'ready' | 'processing';
+export type MyVehicleAccess = 'full' | 'sample';
+export type Severity = 'serious' | 'medium' | 'small';
+
+export interface SeverityCounts {
+    serious: number;
+    medium: number;
+    small: number;
+}
+
+export interface MyVehicle {
+    vehicleId: number;
+    year: number;
+    make: string;
+    model: string;
+    availability: MyVehicleAvailability;
+    counts: SeverityCounts;
+    access: MyVehicleAccess;
+    addedAt: string;
+}
+
+export interface MyVehicleCreate {
+    year: number;
+    make: string;
+    model: string;
+}
+
+// One folded bulletin. A locked row carries only the identity fields; every
+// other key is absent from the wire.
+export interface MyBulletin {
+    nhtsaId: string;
+    communicationNumber?: string | null;
+    communicationType?: string | null;
+    communicationDate?: string | null;
+    severity: Severity;
+    supersededCount?: number;
+    locked: boolean;
+    summary?: string | null;
+    llmSummary?: string | null;
+    symptoms?: string[] | null;
+    systems?: string[] | null;
+    components?: string[] | null;
+    remedy?: string | null;
+    applicability?: string | null;
+    applicabilityYears?: number[] | null;
+    applicabilityModels?: string[] | null;
+    applicabilityConditions?: string | null;
+    audience?: string | null;
+    documents?: { url: string }[] | null;
+}
+
+export interface MyBulletinsParams {
+    severity?: Severity;
+    search?: string;
+    page?: number;
+    perPage?: number;
+}
+
+export interface MyBulletinsResponse {
+    items: MyBulletin[];
+    total: number;
+    page: number;
+    perPage: number;
+    access: MyVehicleAccess;
+    sampleCounts: SeverityCounts;
 }
 
 // Public lookup (GET /api/public/lookup)

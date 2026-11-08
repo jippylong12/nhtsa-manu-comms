@@ -24,3 +24,10 @@ export const corpusKeys = {
     detail: (nhtsaId: string) => [...corpusKeys.details(), nhtsaId] as const,
     tags: (vehicleId?: number) => [...corpusKeys.all, 'tags', vehicleId ?? null] as const,
 };
+
+// The signed-in user's account. AuthContext reads ['me'] for the profile.
+export const meKeys = {
+    all: ['me'] as const,
+    bulletins: (vehicleId: number, params: Record<string, unknown>) =>
+        [...meKeys.all, 'vehicles', vehicleId, 'bulletins', params] as const,
+};

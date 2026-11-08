@@ -1,22 +1,78 @@
-"""GET /api/me: who is signed in, and what they have bought."""
+"""/api/me: who is signed in, their vehicles, and what they may read."""
 
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.auth.deps import current_user
 from src.me import service
-from src.me.schemas import MeResponse
+from src.me.schemas import MeResponse, MyBulletinsResponse, MyVehicle, MyVehicleCreate
 
 router = APIRouter(prefix="/me", tags=["Me"])
+
+# One body for "not yours" and "does not exist", so a vehicle id reveals nothing.
+_NOT_FOUND = "vehicle not found"
 
 
 @router.get("", response_model=MeResponse, summary="The signed-in user's profile")
 async def get_me(user: dict = Depends(current_user)) -> MeResponse:
-    """Id, email, admin flag and entitlements. Vehicles are filled in M3."""
+    """Id, email, admin flag, entitlements and linked vehicles."""
     return MeResponse(
         id=user["id"],
         email=user["email"],
         display_name=user["display_name"],
         is_admin=user["is_admin"],
         entitlements=await service.list_entitlements(user["id"]),
-        vehicles=[],
+        vehicles=await service.list_my_vehicles(user["id"]),
     )
+
+
+@router.post(
+    "/vehicles",
+    response_model=MyVehicle,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a vehicle to my account",
+)
+async def add_vehicle(payload: MyVehicleCreate, user: dict = Depends(current_user)) -> MyVehicle:
+    """Link a vehicle to the caller, creating and ingesting it when it is new."""
+    try:
+        return await service.add_vehicle(user["id"], payload.year, payload.make, payload.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except service.VehicleLimitReached:
+        raise HTTPException(
+            status_code=409, detail=f"at most {service.MAX_VEHICLES} vehicles per account"
+        ) from None
+
+
+@router.delete(
+    "/vehicles/{vehicle_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a vehicle from my account",
+)
+async def remove_vehicle(vehicle_id: int, user: dict = Depends(current_user)) -> Response:
+    """Unlink the caller's vehicle; 404 when the caller has no such link."""
+    if not await service.remove_vehicle(user["id"], vehicle_id):
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/vehicles/{vehicle_id}/bulletins",
+    response_model=MyBulletinsResponse,
+    response_model_exclude_unset=True,
+    summary="Bulletins for one of my vehicles, locked beyond the free sample",
+)
+async def my_bulletins(
+    vehicle_id: int,
+    severity: Literal["serious", "medium", "small"] | None = None,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200, alias="perPage"),
+    search: str | None = Query(None, max_length=200),
+    user: dict = Depends(current_user),
+):
+    """Folded bulletins newest first; 404 unless the vehicle is linked to the caller."""
+    result = await service.my_bulletins(user["id"], vehicle_id, severity, page, per_page, search)
+    if result is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return MyBulletinsResponse(**result)

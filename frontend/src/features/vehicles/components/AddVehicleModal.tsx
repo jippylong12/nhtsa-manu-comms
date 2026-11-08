@@ -15,9 +15,12 @@ interface Props {
     onClose: () => void;
     onSubmit: (data: VehicleCreate) => void;
     isLoading?: boolean;
+    /** 'product' hides the keywords field and relabels the submit "Add my car". */
+    mode?: 'tracker' | 'product';
 }
 
-export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props) {
+export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading, mode = 'tracker' }: Props) {
+    const product = mode === 'product';
     const [selectedYear, setSelectedYear] = useState<number | null>(null);
     const [selectedMake, setSelectedMake] = useState<string>('');
     const [selectedModel, setSelectedModel] = useState<string>('');
@@ -202,6 +205,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                         )}
 
                         {/* Keywords */}
+                        {!product && (
                         <div className={`input-group ${!selectedModel ? styles.disabled : ''}`}>
                             <label className="input-label">Filter Keywords (optional)</label>
                             <input
@@ -216,6 +220,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                                 Only show communications containing these keywords
                             </span>
                         </div>
+                        )}
                     </div>
 
                     <div className={styles.modalFooter}>
@@ -228,7 +233,7 @@ export function AddVehicleModal({ isOpen, onClose, onSubmit, isLoading }: Props)
                             disabled={isLoading || !ready}
                         >
                             <Plus size={18} />
-                            {isLoading ? 'Adding...' : 'Add Vehicle'}
+                            {isLoading ? 'Adding...' : product ? 'Add my car' : 'Add Vehicle'}
                         </button>
                     </div>
                 </form>
