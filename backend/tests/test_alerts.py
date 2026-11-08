@@ -8,6 +8,7 @@ reaches Resend.
 
 from datetime import datetime, timedelta, timezone
 
+import asyncpg
 import pytest
 
 from src.alerts import service as A
@@ -295,6 +296,48 @@ async def test_a_missing_resend_key_fails_that_send_by_name_and_keeps_the_waterm
     assert outcome.outcome == "failed"
     assert "RESEND_API_KEY" in outcome.error and "DIGEST_FROM_EMAIL" in outcome.error
     assert await watermark(conn, uid) == BASE
+
+
+async def test_a_second_concurrent_send_sends_nothing_and_moves_no_watermark(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "locked", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTLOCKED")
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-L1", 2)
+    other = await asyncpg.connect(get_settings().database_url)
+    try:
+        assert await other.fetchval("SELECT pg_try_advisory_lock($1)", A._SEND_LOCK_KEY)
+        with pytest.raises(A.AlertSendInProgress):
+            await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+        assert mailbox.to(email) == []
+        assert await watermark(conn, uid) == BASE
+        await other.execute("SELECT pg_advisory_unlock($1)", A._SEND_LOCK_KEY)
+    finally:
+        await other.close()
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+    assert len(mailbox.to(email)) == 1
+    # The lock is released after the pass, so a later pass can take it.
+    assert await conn.fetchval("SELECT pg_try_advisory_lock($1)", A._SEND_LOCK_KEY)
+    await conn.execute("SELECT pg_advisory_unlock($1)", A._SEND_LOCK_KEY)
+
+
+async def test_a_trailing_slash_on_app_base_url_never_doubles_the_link_path(
+    conn, mailbox, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "app_base_url", "https://app.example.test/")
+    uid, email = await make_user(conn, "slash", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTSLASH")
+    await make_comm(conn, vid, "ALERT-S1", 2)
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    for part in (mail["html"], mail["text"]):
+        assert "https://app.example.test/unsubscribe/" in part
+        assert f"https://app.example.test/app/vehicles/{vid}" in part
+        assert "example.test//" not in part
 
 
 # --- Pure rendering (no database) -------------------------------------------------

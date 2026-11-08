@@ -34,6 +34,7 @@ def calls(monkeypatch):
 
     async def run_alerts(send, generated_at, **kw):
         seen.append(("alerts", send))
+        return alerts_service.AlertRunSummary()
 
     monkeypatch.setattr(run_pipeline.processor, "run_extract", run_extract)
     monkeypatch.setattr(run_pipeline.processor, "run_llm", run_llm)
@@ -75,6 +76,20 @@ async def test_a_failing_alerts_stage_fails_the_run_without_crashing(calls, monk
 
     monkeypatch.setattr(alerts_service, "run_alerts", boom)
     assert await run_pipeline._run(_args(), NOW) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_send_for_one_user_fails_the_run(calls, monkeypatch):
+    async def one_failed(send, generated_at, **kw):
+        return alerts_service.AlertRunSummary(
+            outcomes=[
+                alerts_service.UserOutcome(1, "a@x.test", "a@x.test", 1, 0, "sent"),
+                alerts_service.UserOutcome(2, "b@x.test", "b@x.test", 1, 0, "failed", error="no key"),
+            ]
+        )
+
+    monkeypatch.setattr(alerts_service, "run_alerts", one_failed)
+    assert await run_pipeline._run(_args(send_digest=True), NOW) == 1
 
 
 def test_send_alerts_is_an_alias_of_send_digest():

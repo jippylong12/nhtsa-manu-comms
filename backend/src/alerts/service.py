@@ -257,13 +257,18 @@ def _severity(item: AlertItem) -> tuple[str, str]:
     )
 
 
+def _base_url() -> str:
+    """APP_BASE_URL without a trailing slash, so links never get a `//` path."""
+    return get_settings().app_base_url.rstrip("/")
+
+
 def _footer_line() -> str:
-    return f"You get this because you subscribe at {get_settings().app_base_url}."
+    return f"You get this because you subscribe at {_base_url()}."
 
 
 def render_text(alert: UserAlert, unsubscribe_url: str) -> str:
     """Plain-text alternative part."""
-    base = get_settings().app_base_url
+    base = _base_url()
     lines = [f"NHTSA Comms alert - {alert.generated_at:%b %d, %Y}"]
     if alert.total_items:
         lines.append(f"{alert.total_items} new communication(s) for your vehicles.")
@@ -296,7 +301,7 @@ def render_text(alert: UserAlert, unsubscribe_url: str) -> str:
 
 def render_html(alert: UserAlert, unsubscribe_url: str) -> str:
     """Dark-mode-friendly HTML with inline styles only (email clients strip <style>)."""
-    base = get_settings().app_base_url
+    base = _base_url()
     sections = []
 
     if alert.ready_vehicles:
@@ -431,15 +436,38 @@ async def run_alerts(
     if send and since_override is not None:
         raise ValueError("since_override is for dry-run rendering only; never combine with send")
     if conn is not None:
-        return await _run(conn, send, generated_at, out_dir, only_user_id, since_override)
+        return await _locked_run(conn, send, generated_at, out_dir, only_user_id, since_override)
     pool = await get_pool()
     async with pool.acquire() as acquired:
-        return await _run(acquired, send, generated_at, out_dir, only_user_id, since_override)
+        return await _locked_run(
+            acquired, send, generated_at, out_dir, only_user_id, since_override
+        )
+
+
+# Session advisory lock held for the whole of a sending pass. Two passes reading the same
+# watermark (the nightly cron and a manual `python -m src.alerts --send`, or a cron on
+# another machine) would otherwise both mail every subscriber.
+_SEND_LOCK_KEY = 0x6E68747361616C74  # "nhtsaalt"
+
+
+class AlertSendInProgress(RuntimeError):
+    """Another process is already sending alerts; this pass sent nothing."""
+
+
+async def _locked_run(conn, send, generated_at, out_dir, only_user_id, since_override):
+    if not send:
+        return await _run(conn, send, generated_at, out_dir, only_user_id, since_override)
+    if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", _SEND_LOCK_KEY):
+        raise AlertSendInProgress("another alert send is running; this pass sent nothing")
+    try:
+        return await _run(conn, send, generated_at, out_dir, only_user_id, since_override)
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock($1)", _SEND_LOCK_KEY)
 
 
 async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) -> AlertRunSummary:
     settings = get_settings()
-    base = settings.app_base_url
+    base = _base_url()
     summary = AlertRunSummary()
     for user in await recipients(conn, only_user_id):
         since = since_override if since_override is not None else user["last_watermark"]

@@ -179,7 +179,12 @@ async def _run(args, now: datetime) -> int:
 
         log.info("=== STAGE: alerts ===")
         try:
-            await alerts.run_alerts(send=args.send_digest, generated_at=now)
+            summary = await alerts.run_alerts(send=args.send_digest, generated_at=now)
+            failed = summary.count("failed")
+            if failed:
+                # Per-user failures do not raise (one user never stops the others), so
+                # they must still mark the run failed or a dead Resend key goes unnoticed.
+                failures.append(f"alerts: {failed} of {len(summary.outcomes)} send(s) failed")
         except Exception as e:  # noqa: BLE001
             log.exception("alerts stage failed")
             failures.append(f"alerts: {type(e).__name__}: {e}")
