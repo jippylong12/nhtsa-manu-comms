@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     # roughly nothing rather than a routine path.
     low_yield_chars_per_page: int = 200
 
-    # Gemini (structured extraction + embeddings)
+    # Gemini (embeddings; gemini_model is kept for the eval harness and bake-off arms)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
@@ -77,9 +77,15 @@ class Settings(BaseSettings):
     )
     # Per-request ceiling for every Anthropic call (see src/anthropic_client.py).
     anthropic_timeout_seconds: int = Field(default=300, gt=0)
-    # The model the LLM extraction stage calls (src/jobs/llm.py). gemini_model stays for
-    # symptom-search compose.
+    # The model the LLM extraction stage calls (src/jobs/llm.py).
     extraction_model: str = "claude-haiku-5-5"
+    # The model symptom-search compose calls (src/symptom_search/compose.py). Haiku at
+    # list price is a third of Flash-Lite on this prompt; see src/symptom_search/cost.py.
+    compose_model: str = "claude-haiku-5-5"
+    # Per-call ceiling for the compose call only. It runs inside a user-facing search
+    # request, so it must fail in seconds; the shared anthropic_timeout_seconds is sized
+    # for the extraction job's PDF calls.
+    compose_timeout_seconds: int = Field(default=30, gt=0)
     # Live extraction calls in flight at once.
     anthropic_extraction_concurrency: int = Field(default=6, gt=0)
     # 1536, not the model's native 3072: pgvector cannot build an hnsw or

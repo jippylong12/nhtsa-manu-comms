@@ -92,11 +92,21 @@ Example (query: "service high voltage warning is on and the cabin blows no heat"
 - Flash ($0.000792): a longer answer citing the same core bulletins plus extra
   mechanism detail.
 
-**Verdict: keep `gemini-3.1-flash-lite`.** Grounding, citations, and refusal
+**Verdict at the time: keep `gemini-3.1-flash-lite`.** Grounding, citations, and refusal
 behaviour are identical; Flash is ~48% more expensive and its extra verbosity is
 not an improvement for a short consumer-facing answer. Escalation criteria if
 this changes: hallucinated citations > 0, or grounded rate materially below
 Flash on a future golden-set expansion.
+
+**Superseded 2026-11-07: compose now runs on `claude-haiku-5-5`** with a tighter
+prompt (top 4 candidates instead of 5, 300-char summaries instead of 600, a
+one-sentence answer instead of 2-4, thinking off, effort low, structured JSON
+output). The target was about $0.10 per 1,000 searches; Haiku's list price is a
+third of Flash-Lite's on input and a fifth on output, and the smaller prompt
+roughly halves the tokens. The retrieval side (Gemini embedding, pgvector, FTS,
+fusion) is unchanged, so the retrieval tables above still hold. The confidence
+gate and citation guard are unchanged. Re-run the `--hardest` subset against
+Haiku before relying on these quality numbers for the new composer.
 
 ## Confidence-gate recalibration (post-B3 dogfooding)
 

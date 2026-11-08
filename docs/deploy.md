@@ -35,13 +35,15 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `DATABASE_URL` | yes | yes | yes | Postgres connection string |
 | `POSTGRES_POOL_MAX` | optional | optional | no | Pool size (default 10) |
 | `TEST_DATABASE_URL` | no | no | yes | Local test database; tests only |
-| `CLAUDE_API_KEY` | no | yes | yes | Anthropic key for extraction (`ANTHROPIC_API_KEY` is accepted too) |
-| `ANTHROPIC_API_KEY` | no | yes | yes | Alias of `CLAUDE_API_KEY` |
-| `ANTHROPIC_TIMEOUT_SECONDS` | no | optional | no | Per-call ceiling (default 300) |
+| `CLAUDE_API_KEY` | yes | yes | yes | Anthropic key: symptom-search compose on api, extraction on nightly (`ANTHROPIC_API_KEY` is accepted too) |
+| `ANTHROPIC_API_KEY` | yes | yes | yes | Alias of `CLAUDE_API_KEY` |
+| `ANTHROPIC_TIMEOUT_SECONDS` | optional | optional | no | Per-call ceiling (default 300) |
 | `ANTHROPIC_EXTRACTION_CONCURRENCY` | no | optional | no | Live extraction calls at once (default 6) |
 | `EXTRACTION_MODEL` | no | optional | no | Extraction model (default `claude-haiku-5-5`) |
-| `GEMINI_API_KEY` | yes | yes | yes | Symptom search and embeddings |
-| `GEMINI_MODEL` | optional | optional | no | Compose model |
+| `COMPOSE_MODEL` | optional | no | no | Symptom-search answer model (default `claude-haiku-5-5`) |
+| `COMPOSE_TIMEOUT_SECONDS` | optional | no | no | Per-call ceiling for the symptom-search answer (default 30) |
+| `GEMINI_API_KEY` | yes | yes | yes | Embeddings (the symptom-search query vector and the corpus) |
+| `GEMINI_MODEL` | no | optional | no | Eval harness and bake-off arms only; compose no longer reads it |
 | `GEMINI_EMBEDDING_MODEL` | optional | optional | no | Embedding model |
 | `GEMINI_TIMEOUT_SECONDS` | optional | optional | no | Per-call ceiling (default 120) |
 | `EMBEDDING_DIMENSIONS` | optional | optional | no | Vector size (default 1536) |
