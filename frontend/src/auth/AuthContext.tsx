@@ -6,7 +6,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -52,26 +51,34 @@ function fakeUser(uid: string): AuthUser {
   return { uid, email: fakeEmail(uid), displayName: uid };
 }
 
+// The signed-in user the token provider reads; module-level so it can be set during render.
+let currentUser: AuthUser | null = null;
+
+function registerTokenProvider() {
+  setAuthTokenProvider(async () => {
+    const current = currentUser;
+    if (!current) return null;
+    if (fakeUid) return `fake:${current.uid}:${current.email}`;
+    return (await firebaseAuth?.currentUser?.getIdToken()) ?? null;
+  });
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(() => (fakeUid ? fakeUser(fakeUid) : null));
   const [loading, setLoading] = useState<boolean>(() => Boolean(firebaseAuth));
-  const userRef = useRef(user);
-
+  // Registered during the first render (idempotent, reads module state lazily) so
+  // child queries, whose effects run before this component's effects, have it.
+  useState(() => {
+    currentUser = user;
+    registerTokenProvider();
+    return null;
+  });
   useEffect(() => {
-    userRef.current = user;
-  }, [user]);
-
-  // Declared before the `me` query so the provider exists when it first fetches.
-  useEffect(() => {
-    setAuthTokenProvider(async () => {
-      const current = userRef.current;
-      if (!current) return null;
-      if (fakeUid) return `fake:${current.uid}:${current.email}`;
-      return (await firebaseAuth?.currentUser?.getIdToken()) ?? null;
-    });
+    currentUser = user;
+    registerTokenProvider(); // re-register after a StrictMode cleanup
     return () => setAuthTokenProvider(null);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!firebaseAuth) return;
@@ -79,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const next = fbUser
         ? { uid: fbUser.uid, email: fbUser.email, displayName: fbUser.displayName }
         : null;
-      userRef.current = next;
+      currentUser = next;
       setUser(next);
       setLoading(false);
     });
@@ -113,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   const signOut = useCallback(async () => {
     if (fakeUid) {
-      userRef.current = null;
+      currentUser = null;
       setUser(null);
       return;
     }

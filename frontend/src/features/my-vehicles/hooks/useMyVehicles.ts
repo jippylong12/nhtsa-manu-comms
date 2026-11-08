@@ -4,15 +4,19 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { meApi } from '@/client';
 import type { Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle } from '@/client';
+import { useAuth } from '@/auth/AuthContext';
 import { meKeys } from '../../queryKeys';
 
 // While any car is still being read, poll so the card flips to Ready by itself.
 const PROCESSING_POLL_MS = 10_000;
 
 export function useMeQuery() {
+    const { user } = useAuth();
     return useQuery<Me>({
         queryKey: meKeys.all,
         queryFn: meApi.get,
+        // Never fire before a signed-in user (and so a token provider) exists.
+        enabled: Boolean(user),
         retry: false,
         refetchInterval: (query) =>
             query.state.data?.vehicles.some((v) => v.availability === 'processing')
