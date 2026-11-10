@@ -3,7 +3,7 @@
 import logging
 from datetime import date, datetime, timezone
 
-from src.billing.entitlements import access_for
+from src.billing.entitlements import PLAN_VEHICLES, access_for
 from src.communications.flatfile import normalize_model
 from src.config import get_settings
 from src.corpus import service as corpus_service
@@ -95,11 +95,6 @@ FREE_SAMPLE_VEHICLES = 2
 
 class SampleLimitReached(Exception):
     """A free account has used its free samples and is adding another car."""
-
-
-# How many cars each subscription covers at a time. A car the account has unlocked
-# ($3, forever) is its own purchase and does not take one of these places.
-PLAN_VEHICLES = {"monthly": 2, "all_access": 20}
 
 
 class PlanLimitReached(Exception):

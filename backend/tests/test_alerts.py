@@ -544,3 +544,25 @@ async def test_a_car_left_out_of_alerts_is_not_in_the_email(conn, mailbox):
     [mail] = mailbox.to(email)
     assert "LLM summary ALERT-L1" in mail["html"]
     assert "ALERT-Q1" not in mail["html"] and "QUIETCAR" not in mail["html"]
+
+
+async def test_a_car_past_the_plans_count_is_not_in_the_email(conn, mailbox):
+    uid, email = await make_user(conn, "overplan", subscription="active")
+    await conn.execute("UPDATE entitlements SET plan = 'monthly' WHERE user_id = $1", uid)
+    cars = [await make_vehicle(conn, uid, f"PLANCAR{i}") for i in range(3)]
+    for i, vid in enumerate(cars):  # oldest link first decides which two the plan covers
+        await conn.execute(
+            "UPDATE user_vehicles SET created_at = now() - make_interval(days => $3) "
+            "WHERE user_id = $1 AND vehicle_id = $2",
+            uid, vid, 10 - i,
+        )
+    await set_watermark(conn, uid, BASE)
+    for i, vid in enumerate(cars):
+        await make_comm(conn, vid, f"ALERT-P{i}0", -5, number=f"ALP{i}0")
+        await make_comm(conn, vid, f"ALERT-P{i}1", 1, number=f"ALP{i}1")
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "ALERT-P01" in mail["html"] and "ALERT-P11" in mail["html"]
+    assert "ALERT-P21" not in mail["html"] and "PLANCAR2" not in mail["html"]
