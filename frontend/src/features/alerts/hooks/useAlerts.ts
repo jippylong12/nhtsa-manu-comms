@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { meApi, publicApi } from '@/client';
-import type { AlertsStatus, UnsubscribeResponse } from '@/client';
+import type { AlertsStatus, MyVehicle, UnsubscribeResponse } from '@/client';
 import { alertKeys, meKeys } from '../../queryKeys';
 
 export function useSetAlerts() {
@@ -11,6 +11,15 @@ export function useSetAlerts() {
     return useMutation<AlertsStatus, Error, boolean>({
         mutationFn: (enabled) => meApi.setAlerts(enabled),
         // Holding the promise keeps the switch pending until `me` has the new state.
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: meKeys.all }),
+    });
+}
+
+/** Includes or leaves out one car in the alert email. */
+export function useSetVehicleAlerts() {
+    const queryClient = useQueryClient();
+    return useMutation<MyVehicle, Error, { vehicleId: number; enabled: boolean }>({
+        mutationFn: ({ vehicleId, enabled }) => meApi.setVehicleAlerts(vehicleId, enabled),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: meKeys.all }),
     });
 }

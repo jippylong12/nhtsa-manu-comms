@@ -1,7 +1,7 @@
 /* Public landing page: pick a car, see its severity counts, sign up for the rest. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, ArrowUp, BellRing, Check, FileText, ListFilter, Stethoscope } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext';
@@ -370,6 +370,10 @@ export function LandingPage() {
         Bulletins are sourced from NHTSA's public files and summarized automatically; check the source
         document before acting on one. NHTSA Comms is an independent service and is not affiliated
         with NHTSA or any carmaker.
+        <span className={styles.footerLinks}>
+          <Link to="/terms">Terms</Link>
+          <Link to="/privacy">Privacy</Link>
+        </span>
       </footer>
 
       {signInOpen && <SignInDialog initialMode="signup" onClose={() => setSignInOpen(false)} />}

@@ -10,6 +10,7 @@ import { VehiclePage } from './pages/VehiclePage';
 import { AccountPage } from './pages/AccountPage';
 import { BillingSuccessPage } from './pages/BillingSuccessPage';
 import { UnsubscribePage } from './pages/UnsubscribePage';
+import { PrivacyPage, TermsPage } from './pages/legal/LegalPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 
 const queryClient = new QueryClient({
@@ -54,6 +55,8 @@ const router = createBrowserRouter([
         ),
       },
       { path: '/unsubscribe/:token', element: <UnsubscribePage /> },
+      { path: '/terms', element: <TermsPage /> },
+      { path: '/privacy', element: <PrivacyPage /> },
     ],
   },
   {

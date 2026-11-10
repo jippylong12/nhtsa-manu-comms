@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Car, Plus, Lock } from 'lucide-react';
 
-import type { VehicleCreate } from '@/client';
+import type { MyVehicle, VehicleCreate } from '@/client';
 import { AddVehicleModal } from '../features/vehicles/components/AddVehicleModal';
 import { MyVehicleCard } from '../features/my-vehicles/components/MyVehicleCard';
+import { RemoveVehicleDialog } from '../features/my-vehicles/components/RemoveVehicleDialog';
 import {
   useAddVehicle,
   useMeQuery,
@@ -58,10 +59,13 @@ export function AppHome() {
     );
   };
 
+  const [removing, setRemoving] = useState<MyVehicle | null>(null);
+  const closeRemove = () => {
+    setRemoving(null);
+    removeVehicle.reset();
+  };
   const handleRemove = (id: number) => {
-    removeVehicle.mutate(id, {
-      onError: (err) => showToast(err.message || 'We could not remove that car.'),
-    });
+    removeVehicle.mutate(id, { onSuccess: closeRemove });
   };
 
   return (
@@ -174,6 +178,7 @@ export function AppHome() {
               vehicle={v}
               me={meQuery.data}
               onRemove={handleRemove}
+              onRequestRemove={setRemoving}
               removing={removeVehicle.isPending && removeVehicle.variables === v.vehicleId}
             />
           ))}
@@ -187,6 +192,16 @@ export function AppHome() {
         onSubmit={handleAdd}
         isLoading={addVehicle.isPending}
       />
+      {removing && (
+        <RemoveVehicleDialog
+          vehicle={removing}
+          me={meQuery.data}
+          pending={removeVehicle.isPending}
+          error={removeVehicle.isError ? removeVehicle.error.message : null}
+          onClose={closeRemove}
+          onConfirm={() => handleRemove(removing.vehicleId)}
+        />
+      )}
       {toast}
     </div>
   );

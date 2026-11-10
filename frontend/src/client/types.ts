@@ -346,6 +346,17 @@ export interface Entitlement {
     vehicleId: number | null;
     status: 'active' | 'canceled' | 'past_due';
     currentPeriodEnd: string | null;
+    /** A cancelled subscription: it works until currentPeriodEnd, then ends. */
+    cancelAtPeriodEnd: boolean;
+}
+
+/** How many plan cars a subscriber may still remove this calendar month. */
+export interface RemovalAllowance {
+    plan: SubscriptionPlan;
+    limit: number;
+    used: number;
+    /** ISO date (YYYY-MM-DD) the allowance returns. */
+    resetsOn: string;
 }
 
 export interface Me {
@@ -356,6 +367,8 @@ export interface Me {
     entitlements: Entitlement[];
     vehicles: MyVehicle[];
     alerts: AlertsStatus;
+    /** Null unless the account is a subscriber held to a removal limit. */
+    removals: RemovalAllowance | null;
 }
 
 // Daily alert email state (GET /api/me, POST /api/me/alerts)
@@ -395,6 +408,8 @@ export interface MyVehicle {
     newThisWeek: number;
     access: MyVehicleAccess;
     addedAt: string;
+    /** Whether this car is included in the account's alert emails. */
+    alertsEnabled: boolean;
 }
 
 export interface MyVehicleCreate {

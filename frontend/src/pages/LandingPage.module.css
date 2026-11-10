@@ -556,6 +556,23 @@
   color: var(--text-muted);
 }
 
+.footerLinks {
+  display: flex;
+  gap: var(--space-lg);
+  margin-top: var(--space-md);
+}
+
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text-secondary);
+}
+
+.footerLinks a:hover {
+  color: var(--text-primary);
+}
+
 @media (min-width: 640px) {
   .plans {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -20,12 +20,14 @@ interface Props {
     vehicle: MyVehicle;
     me: Me | undefined;
     onRemove: (id: number) => void;
+    /** When set, Remove hands the car to the caller's own dialog instead of confirming here. */
+    onRequestRemove?: (vehicle: MyVehicle) => void;
     removing?: boolean;
     /** Extra menu items shown above Remove (for example Refresh on /admin). */
     actions?: ReactNode;
 }
 
-export function MyVehicleCard({ vehicle, me, onRemove, removing, actions }: Props) {
+export function MyVehicleCard({ vehicle, me, onRemove, onRequestRemove, removing, actions }: Props) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [confirming, setConfirming] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -150,7 +152,14 @@ export function MyVehicleCard({ vehicle, me, onRemove, removing, actions }: Prop
                             <button
                                 type="button"
                                 className={styles.menuItem}
-                                onClick={() => setConfirming(true)}
+                                onClick={() => {
+                                    if (onRequestRemove) {
+                                        setMenuOpen(false);
+                                        onRequestRemove(vehicle);
+                                    } else {
+                                        setConfirming(true);
+                                    }
+                                }}
                             >
                                 <Trash2 size={15} /> Remove
                             </button>

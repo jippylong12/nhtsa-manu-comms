@@ -291,3 +291,20 @@
     transition: none;
   }
 }
+
+.legal {
+  margin: var(--space-md) 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.legal a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
+.legal a:hover {
+  color: var(--text-primary);
+}

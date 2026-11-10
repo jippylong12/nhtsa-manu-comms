@@ -9,11 +9,19 @@ export function availabilityLabel(v: MyVehicle): string {
     return 'Unknown';
 }
 
-/** "Subscribed" when an active subscription covers every car, else "Unlocked" for a paid car. */
-export function accessLabel(v: MyVehicle, me: Me | undefined): 'Sample' | 'Unlocked' | 'Subscribed' {
+/** True when the account bought this car outright ($3, forever). */
+export function isUnlocked(v: { vehicleId: number }, me: Me | undefined): boolean {
+    return (
+        me?.entitlements.some(
+            (e) => e.kind === 'unlock' && e.status === 'active' && e.vehicleId === v.vehicleId
+        ) ?? false
+    );
+}
+
+/** "Unlocked" for a car the account bought, "On your plan" for one a subscription covers. */
+export function accessLabel(v: MyVehicle, me: Me | undefined): 'Sample' | 'Unlocked' | 'On your plan' {
     if (v.access === 'sample') return 'Sample';
-    const subscribed = me?.entitlements.some((e) => e.kind === 'subscription' && e.status === 'active');
-    return subscribed ? 'Subscribed' : 'Unlocked';
+    return isUnlocked(v, me) ? 'Unlocked' : 'On your plan';
 }
 
 /** The car's name as shown: "2024 Chevrolet Silverado EV" (stored values stay in NHTSA's capitals). */

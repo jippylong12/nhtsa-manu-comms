@@ -7,3 +7,7 @@ export const ALL_ACCESS_PRICE_LABEL = '$20/month';
 /* How many cars each subscription covers at a time; the server enforces it. */
 export const MONTHLY_CARS = 2;
 export const ALL_ACCESS_CARS = 20;
+
+/* How many plan cars a subscriber may remove per calendar month; the server enforces it. */
+export const MONTHLY_REMOVALS = 1;
+export const ALL_ACCESS_REMOVALS = 5;

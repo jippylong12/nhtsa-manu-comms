@@ -12,5 +12,9 @@ export const billingApi = {
         }),
 
     /** POST /api/billing/portal; ApiError 404 when the caller never paid. */
-    portal: () => request<BillingUrlResponse>('/billing/portal', { method: 'POST' }),
+    portal: (flow: 'manage' | 'cancel' = 'manage') =>
+        request<BillingUrlResponse>('/billing/portal', {
+            method: 'POST',
+            body: JSON.stringify({ flow }),
+        }),
 };

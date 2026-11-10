@@ -239,6 +239,19 @@ export function SignInDialog({ onClose, onSignedIn, initialMode = 'signin' }: Pr
             {creating ? 'Sign in' : 'Create a free account'}
           </button>
         </p>
+        {creating && (
+          <p className={styles.legal}>
+            By creating an account you agree to our{' '}
+            <a href="/terms" target="_blank" rel="noopener noreferrer">
+              Terms
+            </a>{' '}
+            and{' '}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">
+              Privacy Policy
+            </a>
+            .
+          </p>
+        )}
       </div>
     </div>
   );

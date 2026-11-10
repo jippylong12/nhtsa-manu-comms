@@ -1,0 +1,120 @@
+/* Terms and Privacy: a single reading column at a comfortable measure. */
+
+.page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-md) 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 44px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--text-primary);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.01em;
+}
+
+.updated {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.intro {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-lg);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-tight);
+}
+
+.num {
+  flex: none;
+  min-width: 1.5rem;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary-light);
+}
+
+.p {
+  margin: 0;
+  padding-left: calc(1.5rem + var(--space-sm));
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.list {
+  margin: 0;
+  padding-left: calc(1.5rem + var(--space-sm) + 1.1rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.list li::marker {
+  color: var(--text-muted);
+}
+
+.foot {
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.foot a {
+  color: var(--color-primary-light);
+}
+
+@media (max-width: 479px) {
+  .p {
+    padding-left: 0;
+  }
+
+  .list {
+    padding-left: 1.2rem;
+  }
+}

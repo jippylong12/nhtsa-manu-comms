@@ -18,10 +18,11 @@ export function useCheckout() {
     });
 }
 
-/** Creates a Customer Portal session, then leaves for the URL it returned. */
+/** Creates a Customer Portal session, then leaves for the URL it returned.
+ *  `mutate('cancel')` lands on Stripe's cancel page for the subscription. */
 export function usePortal() {
-    return useMutation<string, Error, void>({
-        mutationFn: async () => (await billingApi.portal()).url,
+    return useMutation<string, Error, 'manage' | 'cancel' | void>({
+        mutationFn: async (flow) => (await billingApi.portal(flow ?? 'manage')).url,
         onSuccess: (url) => window.location.assign(url),
     });
 }

@@ -32,6 +32,13 @@ export const meApi = {
     /** DELETE /api/me/vehicles/{id}: 404 (ApiError) when the account has no such link. */
     removeVehicle: (id: number) => request<void>(`/me/vehicles/${id}`, { method: 'DELETE' }),
 
+    /** PATCH /api/me/vehicles/{id}: include or leave out one car in alert emails. */
+    setVehicleAlerts: (id: number, alertsEnabled: boolean) =>
+        request<MyVehicle>(`/me/vehicles/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ alertsEnabled }),
+        }),
+
     /** GET /api/me/vehicles/{id}/bulletins: newest first, locked beyond the free sample. */
     bulletins: (id: number, params: MyBulletinsParams = {}) => {
         const q = new URLSearchParams();

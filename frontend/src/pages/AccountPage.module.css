@@ -110,11 +110,23 @@
   border-top: 0;
 }
 
+.carBlock {
+  flex: 1 1 12rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .car {
   flex: 1 1 10rem;
   color: var(--text-primary);
   font-weight: var(--font-weight-medium);
   text-decoration: none;
+}
+
+.carBlock .car {
+  flex: none;
 }
 
 .car:hover {
@@ -131,10 +143,22 @@
   border-radius: var(--radius-full);
 }
 
-.badgeFull {
+.badge[data-access='On your plan'] {
   color: var(--color-primary-light);
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.badge[data-access='Unlocked'] {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
+}
+
+.badge[data-access='Sample'] {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 32%, transparent);
 }
 
 .error {
@@ -146,4 +170,387 @@
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
   border-radius: var(--radius-md);
+}
+
+/* ---- Member plan card ---- */
+
+.member {
+  position: relative;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 60%),
+    var(--bg-elevated);
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--border-default));
+  box-shadow: var(--shadow-md), 0 0 40px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.memberTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.crest {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: hsl(45, 95%, 62%);
+  background: color-mix(in srgb, hsl(45, 95%, 55%) 14%, transparent);
+  border: 1px solid color-mix(in srgb, hsl(45, 95%, 55%) 40%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.memberName {
+  flex: 1;
+  min-width: 0;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-primary-light);
+}
+
+.planName {
+  margin: 0;
+  font-size: var(--font-size-2xl, 1.75rem);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--leading-tight);
+}
+
+.planPrice {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.renewal {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.renewal[data-ending] {
+  color: var(--color-warning);
+}
+
+.benefits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.benefits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: start;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.benefits svg {
+  margin-top: 3px;
+  color: var(--color-success);
+}
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--bg-base, #000) 45%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.usageRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  color: var(--text-secondary);
+}
+
+.usageRow strong {
+  color: var(--text-primary);
+}
+
+.meter {
+  height: 8px;
+  background: var(--border-subtle);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-light));
+  border-radius: inherit;
+  transition: width 240ms ease;
+}
+
+.upgrade {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-primary-light);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 45%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.upgrade p {
+  flex: 1 1 14rem;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.upgrade strong {
+  color: var(--text-primary);
+}
+
+.cancel {
+  color: var(--text-muted);
+}
+
+.cancel:hover {
+  color: var(--color-danger);
+}
+
+/* ---- Plan offers for accounts without a plan ---- */
+
+.offers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-md);
+  margin-top: var(--space-xs);
+}
+
+.offer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.offer[data-featured] {
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.offerTag {
+  position: absolute;
+  top: -10px;
+  left: var(--space-md);
+  padding: 1px 10px;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  background: var(--color-primary);
+  border-radius: var(--radius-full);
+}
+
+.offerName {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.offerPrice {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.offer .benefits {
+  font-size: var(--font-size-sm);
+}
+
+.offerCta {
+  margin-top: auto;
+  justify-content: center;
+}
+
+@media (min-width: 620px) {
+  .offers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---- Alerts ---- */
+
+.alertStatus {
+  --tone: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.alertStatus[data-on] {
+  --tone: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
+}
+
+.alertIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  border-radius: var(--radius-full);
+}
+
+.alertText {
+  flex: 1;
+  min-width: 0;
+}
+
+.alertTitle {
+  margin: 0 0 2px;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+/* A real switch: the input covers the track so the whole thing is the 44px target. */
+.switch {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  width: 46px;
+  height: 44px;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch span {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+  transition: background 160ms ease;
+}
+
+.switch span::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  transition: transform 160ms ease;
+}
+
+.switch input:checked + span {
+  background: var(--color-success);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(20px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 3px;
+}
+
+.switch input:disabled + span {
+  opacity: 0.55;
+}
+
+/* ---- Card head and legal links ---- */
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.cardLink {
+  font-size: var(--font-size-sm);
+  color: var(--color-primary-light);
+  text-decoration: none;
+}
+
+.cardLink:hover {
+  text-decoration: underline;
+}
+
+.legal {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-sm);
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.legal a {
+  color: var(--text-muted);
+}
+
+.legal a:hover {
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch span,
+  .switch span::after,
+  .meter span {
+    transition: none;
+  }
+}
+
+@media (max-width: 479px) {
+  .member {
+    padding: var(--space-md);
+  }
+
+  .memberTop {
+    flex-wrap: wrap;
+  }
+
+  .planName {
+    font-size: var(--font-size-xl);
+    white-space: nowrap;
+  }
 }
