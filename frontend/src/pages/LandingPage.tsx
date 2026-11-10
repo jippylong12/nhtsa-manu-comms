@@ -46,8 +46,8 @@ const PLANS = [
     cadence: '',
     blurb: 'See what is out there for your car.',
     features: [
-      'Look up any car, no account needed',
-      'Counts of serious, medium and small bulletins',
+      'Look up any car and see its counts',
+      'A free account to read your sample',
       'A free sample: the newest 1 serious, 2 medium and 3 small, in full',
     ],
     cta: 'Start free',
@@ -207,7 +207,7 @@ export function LandingPage() {
         <div className={styles.check} ref={checkRef}>
           <div className={styles.checkHead}>
             <h2 className={styles.checkLabel}>Check your car</h2>
-            <span className={styles.checkFree}>Free. No account. No card.</span>
+            <span className={styles.checkFree}>Free to check. No card needed.</span>
           </div>
           <VehiclePicker value={value} onChange={handleChange} yearRef={yearRef} />
           {!selected && (

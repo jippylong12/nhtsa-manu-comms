@@ -5,6 +5,18 @@
       "name": "frontend",
       "url": "http://localhost:5175",
       "port": 5175
+    },
+    {
+      "name": "product-api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/marcus.salinas/PycharmProjects/nhtsa-manu-comms-revo/.revo/workspaces/nhtsa-product/nhtsa-manu-comms/backend && set -a && source .env && set +a && DATABASE_URL=\"$TEST_DATABASE_URL\" PORT=18790 VITE_AUTH_FAKE_UID=marcus /Users/marcus.salinas/.pyenv/versions/3.11.6/bin/python ../tmp/lead_dev_server.py"],
+      "port": 18790
+    },
+    {
+      "name": "product-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/marcus.salinas/PycharmProjects/nhtsa-manu-comms-revo/.revo/workspaces/nhtsa-product/nhtsa-manu-comms/frontend && VITE_AUTH_FAKE_UID=marcus node node_modules/vite/bin/vite.js --config /private/tmp/claude-501/-Users-marcus-salinas-PycharmProjects-nhtsa-manu-comms/99af5dbb-e89b-4fb7-983b-5b7211e952aa/scratchpad/vite.local.config.mjs"],
+      "port": 5190
     }
   ]
 }
