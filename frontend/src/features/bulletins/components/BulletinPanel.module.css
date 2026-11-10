@@ -228,3 +228,111 @@
   flex-wrap: wrap;
   gap: var(--space-sm);
 }
+
+/* --- Reading-pane refinements (2026-11-09) --- */
+.panel {
+  gap: 0;
+  padding: 0;
+}
+
+.header {
+  max-width: none;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.top {
+  align-items: center;
+}
+
+.date {
+  font-size: var(--font-size-base);
+  font-variant-numeric: tabular-nums;
+}
+
+.type {
+  font-size: var(--font-size-sm);
+}
+
+.code {
+  display: none;
+}
+
+/* The summary is a paragraph, so it reads as one: no oversized bold block. */
+.headline {
+  max-width: 68ch;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.55;
+  letter-spacing: -0.003em;
+}
+
+.section {
+  max-width: none;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.section > * {
+  max-width: 68ch;
+}
+
+.h3 {
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.prose,
+.list {
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.list {
+  padding-left: 1.1rem;
+  gap: 6px;
+  color: var(--text-primary);
+}
+
+.list li::marker {
+  color: var(--text-muted);
+}
+
+.pdf {
+  align-self: flex-start;
+  min-height: 40px;
+}
+
+.details {
+  padding: var(--space-md) var(--space-lg);
+}
+
+.summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.summary:hover {
+  color: var(--text-primary);
+}
+
+.details {
+  max-width: none;
+}
+
+.summary {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rows {
+  max-width: 68ch;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}

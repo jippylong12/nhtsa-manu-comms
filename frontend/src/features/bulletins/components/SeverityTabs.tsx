@@ -95,7 +95,7 @@ export function SeverityTabs({
                             aria-selected={active}
                             tabIndex={active ? 0 : -1}
                             className={`${styles.tab} ${active ? styles.tabActive : ''}`}
-                            style={active ? { borderBottomColor: color } : undefined}
+                            style={{ ['--tab-color' as string]: color }}
                             onClick={() => onSelect(t.key)}
                             onKeyDown={(e) => onKeyDown(e, i)}
                         >
@@ -104,7 +104,6 @@ export function SeverityTabs({
                             {u > 0 && (
                                 <span
                                     className={styles.pill}
-                                    style={{ backgroundColor: color }}
                                     aria-label={`${u} unread`}
                                 >
                                     {u}

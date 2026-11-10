@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, FileText } from 'lucide-react';
 
 import { ApiError } from '@/client';
 import type { Facets, MyBulletinsParams, Severity, Vehicle } from '@/client';
@@ -294,7 +294,7 @@ export function VehiclePage() {
         </div>
       )}
       {data && data.items.length > 0 && (
-        <ul ref={listRef} className={styles.list}>
+        <ul ref={listRef} className={styles.list} aria-label="Bulletins">
           {data.items.map((b) => {
             const highlighted = kbMode && b.nhtsaId === activeId;
             return (
@@ -366,21 +366,27 @@ export function VehiclePage() {
 
       <header className={styles.header}>
         <h1 className={styles.title}>{vehicleName(vehicle)}</h1>
-        {ready && (
-          <p className={styles.unreadLine}>
-            {unreadTotal} unread · {vehicle.newThisWeek} new this week
-          </p>
-        )}
-        <div className={styles.badges}>
-          <span className={styles.badge}>{availabilityLabel(vehicle)}</span>
+        <p className={styles.metaLine}>
+          {ready && (
+            <>
+              <span>
+                <strong>{unreadTotal}</strong> unread
+              </span>
+              <span className={styles.metaSep} aria-hidden="true">·</span>
+              <span>
+                <strong>{vehicle.newThisWeek}</strong> new this week
+              </span>
+              <span className={styles.metaSep} aria-hidden="true">·</span>
+            </>
+          )}
           <span className={`${styles.badge} ${full ? styles.badgeAccess : ''}`}>{access}</span>
-        </div>
+          {!ready && <span className={styles.badge}>{availabilityLabel(vehicle)}</span>}
+        </p>
         {!ready && (
           <p className={styles.processing} role="status">
             We're reading this car's bulletins. You'll get an email when it's ready.
           </p>
         )}
-        {full && ready && <p className={styles.unlockedLine}>{access}</p>}
       </header>
 
       {full && (
@@ -448,8 +454,20 @@ export function VehiclePage() {
             {list}
           </div>
 
-          {selected && !compact && (
-            <div className={styles.panelCol}>{panel}</div>
+          {!compact && ready && (
+            <div className={styles.panelCol}>
+              {selected ? (
+                panel
+              ) : (
+                <div className={styles.panelEmpty}>
+                  <FileText size={28} aria-hidden="true" />
+                  <p className={styles.panelEmptyTitle}>Select a bulletin</p>
+                  <p className={styles.panelEmptyText}>
+                    Pick one from the list to see what it covers and how to tell if your car has it.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
           {selected && compact && (
             <BulletinSheet title={vehicleName(vehicle)} onClose={closePanel}>
