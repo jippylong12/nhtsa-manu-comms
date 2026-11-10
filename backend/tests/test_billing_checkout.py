@@ -308,3 +308,46 @@ async def test_a_missing_all_access_price_is_503_naming_the_variable(db, fake_st
         )
     assert r.status_code == 503
     assert "STRIPE_PRICE_ALL_ACCESS" in r.json()["detail"]
+
+
+async def test_cancel_opens_the_portal_on_the_cancel_page_of_the_users_subscription(
+    db, fake_stripe
+):
+    async with _http() as c:
+        uid = await _user_id(c, USER_A)
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, status, stripe_customer_id, "
+            "stripe_subscription_id) VALUES ($1, 'subscription', 'active', 'cus_9', $2)",
+            uid, PREFIX + "sub_cancel",
+        )
+        r = await c.post("/api/billing/portal", headers=_as(USER_A), json={"flow": "cancel"})
+    assert r.status_code == 200
+    (call,) = fake_stripe.portal_calls
+    assert call["customer"] == "cus_9"
+    assert call["flow_data"]["type"] == "subscription_cancel"
+    assert call["flow_data"]["subscription_cancel"] == {"subscription": PREFIX + "sub_cancel"}
+
+
+async def test_cancel_without_a_subscription_is_404(db, fake_stripe):
+    async with _http() as c:
+        uid = await _user_id(c, USER_A)
+        vid = await _linked_vehicle(db, c, USER_A)
+        await _entitlement(db, uid, "unlock", vehicle_id=vid, customer="cus_9")
+        r = await c.post("/api/billing/portal", headers=_as(USER_A), json={"flow": "cancel"})
+    assert r.status_code == 404
+    assert fake_stripe.portal_calls == []
+
+
+async def test_cancel_never_uses_another_accounts_subscription(db, fake_stripe):
+    async with _http() as c:
+        other = await _user_id(c, USER_B)
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, status, stripe_customer_id, "
+            "stripe_subscription_id) VALUES ($1, 'subscription', 'active', 'cus_b', $2)",
+            other, PREFIX + "sub_b",
+        )
+        uid = await _user_id(c, USER_A)
+        vid = await _linked_vehicle(db, c, USER_A)
+        await _entitlement(db, uid, "unlock", vehicle_id=vid, customer="cus_a")
+        r = await c.post("/api/billing/portal", headers=_as(USER_A), json={"flow": "cancel"})
+    assert r.status_code == 404

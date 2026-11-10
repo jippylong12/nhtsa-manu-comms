@@ -1,7 +1,7 @@
 """Business logic for the signed-in user's profile."""
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 from src.billing.entitlements import access_for
 from src.communications.flatfile import normalize_model
@@ -21,7 +21,8 @@ async def list_entitlements(user_id: int) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT kind, plan, vehicle_id, status, current_period_end FROM entitlements "
+            "SELECT kind, plan, vehicle_id, status, current_period_end, cancel_at_period_end "
+            "FROM entitlements "
             "WHERE user_id = $1 ORDER BY id",
             user_id,
         )
@@ -188,7 +189,8 @@ async def _my_vehicle(conn, user_id: int, vehicle_id: int) -> dict | None:
     """One of the caller's linked vehicles as a MyVehicle dict, or None when not linked."""
     row = await conn.fetchrow(
         """
-        SELECT v.id AS vehicle_id, v.year, v.make, v.model, uv.created_at AS added_at
+        SELECT v.id AS vehicle_id, v.year, v.make, v.model, uv.created_at AS added_at,
+               uv.alerts_enabled
         FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id
         WHERE uv.user_id = $1 AND uv.vehicle_id = $2 AND v.active
         """,
@@ -268,16 +270,116 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
     return result
 
 
-async def remove_vehicle(user_id: int, vehicle_id: int) -> bool:
-    """Unlink the vehicle from the caller only. False when the caller had no such link."""
+# How many cars a subscriber may take off the plan per calendar month (UTC). Without this a
+# plan for 2 cars would read any number of cars, two at a time.
+PLAN_REMOVALS = {"monthly": 1, "all_access": 5}
+
+
+class RemovalLimitReached(Exception):
+    """A subscriber has already removed as many plan cars this month as the plan allows."""
+
+    def __init__(self, plan: str, resets_on: date) -> None:
+        super().__init__(plan)
+        self.plan = plan
+        self.limit = PLAN_REMOVALS[plan]
+        self.resets_on = resets_on
+
+
+def _next_month(today: date) -> date:
+    return date(today.year + (today.month == 12), today.month % 12 + 1, 1)
+
+
+async def _removal_state(conn, user_id: int) -> dict | None:
+    """`{plan, limit, used, resets_on}` for a subscriber held to a removal limit, else None.
+
+    None for an admin and for an account without an active subscription: their removals
+    are neither counted nor limited.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT
+            EXISTS (SELECT 1 FROM users u WHERE u.id = $1 AND u.is_admin) AS admin,
+            (SELECT COALESCE(e.plan, 'monthly') FROM entitlements e
+              WHERE e.user_id = $1 AND e.kind = 'subscription' AND e.status = 'active'
+              ORDER BY (e.plan = 'all_access') DESC LIMIT 1) AS plan,
+            (SELECT count(*) FROM vehicle_removals r
+              WHERE r.user_id = $1
+                AND r.removed_at >= date_trunc('month', now() AT TIME ZONE 'utc')
+                                    AT TIME ZONE 'utc') AS used
+        """,
+        user_id,
+    )
+    if row["admin"] or row["plan"] not in PLAN_REMOVALS:
+        return None
+    return {
+        "plan": row["plan"],
+        "limit": PLAN_REMOVALS[row["plan"]],
+        "used": row["used"],
+        "resets_on": _next_month(datetime.now(timezone.utc).date()),
+    }
+
+
+async def get_removals(user_id: int) -> dict | None:
+    """The caller's removal allowance for GET /api/me, or None when not limited."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM user_vehicles WHERE user_id = $1 AND vehicle_id = $2 RETURNING 1",
+        return await _removal_state(conn, user_id)
+
+
+async def remove_vehicle(user_id: int, vehicle_id: int) -> bool:
+    """Unlink the vehicle from the caller only. False when the caller had no such link.
+
+    An unlocked car, and any car on an account without a subscription, comes off freely.
+    A car on a subscription counts against the plan's removals for the month and raises
+    RemovalLimitReached once they are used.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Serialise this user's removals so two requests cannot both take the last one.
+            await conn.execute("SELECT 1 FROM users WHERE id = $1 FOR UPDATE", user_id)
+            linked = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM user_vehicles "
+                "WHERE user_id = $1 AND vehicle_id = $2)",
+                user_id,
+                vehicle_id,
+            )
+            if not linked:
+                return False
+            unlocked = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM entitlements WHERE user_id = $1 AND kind = 'unlock' "
+                "AND status = 'active' AND vehicle_id = $2)",
+                user_id,
+                vehicle_id,
+            )
+            state = None if unlocked else await _removal_state(conn, user_id)
+            if state:
+                if state["used"] >= state["limit"]:
+                    raise RemovalLimitReached(state["plan"], state["resets_on"])
+                await conn.execute(
+                    "INSERT INTO vehicle_removals (user_id, vehicle_id) VALUES ($1, $2)",
+                    user_id,
+                    vehicle_id,
+                )
+            await conn.execute(
+                "DELETE FROM user_vehicles WHERE user_id = $1 AND vehicle_id = $2",
+                user_id,
+                vehicle_id,
+            )
+    return True
+
+
+async def set_vehicle_alerts(user_id: int, vehicle_id: int, enabled: bool) -> dict | None:
+    """Include or leave out one of the caller's cars in alert emails. None when not linked."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE user_vehicles SET alerts_enabled = $3 WHERE user_id = $1 AND vehicle_id = $2",
             user_id,
             vehicle_id,
+            enabled,
         )
-    return deleted is not None
+        return await _my_vehicle(conn, user_id, vehicle_id)
 
 
 def _newest_first(rows: list[dict]) -> None:

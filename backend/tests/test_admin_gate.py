@@ -149,7 +149,8 @@ async def test_me_lists_entitlements():
             await conn.close()
         r = await c.get("/api/me", headers=_as(USER_UID))
     assert r.json()["entitlements"] == [
-        {"kind": "subscription", "plan": None, "vehicleId": None, "status": "active", "currentPeriodEnd": None}
+        {"kind": "subscription", "plan": None, "vehicleId": None, "status": "active", "currentPeriodEnd": None,
+         "cancelAtPeriodEnd": False}
     ]
 
 

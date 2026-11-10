@@ -88,6 +88,19 @@ subscriptions are `kind = 'subscription'` in `entitlements`; the `plan` column (
 or `all_access`) says which. An account holds one subscription: changing plan happens in
 the Stripe Customer Portal, and `customer.subscription.updated` moves `plan` by the price id.
 
+Removing a car: an unlocked car, and any car on an account without a subscription, comes off
+freely (an unlocked car can be added back at no cost; a free sample that is removed hands
+out no new sample). A car on a subscription counts against the plan's removals for the
+calendar month (`PLAN_REMOVALS`: Monthly 1, All access 5); past that the DELETE is a 409
+that names the day the allowance returns. `GET /api/me` carries `removals`
+(`{plan, limit, used, resetsOn}`, null when not limited).
+
+Alerts: a new subscription turns the account's alerts on (the webhook clears
+`alert_state.unsubscribed_at`). `PATCH /api/me/vehicles/{id}` with `alertsEnabled` leaves one
+car out of the email. Cancelling: `POST /api/billing/portal` with `{"flow": "cancel"}` opens
+Stripe's portal on the cancel page; the subscription then runs to the end of its period with
+`cancel_at_period_end` set on the entitlement.
+
 The prices are three Stripe Price ids (`STRIPE_PRICE_UNLOCK`, `STRIPE_PRICE_MONTHLY`,
 `STRIPE_PRICE_ALL_ACCESS`). To
 change an amount, create a new price (the `stripe_setup` command in the runbook creates the

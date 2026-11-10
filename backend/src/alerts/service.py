@@ -182,6 +182,7 @@ async def build_for_user(
         JOIN communication_vehicles cv ON cv.vehicle_id = v.id
         JOIN communications c ON c.id = cv.communication_id
         WHERE uv.user_id = $1
+          AND uv.alerts_enabled
           AND c.status = 'processed'
           AND c.processed_at IS NOT NULL
           AND ($2::timestamptz IS NULL OR c.processed_at > $2)

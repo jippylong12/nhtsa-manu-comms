@@ -523,3 +523,24 @@ def test_an_alert_with_nothing_in_it_does_not_claim_anything_new():
     for body in (A.render_html(alert, UNSUB), A.render_text(alert, UNSUB)):
         assert "new communication" not in body
         assert "Now ready" not in body
+
+
+async def test_a_car_left_out_of_alerts_is_not_in_the_email(conn, mailbox):
+    uid, email = await make_user(conn, "percar", subscription="active")
+    loud = await make_vehicle(conn, uid, "LOUDCAR")
+    quiet = await make_vehicle(conn, uid, "QUIETCAR")
+    await conn.execute(
+        "UPDATE user_vehicles SET alerts_enabled = false WHERE user_id = $1 AND vehicle_id = $2",
+        uid, quiet,
+    )
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, loud, "ALERT-L0", -5, number="ALL0")
+    await make_comm(conn, quiet, "ALERT-Q0", -5, number="ALQ0")
+    await make_comm(conn, loud, "ALERT-L1", 1, number="ALL1")
+    await make_comm(conn, quiet, "ALERT-Q1", 1, number="ALQ1")
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "LLM summary ALERT-L1" in mail["html"]
+    assert "ALERT-Q1" not in mail["html"] and "QUIETCAR" not in mail["html"]
