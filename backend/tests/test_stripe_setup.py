@@ -45,13 +45,16 @@ def test_dry_run_is_the_default_and_calls_nothing(capsys):
     assert fake.list_calls == [] and fake.create_calls == []
 
 
-def test_apply_creates_both_prices_and_prints_env_lines(capsys):
+def test_apply_creates_the_three_prices_and_prints_env_lines(capsys):
     fake = FakeStripe()
     assert stripe_setup.main(["--apply"], stripe_module=fake) == 0
     out = capsys.readouterr().out
     assert "STRIPE_PRICE_UNLOCK=price_new_nhtsa_unlock_one_time" in out
     assert "STRIPE_PRICE_MONTHLY=price_new_nhtsa_monthly" in out
-    unlock, monthly = fake.create_calls
+    assert "STRIPE_PRICE_ALL_ACCESS=price_new_nhtsa_all_access" in out
+    unlock, monthly, all_access = fake.create_calls
+    assert (all_access["unit_amount"], all_access["recurring"]) == (2000, {"interval": "month"})
+    assert all_access["product_data"] == {"name": "NHTSA Comms all access"}
     assert (unlock["unit_amount"], unlock["currency"]) == (300, "usd")
     assert "recurring" not in unlock
     assert unlock["product_data"] == {"name": "Vehicle unlock"}
@@ -61,7 +64,13 @@ def test_apply_creates_both_prices_and_prints_env_lines(capsys):
 
 
 def test_apply_reuses_existing_lookup_keys(capsys):
-    fake = FakeStripe({"nhtsa_unlock_one_time": "price_old_unlock", "nhtsa_monthly": "price_old_m"})
+    fake = FakeStripe(
+        {
+            "nhtsa_unlock_one_time": "price_old_unlock",
+            "nhtsa_monthly": "price_old_m",
+            "nhtsa_all_access": "price_old_a",
+        }
+    )
     assert stripe_setup.main(["--apply"], stripe_module=fake) == 0
     out = capsys.readouterr().out
     assert "STRIPE_PRICE_UNLOCK=price_old_unlock" in out
@@ -74,5 +83,8 @@ def test_apply_creates_only_the_missing_price(capsys):
     fake = FakeStripe({"nhtsa_monthly": "price_old_m"})
     stripe_setup.main(["--apply"], stripe_module=fake)
     out = capsys.readouterr().out
-    assert [c["lookup_key"] for c in fake.create_calls] == ["nhtsa_unlock_one_time"]
+    assert [c["lookup_key"] for c in fake.create_calls] == [
+        "nhtsa_unlock_one_time",
+        "nhtsa_all_access",
+    ]
     assert "STRIPE_PRICE_MONTHLY=price_old_m" in out

@@ -75,13 +75,23 @@ user per 24 hours. Admins are exempt from both.
 
 | Plan | Price | Includes |
 |------|-------|----------|
-| Free account | $0 | The sample (1 serious, 2 medium, 3 small) of each car, up to 10 cars |
-| Unlock | $3, one time | Every bulletin and symptom search for one car |
-| Subscription | $5 per month | Every bulletin and symptom search for every car on the account, and daily email alerts |
+| Free account | $0 | The sample (1 serious, 2 medium, 3 small) of two different cars, ever |
+| Unlock | $3, one time | Every bulletin and symptom search for one car, forever, including bulletins published later |
+| Monthly | $5 per month | Every bulletin and symptom search for 2 cars at a time, and daily email alerts |
+| All access | $20 per month | The same for 20 cars at a time |
 
-The prices are two Stripe Price ids (`STRIPE_PRICE_UNLOCK`, `STRIPE_PRICE_MONTHLY`). To
+Car limits (`_add_refusal` in `backend/src/me/service.py`): a subscriber may have as many
+cars as the plan covers, not counting cars the account has unlocked; a car can be removed
+and another added. A third (or twenty-first) add is a 402 that names the plan. Without a
+subscription the free-sample rule applies and an account holds at most 10 cars. Both
+subscriptions are `kind = 'subscription'` in `entitlements`; the `plan` column (`monthly`
+or `all_access`) says which. An account holds one subscription: changing plan happens in
+the Stripe Customer Portal, and `customer.subscription.updated` moves `plan` by the price id.
+
+The prices are three Stripe Price ids (`STRIPE_PRICE_UNLOCK`, `STRIPE_PRICE_MONTHLY`,
+`STRIPE_PRICE_ALL_ACCESS`). To
 change an amount, create a new price (the `stripe_setup` command in the runbook creates the
-two prices and reuses them by lookup key, so a changed amount needs a new lookup key in that
+three prices and reuses them by lookup key, so a changed amount needs a new lookup key in that
 script) and set the new id. The webhook handles `checkout.session.completed`,
 `checkout.session.async_payment_succeeded`, `customer.subscription.created`,
 `customer.subscription.updated`, `customer.subscription.deleted` and `invoice.payment_failed`.

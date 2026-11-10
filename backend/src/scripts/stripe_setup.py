@@ -1,4 +1,4 @@
-"""Create the two Stripe prices the app sells, idempotently by lookup key.
+"""Create the three Stripe prices the app sells, idempotently by lookup key.
 
     python -m src.scripts.stripe_setup --dry-run   # default: print what would be created
     python -m src.scripts.stripe_setup --apply     # create (or reuse) and print the .env lines
@@ -24,6 +24,13 @@ PRICES = [
         "lookup_key": "nhtsa_monthly",
         "product": "NHTSA Comms monthly",
         "amount": 500,
+        "recurring": {"interval": "month"},
+    },
+    {
+        "env": "STRIPE_PRICE_ALL_ACCESS",
+        "lookup_key": "nhtsa_all_access",
+        "product": "NHTSA Comms all access",
+        "amount": 2000,
         "recurring": {"interval": "month"},
     },
 ]

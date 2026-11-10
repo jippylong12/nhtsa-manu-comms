@@ -125,6 +125,7 @@ erDiagram
         bigserial id PK
         bigint user_id FK
         text kind "unlock|subscription"
+        text plan "monthly|all_access, null for an unlock (0019)"
         bigint vehicle_id FK "null for a subscription"
         text status "active|canceled|past_due"
         text stripe_customer_id
@@ -296,7 +297,8 @@ Five tables sit beside the corpus. None of them changes `communications`,
   only this link, never the vehicle or its bulletins.
 - `entitlements` holds what a user paid for. `kind = 'unlock'` carries a `vehicle_id` and
   opens that one car; `kind = 'subscription'` has a null `vehicle_id` and opens every car on
-  the account. Only `status = 'active'` grants anything: `past_due` and `canceled` rows are
+  the account, and its `plan` (`monthly` 2 cars, `all_access` 20 cars) sets how many cars the
+  account may hold. Only `status = 'active'` grants anything: `past_due` and `canceled` rows are
   kept for history and the account page. The two Stripe id columns are unique, so a webhook
   replay cannot create a second row for the same checkout or subscription.
 - `stripe_events` records every Stripe event id the webhook has handled. An id seen once is

@@ -70,6 +70,7 @@ def fake_stripe(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "stripe_price_unlock", "price_unlock_test")
     monkeypatch.setattr(settings, "stripe_price_monthly", "price_monthly_test")
+    monkeypatch.setattr(settings, "stripe_price_all_access", "price_all_access_test")
     monkeypatch.setattr(settings, "app_base_url", "https://app.test")
     monkeypatch.setattr(stripe_client, "client", lambda: fake)
     monkeypatch.setattr(
@@ -130,7 +131,9 @@ async def test_unlock_creates_a_payment_session_for_the_unlock_price(db, fake_st
     (call,) = fake_stripe.checkout_calls
     assert call["mode"] == "payment"
     assert call["line_items"] == [{"price": "price_unlock_test", "quantity": 1}]
-    assert call["metadata"] == {"kind": "unlock", "vehicle_id": str(vid), "user_id": str(uid)}
+    assert call["metadata"] == {
+        "kind": "unlock", "plan": "", "vehicle_id": str(vid), "user_id": str(uid)
+    }
     assert call["client_reference_id"] == str(uid)
     assert call["customer_email"] == f"{USER_A}@example.com"
     assert "customer" not in call
@@ -180,7 +183,9 @@ async def test_subscription_creates_a_subscription_session_for_the_monthly_price
     (call,) = fake_stripe.checkout_calls
     assert call["mode"] == "subscription"
     assert call["line_items"] == [{"price": "price_monthly_test", "quantity": 1}]
-    assert call["metadata"] == {"kind": "subscription", "vehicle_id": "", "user_id": str(uid)}
+    assert call["metadata"] == {
+        "kind": "subscription", "plan": "monthly", "vehicle_id": "", "user_id": str(uid)
+    }
     assert call["cancel_url"] == "https://app.test/app/account"
     assert "customer_creation" not in call  # Stripe rejects it in subscription mode
 
@@ -252,3 +257,54 @@ async def test_a_missing_stripe_key_is_503_naming_the_variable(db, monkeypatch):
         r = await c.post("/api/billing/checkout", headers=_as(USER_A), json={"kind": "subscription"})
     assert r.status_code == 503
     assert "STRIPE_SECRET_KEY" in r.json()["detail"]
+
+
+async def test_all_access_creates_a_subscription_session_for_the_all_access_price(db, fake_stripe):
+    async with _http() as c:
+        r = await c.post(
+            "/api/billing/checkout",
+            headers=_as(USER_A),
+            json={"kind": "subscription", "plan": "all_access"},
+        )
+    assert r.status_code == 200
+    (call,) = fake_stripe.checkout_calls
+    assert call["mode"] == "subscription"
+    assert call["line_items"] == [{"price": "price_all_access_test", "quantity": 1}]
+    assert call["metadata"]["plan"] == "all_access"
+
+
+async def test_a_monthly_subscriber_cannot_start_a_second_subscription_for_all_access(
+    db, fake_stripe
+):
+    async with _http() as c:
+        await _entitlement(db, await _user_id(c, USER_A), "subscription")
+        r = await c.post(
+            "/api/billing/checkout",
+            headers=_as(USER_A),
+            json={"kind": "subscription", "plan": "all_access"},
+        )
+    assert r.status_code == 409
+    assert fake_stripe.checkout_calls == []
+
+
+async def test_an_unknown_plan_is_422(db, fake_stripe):
+    async with _http() as c:
+        r = await c.post(
+            "/api/billing/checkout",
+            headers=_as(USER_A),
+            json={"kind": "subscription", "plan": "free_forever"},
+        )
+    assert r.status_code == 422
+    assert fake_stripe.checkout_calls == []
+
+
+async def test_a_missing_all_access_price_is_503_naming_the_variable(db, fake_stripe, monkeypatch):
+    monkeypatch.setattr(get_settings(), "stripe_price_all_access", "")
+    async with _http() as c:
+        r = await c.post(
+            "/api/billing/checkout",
+            headers=_as(USER_A),
+            json={"kind": "subscription", "plan": "all_access"},
+        )
+    assert r.status_code == 503
+    assert "STRIPE_PRICE_ALL_ACCESS" in r.json()["detail"]

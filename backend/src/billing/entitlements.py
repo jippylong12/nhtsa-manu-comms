@@ -32,7 +32,7 @@ async def access_for(
 async def list_for_user(conn: asyncpg.Connection, user_id: int) -> list[dict]:
     """The user's entitlements, oldest first."""
     rows = await conn.fetch(
-        "SELECT kind, vehicle_id, status, current_period_end FROM entitlements "
+        "SELECT kind, plan, vehicle_id, status, current_period_end FROM entitlements "
         "WHERE user_id = $1 ORDER BY id",
         user_id,
     )

@@ -60,6 +60,7 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `STRIPE_WEBHOOK_SECRET` | yes | no | yes | Stripe webhook check |
 | `STRIPE_PRICE_UNLOCK` | yes | no | no | Stripe price id |
 | `STRIPE_PRICE_MONTHLY` | yes | no | no | Stripe price id |
+| `STRIPE_PRICE_ALL_ACCESS` | yes | no | no | Stripe price id of the $20/month all-access plan |
 | `CORS_ORIGINS` | optional | no | no | JSON list; the SPA is same-origin in production, leave the default |
 | `REFRESH_DOCUMENT_LIMIT` | optional | no | no | Most documents read per in-app read of one car (default 0, no limit). Only for a local try-out; leave unset in production |
 | `READ_ONLY` | optional (leave unset or `false`) | no | no | Read-only mode, see above |

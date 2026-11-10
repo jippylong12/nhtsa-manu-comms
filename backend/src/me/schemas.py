@@ -12,6 +12,7 @@ from src.vehicles.schemas import CamelModel
 
 class EntitlementResponse(CamelModel):
     kind: str
+    plan: str | None = None
     vehicle_id: int | None = None
     status: str
     current_period_end: datetime | None = None

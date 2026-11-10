@@ -99,10 +99,11 @@ async def _user(conn, uid: str) -> int:
     )
 
 
-async def _subscribe(conn, uid: str) -> None:
+async def _subscribe(conn, uid: str, plan: str = "monthly") -> None:
     await conn.execute(
-        "INSERT INTO entitlements (user_id, kind, status) VALUES ($1, 'subscription', 'active')",
-        await _user(conn, uid),
+        "INSERT INTO entitlements (user_id, kind, status, plan) "
+        "VALUES ($1, 'subscription', 'active', $2)",
+        await _user(conn, uid), plan,
     )
 
 
@@ -147,11 +148,16 @@ async def test_adding_twice_is_idempotent(db):
 
 
 async def test_the_eleventh_vehicle_is_409(db):
-    await _subscribe(db, USER_A)  # only a subscriber can reach ten cars
+    # Without a subscription the only way to ten cars is to unlock each one.
     async with _http() as c:
         for i in range(10):
             r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body(f"CAR{i}"))
             assert r.status_code == 201
+            await db.execute(
+                "INSERT INTO entitlements (user_id, kind, vehicle_id, status) "
+                "VALUES ($1, 'unlock', $2, 'active')",
+                await _user(db, USER_A), r.json()["vehicleId"],
+            )
         r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("CAR10"))
         again = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("CAR3"))
     assert r.status_code == 409
@@ -227,20 +233,21 @@ async def test_a_user_id_in_the_request_is_ignored(db):
     assert me_b.json()["vehicles"] == []
 
 
-async def test_a_capped_account_cannot_create_vehicles_by_collecting_409s(db, refresh_calls):
-    await _subscribe(db, USER_A)
+async def test_a_capped_account_cannot_create_vehicles_by_collecting_refusals(db, refresh_calls):
+    await _subscribe(db, USER_A, "all_access")
     async with _http() as c:
-        for i in range(10):
+        for i in range(20):
             assert (
                 await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body(f"CAR{i}"))
             ).status_code == 201
         r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("OVERCAP"))
-    assert r.status_code == 409
+    assert r.status_code == 402
+    assert "20 cars" in r.json()["detail"]
     # The refused identity was never created, so the nightly pipeline has nothing to ingest.
     assert await db.fetchval(
         "SELECT count(*) FROM vehicles WHERE make = $1 AND model = 'OVERCAP'", MAKE
     ) == 0
-    assert len(refresh_calls) == 10
+    assert len(refresh_calls) == 20
 
 
 async def test_read_only_mode_links_a_new_vehicle_without_starting_a_refresh(
@@ -297,11 +304,59 @@ async def test_unlocking_a_car_frees_its_sample_slot(db):
         assert await _add(c, USER_A, "FOUR") == 402
 
 
-async def test_a_subscriber_is_not_held_to_two_cars(db):
+async def test_the_monthly_plan_covers_two_cars_and_the_third_is_refused(db, refresh_calls):
     await _subscribe(db, USER_A)
+    async with _http() as c:
+        assert await _add(c, USER_A, "ONE") == 201
+        assert await _add(c, USER_A, "TWO") == 201
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("THREE"))
+        assert r.status_code == 402
+        assert "2 cars" in r.json()["detail"] and "All access" in r.json()["detail"]
+        # Adding a car already on the account stays idempotent at the limit.
+        assert await _add(c, USER_A, "ONE") in (200, 201)
+    assert await db.fetchval(
+        "SELECT count(*) FROM vehicles WHERE make = $1 AND model = 'THREE'", MAKE
+    ) == 0
+
+
+async def test_a_monthly_subscriber_can_swap_a_car(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        first = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("ONE"))
+        assert await _add(c, USER_A, "TWO") == 201
+        await c.delete(f"/api/me/vehicles/{first.json()['vehicleId']}", headers=_as(USER_A))
+        assert await _add(c, USER_A, "THREE") == 201
+
+
+async def test_an_unlocked_car_does_not_take_a_place_on_the_plan(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("ONE"))
+        assert await _add(c, USER_A, "TWO") == 201
+        assert await _add(c, USER_A, "THREE") == 402
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, vehicle_id, status) "
+            "VALUES ($1, 'unlock', $2, 'active')",
+            await _user(db, USER_A), r.json()["vehicleId"],
+        )
+        assert await _add(c, USER_A, "THREE") == 201
+        assert await _add(c, USER_A, "FOUR") == 402
+
+
+async def test_all_access_is_not_held_to_two_cars(db):
+    await _subscribe(db, USER_A, "all_access")
     async with _http() as c:
         for model in ("ONE", "TWO", "THREE", "FOUR"):
             assert await _add(c, USER_A, model) == 201
+
+
+async def test_a_canceled_plan_no_longer_covers_new_cars(db):
+    await _subscribe(db, USER_A, "all_access")
+    async with _http() as c:
+        for model in ("ONE", "TWO", "THREE"):
+            assert await _add(c, USER_A, model) == 201
+        await db.execute("UPDATE entitlements SET status = 'canceled'")
+        assert await _add(c, USER_A, "FOUR") == 402
 
 
 async def test_one_accounts_samples_do_not_count_against_another(db):
