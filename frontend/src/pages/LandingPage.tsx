@@ -6,7 +6,13 @@ import { ArrowRight, ArrowUp, BellRing, Check, FileText, ListFilter, Stethoscope
 
 import { useAuth } from '../auth/AuthContext';
 import { SignInDialog } from '../auth/SignInDialog';
-import { MONTHLY_PRICE_LABEL, UNLOCK_PRICE_LABEL } from '../features/billing/prices';
+import {
+  ALL_ACCESS_CARS,
+  ALL_ACCESS_PRICE_LABEL,
+  MONTHLY_CARS,
+  MONTHLY_PRICE_LABEL,
+  UNLOCK_PRICE_LABEL,
+} from '../features/billing/prices';
 import { CountsCard } from '../features/lookup/CountsCard';
 import { useAddVehicle } from '../features/my-vehicles/hooks/useMyVehicles';
 import { useLookup } from '../features/lookup/useLookup';
@@ -68,18 +74,33 @@ const PLANS = [
     featured: false,
   },
   {
-    key: 'subscribe',
-    name: 'Subscribe',
+    key: 'monthly',
+    name: 'Monthly',
     price: MONTHLY_PRICE_LABEL.replace('/month', ''),
     cadence: 'a month',
-    blurb: 'Every car you own, and the news as it happens.',
+    blurb: 'Both your cars, and the news the day it lands.',
     features: [
-      'Everything in Unlock, for every car on your account (up to 10)',
-      'A daily email when a new bulletin lands for one of your cars',
+      `An email the morning a new bulletin lands for one of your cars`,
+      `Everything in Unlock, for ${MONTHLY_CARS} cars at a time`,
+      'Swap a car whenever you change one',
       'Cancel any time from your account page',
     ],
     cta: 'Start free, subscribe inside',
     featured: true,
+  },
+  {
+    key: 'all-access',
+    name: 'All access',
+    price: ALL_ACCESS_PRICE_LABEL.replace('/month', ''),
+    cadence: 'a month',
+    blurb: 'For a full driveway, a shop or a small fleet.',
+    features: [
+      `Everything in Monthly, for ${ALL_ACCESS_CARS} cars at a time`,
+      'Daily email alerts across all of them',
+      'Cancel any time from your account page',
+    ],
+    cta: 'Start free, subscribe inside',
+    featured: false,
   },
 ];
 
@@ -98,7 +119,7 @@ const FAQ = [
   },
   {
     q: 'How do I pay?',
-    a: 'You do not pick a plan up front. Sign up free, add your car, and look at the sample. The Unlock and Subscribe buttons are on your car\'s page, and payment runs through Stripe.',
+    a: 'You do not pick a plan up front. Sign up free, add your car, and look at the sample. The Unlock and Subscribe buttons are on your car\'s page, both subscriptions are on your account page, and payment runs through Stripe.',
   },
   {
     q: 'What if my car is not there yet?',
@@ -292,7 +313,7 @@ export function LandingPage() {
         <div className={styles.plans}>
           {PLANS.map((plan) => (
             <article key={plan.key} className={`${styles.plan} ${plan.featured ? styles.planFeatured : ''}`}>
-              {plan.featured && <span className={styles.planTag}>Most complete</span>}
+              {plan.featured && <span className={styles.planTag}>Most popular</span>}
               <h3 className={styles.planName}>{plan.name}</h3>
               <p className={styles.planPrice}>
                 <span className={styles.planAmount}>{plan.price}</span>
@@ -318,7 +339,7 @@ export function LandingPage() {
           ))}
         </div>
         <p className={styles.pricingNote}>
-          Every account starts free: check your car above, then sign up to read the sample. You choose Unlock or Subscribe on your car's page.
+          Every account starts free: check your car above, then sign up to read the sample. You choose Unlock or a subscription on your car's page or your account page.
         </p>
       </section>
 

@@ -3,7 +3,7 @@
 import { Loader2, Lock } from 'lucide-react';
 
 import type { CheckoutKind, SeverityCounts } from '@/client';
-import { MONTHLY_PRICE_LABEL, UNLOCK_PRICE_LABEL } from '../../billing/prices';
+import { MONTHLY_CARS, MONTHLY_PRICE_LABEL, UNLOCK_PRICE_LABEL } from '../../billing/prices';
 import styles from './PlanBar.module.css';
 
 interface Props {
@@ -34,7 +34,7 @@ export function PlanBar({ counts, sampleCounts, onUnlock, onSubscribe, pending =
                     {pending === 'subscription' ? <Loader2 size={16} className={styles.spin} aria-hidden="true" /> : null}
                     {pending === 'subscription'
                         ? 'Opening checkout…'
-                        : `Subscribe · ${MONTHLY_PRICE_LABEL}, every car + daily alerts`}
+                        : `Subscribe · ${MONTHLY_PRICE_LABEL}, ${MONTHLY_CARS} cars + daily alerts`}
                 </button>
             </div>
             {error && (

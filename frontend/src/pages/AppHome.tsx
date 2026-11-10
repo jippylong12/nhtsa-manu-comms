@@ -13,11 +13,16 @@ import {
   useRemoveVehicle,
 } from '../features/my-vehicles/hooks/useMyVehicles';
 import { PastDueBanner } from '../features/billing/components/PastDueBanner';
-import { isPastDue } from '../features/billing/plan';
+import { isPastDue, planOf } from '../features/billing/plan';
 import { useToast } from '../features/my-vehicles/hooks/useToast';
 import { ApiError } from '@/client';
-import { useCheckout } from '../features/billing/hooks/useBilling';
-import { MONTHLY_PRICE_LABEL } from '../features/billing/prices';
+import { useCheckout, usePortal } from '../features/billing/hooks/useBilling';
+import {
+  ALL_ACCESS_CARS,
+  ALL_ACCESS_PRICE_LABEL,
+  MONTHLY_CARS,
+  MONTHLY_PRICE_LABEL,
+} from '../features/billing/prices';
 import styles from './AppHome.module.css';
 
 export function AppHome() {
@@ -27,7 +32,10 @@ export function AppHome() {
   const [modalOpen, setModalOpen] = useState(false);
   const [sampleLimit, setSampleLimit] = useState<string | null>(null);
   const checkout = useCheckout();
+  const portal = usePortal();
   const meQuery = useMeQuery();
+  const plan = planOf(meQuery.data);
+  const leaving = checkout.isPending || checkout.isSuccess || portal.isPending || portal.isSuccess;
   const addVehicle = useAddVehicle();
   const removeVehicle = useRemoveVehicle();
   const vehicles = meQuery.data?.vehicles ?? [];
@@ -38,7 +46,7 @@ export function AppHome() {
       {
         onSuccess: () => setModalOpen(false),
         onError: (err) => {
-          // 402: the free samples are used up. That is an offer, not an error toast.
+          // 402: the free samples or the plan's cars are used up. An offer, not an error toast.
           if (err instanceof ApiError && err.status === 402) {
             setModalOpen(false);
             setSampleLimit(err.message);
@@ -74,21 +82,56 @@ export function AppHome() {
           </span>
           <div className={styles.upsellText}>
             <p className={styles.upsellTitle}>{sampleLimit}</p>
-            <p className={styles.upsellBody}>
-              A subscription covers every car on your account, up to 10, with a daily email when a
-              new bulletin lands.
-            </p>
+            {plan === null && (
+              <p className={styles.upsellBody}>
+                Monthly covers {MONTHLY_CARS} cars and emails you the morning a new bulletin lands
+                for one of them. All access covers {ALL_ACCESS_CARS}.
+              </p>
+            )}
+            {plan === 'monthly' && (
+              <p className={styles.upsellBody}>
+                All access is {ALL_ACCESS_PRICE_LABEL} for {ALL_ACCESS_CARS} cars. You change plan
+                on the billing page.
+              </p>
+            )}
             {checkout.isError && <p className={styles.upsellError}>{checkout.error.message}</p>}
+            {portal.isError && <p className={styles.upsellError}>{portal.error.message}</p>}
           </div>
           <div className={styles.upsellActions}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={checkout.isPending || checkout.isSuccess}
-              onClick={() => checkout.mutate({ kind: 'subscription' })}
-            >
-              {checkout.isPending || checkout.isSuccess ? 'Opening checkout...' : `Subscribe ${MONTHLY_PRICE_LABEL}`}
-            </button>
+            {plan === null && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={leaving}
+                  onClick={() => checkout.mutate({ kind: 'subscription', plan: 'monthly' })}
+                >
+                  {leaving && checkout.variables?.plan === 'monthly'
+                    ? 'Opening checkout...'
+                    : `Monthly ${MONTHLY_PRICE_LABEL}`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={leaving}
+                  onClick={() => checkout.mutate({ kind: 'subscription', plan: 'all_access' })}
+                >
+                  {leaving && checkout.variables?.plan === 'all_access'
+                    ? 'Opening checkout...'
+                    : `All access ${ALL_ACCESS_PRICE_LABEL}`}
+                </button>
+              </>
+            )}
+            {plan === 'monthly' && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={leaving}
+                onClick={() => portal.mutate()}
+              >
+                {leaving ? 'Opening...' : 'Change plan'}
+              </button>
+            )}
             <button type="button" className="btn btn-ghost" onClick={() => setSampleLimit(null)}>
               Not now
             </button>

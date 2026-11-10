@@ -3,13 +3,14 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { billingApi } from '@/client';
-import type { CheckoutKind } from '@/client';
+import type { CheckoutKind, SubscriptionPlan } from '@/client';
 import { rememberCheckout } from '../pending';
 
 /** Creates a Checkout session on the server, then leaves for the URL it returned. */
 export function useCheckout() {
-    return useMutation<string, Error, { kind: CheckoutKind; vehicleId?: number }>({
-        mutationFn: async ({ kind, vehicleId }) => (await billingApi.checkout(kind, vehicleId)).url,
+    return useMutation<string, Error, { kind: CheckoutKind; vehicleId?: number; plan?: SubscriptionPlan }>({
+        mutationFn: async ({ kind, vehicleId, plan }) =>
+            (await billingApi.checkout(kind, vehicleId, plan)).url,
         onSuccess: (url, { kind, vehicleId }) => {
             rememberCheckout({ kind, vehicleId });
             window.location.assign(url);

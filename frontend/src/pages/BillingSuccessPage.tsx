@@ -100,7 +100,7 @@ export function BillingSuccessPage() {
             {vehicle ? `${vehicleName(vehicle)} is` : 'Your car is'} unlocked: every bulletin is open.
           </p>
         ) : (
-          <p className={styles.line}>You're subscribed: every car is open, with daily alerts.</p>
+          <p className={styles.line}>You're subscribed: your cars are open, and new bulletins come to you by email.</p>
         )}
         {kind === 'unlock' && landed?.vehicleId != null ? (
           <Link to={`/app/vehicles/${landed.vehicleId}`} className={`btn btn-primary ${styles.cta}`}>

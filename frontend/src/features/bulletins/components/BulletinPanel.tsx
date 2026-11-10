@@ -91,7 +91,7 @@ export function BulletinPanel({
                     <p className={styles.planTitle}>
                         <Lock size={14} aria-hidden="true" /> This bulletin is locked
                     </p>
-                    <p className={styles.planText}>Unlock this car to read it, or subscribe for every car.</p>
+                    <p className={styles.planText}>Unlock this car to read it, or subscribe for your cars and a daily alert.</p>
                     <div className={styles.planButtons}>
                         <button type="button" className="btn btn-primary" onClick={onUnlock}>
                             Unlock this car {UNLOCK_PRICE_LABEL}

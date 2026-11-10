@@ -9,11 +9,18 @@ import { PastDueBanner } from '../features/billing/components/PastDueBanner';
 import { useCheckout, usePortal } from '../features/billing/hooks/useBilling';
 import {
   hasBillingAccount,
+  planOf,
   planState,
   subscriptionOf,
   unlockedCount,
 } from '../features/billing/plan';
-import { MONTHLY_PRICE_LABEL, UNLOCK_PRICE_LABEL } from '../features/billing/prices';
+import {
+  ALL_ACCESS_CARS,
+  ALL_ACCESS_PRICE_LABEL,
+  MONTHLY_CARS,
+  MONTHLY_PRICE_LABEL,
+  UNLOCK_PRICE_LABEL,
+} from '../features/billing/prices';
 import { accessLabel, vehicleName } from '../features/my-vehicles/access';
 import { useMeQuery } from '../features/my-vehicles/hooks/useMyVehicles';
 import styles from './AccountPage.module.css';
@@ -22,7 +29,12 @@ function planLine(me: ReturnType<typeof useMeQuery>['data']): string {
   const state = planState(me);
   const end = subscriptionOf(me)?.currentPeriodEnd;
   if (state === 'subscribed') {
-    return `Subscribed: ${MONTHLY_PRICE_LABEL}${end ? `, renews ${format(new Date(end), 'MMM d, yyyy')}` : ''}`;
+    const [name, price, cars] =
+      planOf(me) === 'all_access'
+        ? ['All access', ALL_ACCESS_PRICE_LABEL, ALL_ACCESS_CARS]
+        : ['Monthly', MONTHLY_PRICE_LABEL, MONTHLY_CARS];
+    const renews = end ? `, renews ${format(new Date(end), 'MMM d, yyyy')}` : '';
+    return `${name}: ${price}, ${cars} cars and daily alerts${renews}`;
   }
   if (state === 'past_due') return 'Payment problem: your subscription is past due';
   if (state === 'unlocked') {
@@ -91,18 +103,42 @@ export function AccountPage() {
                 </button>
               )}
               {!subscribed && (
-                <button
-                  type="button"
-                  className={`btn btn-primary ${styles.btn}`}
-                  disabled={checkingOut}
-                  onClick={() => checkout.mutate({ kind: 'subscription' })}
-                >
-                  {checkingOut && checkout.variables.kind === 'subscription'
-                    ? 'Opening checkout…'
-                    : `Subscribe · ${MONTHLY_PRICE_LABEL}`}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={`btn btn-primary ${styles.btn}`}
+                    disabled={checkingOut}
+                    onClick={() => checkout.mutate({ kind: 'subscription', plan: 'monthly' })}
+                  >
+                    {checkingOut && checkout.variables.plan === 'monthly'
+                      ? 'Opening checkout…'
+                      : `Monthly · ${MONTHLY_PRICE_LABEL}`}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${styles.btn}`}
+                    disabled={checkingOut}
+                    onClick={() => checkout.mutate({ kind: 'subscription', plan: 'all_access' })}
+                  >
+                    {checkingOut && checkout.variables.plan === 'all_access'
+                      ? 'Opening checkout…'
+                      : `All access · ${ALL_ACCESS_PRICE_LABEL}`}
+                  </button>
+                </>
               )}
             </div>
+            {!subscribed && (
+              <p className={styles.note}>
+                Monthly covers {MONTHLY_CARS} cars and emails you the morning a new bulletin lands.
+                All access covers {ALL_ACCESS_CARS}.
+              </p>
+            )}
+            {planOf(me) === 'monthly' && (
+              <p className={styles.note}>
+                Need more than {MONTHLY_CARS} cars? Manage billing lets you move to All access (
+                {ALL_ACCESS_PRICE_LABEL}, {ALL_ACCESS_CARS} cars).
+              </p>
+            )}
             {portal.isError && (
               <p className={styles.inlineError} role="alert">
                 {portal.error.message}

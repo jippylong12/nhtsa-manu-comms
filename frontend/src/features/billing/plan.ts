@@ -1,12 +1,18 @@
 /* What an account's entitlements add up to, for the plan card, banners and success page. */
 
-import type { Entitlement, Me } from '@/client';
+import type { Entitlement, Me, SubscriptionPlan } from '@/client';
 
 export type PlanState = 'free' | 'unlocked' | 'subscribed' | 'past_due';
 
 export function subscriptionOf(me: Me | undefined): Entitlement | undefined {
     const subs = me?.entitlements.filter((e) => e.kind === 'subscription') ?? [];
     return subs.find((e) => e.status === 'active') ?? subs.find((e) => e.status === 'past_due');
+}
+
+/** The subscription the account is on (active or past due), or null. A missing plan is the $5 one. */
+export function planOf(me: Me | undefined): SubscriptionPlan | null {
+    const sub = subscriptionOf(me);
+    return sub ? (sub.plan ?? 'monthly') : null;
 }
 
 export function isPastDue(me: Me | undefined): boolean {

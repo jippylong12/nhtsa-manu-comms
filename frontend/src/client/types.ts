@@ -337,8 +337,12 @@ export interface SymptomSearchResponse {
 
 // --- Me ---
 
+export type SubscriptionPlan = 'monthly' | 'all_access';
+
 export interface Entitlement {
     kind: 'unlock' | 'subscription';
+    /** Which subscription; null for an unlock. */
+    plan: SubscriptionPlan | null;
     vehicleId: number | null;
     status: 'active' | 'canceled' | 'past_due';
     currentPeriodEnd: string | null;
