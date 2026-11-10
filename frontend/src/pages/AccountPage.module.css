@@ -560,3 +560,28 @@
     white-space: nowrap;
   }
 }
+
+/* ---- Support ---- */
+
+.support {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.support .alertText {
+  flex: 1 1 14rem;
+}
+
+.supportIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--color-primary-light);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-radius: var(--radius-full);
+}

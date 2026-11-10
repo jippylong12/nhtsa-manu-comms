@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+
+import { CONTACT_EMAIL } from './legal/content';
 import { ArrowRight, ArrowUp, BellRing, Check, FileText, ListFilter, Stethoscope } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext';
@@ -123,6 +125,10 @@ const FAQ = [
   {
     q: 'What if my car is not there yet?',
     a: "Add it anyway. We read a new car's bulletins within about a day and email you when they are ready.",
+  },
+  {
+    q: 'How do I get help?',
+    a: `Email ${CONTACT_EMAIL}. A person reads it and answers.`,
   },
 ];
 
@@ -372,6 +378,7 @@ export function LandingPage() {
         <span className={styles.footerLinks}>
           <Link to="/terms">Terms</Link>
           <Link to="/privacy">Privacy</Link>
+          <a href={`mailto:${CONTACT_EMAIL}`}>Support</a>
         </span>
       </footer>
 

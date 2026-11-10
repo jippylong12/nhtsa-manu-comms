@@ -13,8 +13,8 @@ import {
 
 export const COMPANY = 'JippylongTwelve LLC';
 export const PRODUCT = 'NHTSA Comms';
-/** Where people write to us. Empty until one is chosen; the pages leave the address out while it is. */
-export const CONTACT_EMAIL = '';
+/** Where people write to us. */
+export const CONTACT_EMAIL = 'support@jippylong12.xyz';
 export const LAST_UPDATED = 'November 10, 2026';
 
 export interface LegalSection {

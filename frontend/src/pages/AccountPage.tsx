@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Bell, BellOff, Check, Crown, Lock, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Bell, BellOff, Check, Crown, LifeBuoy, Lock, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 import type { Me, MyVehicle, SubscriptionPlan } from '@/client';
 import { useAuth } from '../auth/AuthContext';
@@ -23,6 +23,7 @@ import {
 import { accessLabel, isUnlocked, vehicleName } from '../features/my-vehicles/access';
 import { RemoveVehicleDialog } from '../features/my-vehicles/components/RemoveVehicleDialog';
 import { useMeQuery, useRemoveVehicle } from '../features/my-vehicles/hooks/useMyVehicles';
+import { CONTACT_EMAIL } from './legal/content';
 import styles from './AccountPage.module.css';
 
 interface PlanInfo {
@@ -442,6 +443,36 @@ export function AccountPage() {
                 {checkout.error.message}
               </p>
             )}
+          </section>
+
+          {/* Support */}
+          <section className={styles.card} aria-labelledby="support-title">
+            <h2 id="support-title" className={styles.cardTitle}>
+              Support
+            </h2>
+            <div className={styles.support}>
+              <span className={styles.supportIcon} aria-hidden="true">
+                <LifeBuoy size={20} />
+              </span>
+              <div className={styles.alertText}>
+                <p className={styles.alertTitle}>Need a hand?</p>
+                <p className={styles.note}>
+                  A billing question, a car that looks wrong, or something that is not working: write to
+                  us and a person will answer.
+                </p>
+              </div>
+              <a
+                className={`btn btn-secondary ${styles.btn}`}
+                href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('NHTSA Comms support')}`}
+              >
+                Email support
+              </a>
+            </div>
+            <p className={styles.note}>
+              <a className={styles.cardLink} href={`mailto:${CONTACT_EMAIL}`}>
+                {CONTACT_EMAIL}
+              </a>
+            </p>
           </section>
 
           <p className={styles.legal}>
