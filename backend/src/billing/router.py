@@ -13,9 +13,11 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
 
 @router.post("/checkout", response_model=UrlResponse, summary="Start a Stripe Checkout Session")
 async def checkout(payload: CheckoutRequest, user: dict = Depends(current_user)) -> UrlResponse:
-    """The $3 vehicle unlock or the $5/month subscription; returns the hosted page URL."""
+    """The $3 unlock, the $5/month plan or the $20/month all-access plan; returns the page URL."""
     try:
-        url = await service.create_checkout(user, payload.kind, payload.vehicle_id)
+        url = await service.create_checkout(
+            user, payload.kind, payload.vehicle_id, payload.plan
+        )
     except service.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except service.Conflict as e:

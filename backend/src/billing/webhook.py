@@ -36,6 +36,7 @@ _STATUS = {
     "incomplete_expired": "canceled",
 }
 _BIGINT_MAX = 2**63 - 1
+PLANS = ("monthly", "all_access")
 
 
 # The subscription's period end, looked up before the transaction opens (see `process`).
@@ -77,6 +78,24 @@ def _lookup_period_end(subscription_id: str) -> datetime | None:
         return None
 
 
+def _plan_of(sub: dict) -> str | None:
+    """The plan a subscription is on now, read from its price id; None when unrecognised.
+
+    This is how a plan change made in the Customer Portal reaches `entitlements`.
+    """
+    settings = get_settings()
+    by_price = {
+        settings.stripe_price_monthly: "monthly",
+        settings.stripe_price_all_access: "all_access",
+    }
+    for item in (sub.get("items") or {}).get("data") or []:
+        price = item.get("price")
+        price_id = price.get("id") if isinstance(price, dict) else price
+        if price_id and price_id in by_price:
+            return by_price[price_id]
+    return None
+
+
 async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
     meta = session.get("metadata") or {}
     kind = meta.get("kind")
@@ -97,6 +116,10 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
         return
     vehicle_id = None
     subscription_id = None
+    plan = None
+    if kind == "subscription":
+        # Checkouts started before plans existed carry no plan: they bought the $5 one.
+        plan = meta.get("plan") if meta.get("plan") in PLANS else "monthly"
     if kind == "unlock":
         vehicle_id = _int(meta.get("vehicle_id"))
         if vehicle_id is None or not await conn.fetchval(
@@ -113,13 +136,13 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
         """
         INSERT INTO entitlements (user_id, kind, vehicle_id, status, stripe_customer_id,
                                   stripe_checkout_session_id, stripe_subscription_id,
-                                  current_period_end)
-        VALUES ($1, $2, $3, 'active', $4, $5, $6, $7)
+                                  current_period_end, plan)
+        VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8)
         ON CONFLICT DO NOTHING
         RETURNING id
         """,
         user_id, kind, vehicle_id, session.get("customer"), session_id, subscription_id,
-        _looked_up_period_end.get(),
+        _looked_up_period_end.get(), plan,
     )
     log.info(
         "checkout %s: user=%s kind=%s vehicle=%s entitlement=%s",
@@ -132,12 +155,14 @@ async def _subscription_updated(conn: asyncpg.Connection, sub: dict) -> None:
     if status is None or not sub.get("id"):
         log.info("subscription %s: status %r not mapped, ignored", sub.get("id"), sub.get("status"))
         return
+    plan = _plan_of(sub)
     result = await conn.execute(
-        "UPDATE entitlements SET status = $2, current_period_end = COALESCE($3, current_period_end) "
+        "UPDATE entitlements SET status = $2, "
+        "current_period_end = COALESCE($3, current_period_end), plan = COALESCE($4, plan) "
         "WHERE stripe_subscription_id = $1 AND status <> 'canceled'",
-        sub["id"], status, _period_end(sub),
+        sub["id"], status, _period_end(sub), plan,
     )
-    log.info("subscription %s: status=%s (%s)", sub["id"], status, result)
+    log.info("subscription %s: status=%s plan=%s (%s)", sub["id"], status, plan, result)
 
 
 async def _subscription_deleted(conn: asyncpg.Connection, sub: dict) -> None:

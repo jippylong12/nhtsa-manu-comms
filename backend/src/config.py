@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_price_unlock: str = ""
     stripe_price_monthly: str = ""
+    stripe_price_all_access: str = ""
 
     @field_validator("admin_firebase_uids", mode="before")
     @classmethod

@@ -71,6 +71,16 @@ async def add_vehicle(payload: MyVehicleCreate, user: dict = Depends(current_use
                 "Subscribe to add more cars, or unlock one you already have."
             ),
         ) from None
+    except service.PlanLimitReached as e:
+        more = (
+            " Remove one, unlock a car for $3, or move to All access for "
+            f"{service.PLAN_VEHICLES['all_access']} cars."
+            if e.plan == "monthly"
+            else " Remove one to add another."
+        )
+        raise HTTPException(
+            status_code=402, detail=f"Your plan covers {e.limit} cars.{more}"
+        ) from None
     except service.VehicleLimitReached:
         raise HTTPException(
             status_code=409, detail=f"at most {service.MAX_VEHICLES} vehicles per account"

@@ -21,7 +21,7 @@ async def list_entitlements(user_id: int) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT kind, vehicle_id, status, current_period_end FROM entitlements "
+            "SELECT kind, plan, vehicle_id, status, current_period_end FROM entitlements "
             "WHERE user_id = $1 ORDER BY id",
             user_id,
         )
@@ -96,6 +96,62 @@ class SampleLimitReached(Exception):
     """A free account has used its free samples and is adding another car."""
 
 
+# How many cars each subscription covers at a time. A car the account has unlocked
+# ($3, forever) is its own purchase and does not take one of these places.
+PLAN_VEHICLES = {"monthly": 2, "all_access": 20}
+
+
+class PlanLimitReached(Exception):
+    """A subscriber already has as many cars as the plan covers."""
+
+    def __init__(self, plan: str) -> None:
+        super().__init__(plan)
+        self.plan = plan
+        self.limit = PLAN_VEHICLES[plan]
+
+
+async def _add_refusal(conn, user_id: int, year: int, make: str, model: str) -> Exception | None:
+    """Why this account may not add this car, or None when it may.
+
+    A car already on the account is always fine (adding is idempotent). A subscriber is
+    held to the plan's car count, not counting unlocked cars. Everyone else is held to
+    MAX_VEHICLES, and a free account also to the free-sample rule.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT
+            EXISTS (SELECT 1 FROM users u WHERE u.id = $1 AND u.is_admin) AS admin,
+            (SELECT COALESCE(e.plan, 'monthly') FROM entitlements e
+              WHERE e.user_id = $1 AND e.kind = 'subscription' AND e.status = 'active'
+              ORDER BY (e.plan = 'all_access') DESC LIMIT 1) AS plan,
+            EXISTS (
+                SELECT 1 FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id
+                WHERE uv.user_id = $1 AND v.year = $2 AND v.make = $3 AND v.model = $4
+            ) AS linked,
+            (SELECT count(*) FROM user_vehicles WHERE user_id = $1) AS total,
+            (SELECT count(*) FROM user_vehicles uv
+              WHERE uv.user_id = $1 AND NOT EXISTS (
+                  SELECT 1 FROM entitlements e
+                  WHERE e.user_id = $1 AND e.kind = 'unlock' AND e.status = 'active'
+                    AND e.vehicle_id = uv.vehicle_id)) AS on_plan
+        """,
+        user_id,
+        year,
+        make.strip().upper(),
+        normalize_model(model),
+    )
+    if row["linked"]:
+        return None
+    if row["plan"] in PLAN_VEHICLES and not row["admin"]:
+        full = row["on_plan"] >= PLAN_VEHICLES[row["plan"]]
+        return PlanLimitReached(row["plan"]) if full else None
+    if row["total"] >= MAX_VEHICLES:
+        return VehicleLimitReached()
+    if not await _sample_slot_free(conn, user_id, year, make, model):
+        return SampleLimitReached()
+    return None
+
+
 async def _sample_slot_free(conn, user_id: int, year: int, make: str, model: str) -> bool:
     """May this account add this car under the free-sample rule?
 
@@ -168,52 +224,27 @@ async def list_my_vehicles(user_id: int) -> list[dict]:
 async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
     """Track the identity, link it to the caller (idempotent) and start ingest if it is empty.
 
-    Raises ValueError for a bad identity, VehicleLimitReached past MAX_VEHICLES, and
-    SampleLimitReached when a free account has used its free samples.
+    Raises ValueError for a bad identity, VehicleLimitReached past MAX_VEHICLES,
+    SampleLimitReached when a free account has used its free samples, and
+    PlanLimitReached when a subscriber already has the cars the plan covers.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Refuse before creating anything: a capped account must not be able to
-        # create tracked vehicles (which the nightly pipeline ingests) by collecting 409s.
-        at_cap = await conn.fetchval(
-            """
-            SELECT count(*) >= $2 AND NOT EXISTS (
-                SELECT 1 FROM user_vehicles uv JOIN vehicles v ON v.id = uv.vehicle_id
-                WHERE uv.user_id = $1 AND v.year = $3 AND v.make = $4 AND v.model = $5
-            )
-            FROM user_vehicles WHERE user_id = $1
-            """,
-            user_id,
-            MAX_VEHICLES,
-            year,
-            make.strip().upper(),
-            normalize_model(model),
-        )
-        # Same reasoning for the free-sample rule: refuse before a vehicle is created.
-        slot_free = at_cap or await _sample_slot_free(conn, user_id, year, make, model)
-    if at_cap:
-        raise VehicleLimitReached()
-    if not slot_free:
-        raise SampleLimitReached()
+        # create tracked vehicles (which the nightly pipeline ingests) by collecting refusals.
+        refusal = await _add_refusal(conn, user_id, year, make, model)
+    if refusal:
+        raise refusal
     vehicle = await VehicleService.create_vehicle(year=str(year), make=make, model=model)
     vehicle_id = vehicle["vehicle_id"]
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Serialise this user's adds so two requests cannot both slip under the cap.
             await conn.execute("SELECT 1 FROM users WHERE id = $1 FOR UPDATE", user_id)
-            linked = await conn.fetchval(
-                "SELECT count(*) FROM user_vehicles WHERE user_id = $1", user_id
-            )
-            exists = await conn.fetchval(
-                "SELECT EXISTS (SELECT 1 FROM user_vehicles WHERE user_id = $1 AND vehicle_id = $2)",
-                user_id,
-                vehicle_id,
-            )
-            if not exists and linked >= MAX_VEHICLES:
-                raise VehicleLimitReached()
-            # Re-checked under the user lock so two adds cannot both take the last slot.
-            if not exists and not await _sample_slot_free(conn, user_id, year, make, model):
-                raise SampleLimitReached()
+            # Re-checked under the user lock so two adds cannot both take the last place.
+            refusal = await _add_refusal(conn, user_id, year, make, model)
+            if refusal:
+                raise refusal
             await conn.execute(
                 "INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2) "
                 "ON CONFLICT DO NOTHING",

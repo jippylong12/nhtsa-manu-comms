@@ -153,6 +153,7 @@ async def test_subscription_session_stores_customer_and_subscription_without_veh
     assert (row["kind"], row["vehicle_id"], row["status"]) == ("subscription", None, "active")
     assert row["stripe_customer_id"] == "cus_" + sid
     assert row["stripe_subscription_id"] == "sub_" + sid
+    assert row["plan"] == "monthly"  # a checkout without a plan bought the $5 one
 
 
 async def _subscribe(c, uid, tag):
@@ -388,3 +389,55 @@ async def test_subscription_created_for_an_unknown_subscription_changes_nothing(
         )
     assert r.status_code == 200
     assert await _rows(db, uid) == []
+
+
+async def test_an_all_access_checkout_stores_the_plan(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        obj = _checkout(PREFIX + "p1", uid, None, "subscription")
+        obj["metadata"]["plan"] = "all_access"
+        await _post(c, _event(PREFIX + "ep1", "checkout.session.completed", obj))
+    (row,) = await _rows(db, uid)
+    assert row["plan"] == "all_access"
+
+
+async def test_a_plan_the_app_does_not_sell_is_stored_as_monthly(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        obj = _checkout(PREFIX + "p2", uid, None, "subscription")
+        obj["metadata"]["plan"] = "enterprise"
+        await _post(c, _event(PREFIX + "ep2", "checkout.session.completed", obj))
+    (row,) = await _rows(db, uid)
+    assert row["plan"] == "monthly"
+
+
+async def test_an_unlock_has_no_plan(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        await _post(
+            c, _event(PREFIX + "ep3", "checkout.session.completed", _checkout(PREFIX + "p3", uid, vid))
+        )
+    (row,) = await _rows(db, uid)
+    assert row["plan"] is None
+
+
+async def test_a_plan_change_in_the_portal_moves_the_entitlement_to_the_new_plan(db, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "stripe_price_monthly", "price_m")
+    monkeypatch.setattr(settings, "stripe_price_all_access", "price_a")
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        sub = await _subscribe(c, uid, "p4")
+        up = {"id": sub, "status": "active", "items": {"data": [{"price": {"id": "price_a"}}]}}
+        await _post(c, _event(PREFIX + "ep4a", "customer.subscription.updated", up))
+        (row,) = await _rows(db, uid)
+        assert row["plan"] == "all_access"
+        # An event whose price the app does not know leaves the plan alone.
+        odd = {"id": sub, "status": "active", "items": {"data": [{"price": {"id": "price_x"}}]}}
+        await _post(c, _event(PREFIX + "ep4b", "customer.subscription.updated", odd))
+        (row,) = await _rows(db, uid)
+        assert row["plan"] == "all_access"
+        down = {"id": sub, "status": "active", "items": {"data": [{"price": "price_m"}]}}
+        await _post(c, _event(PREFIX + "ep4c", "customer.subscription.updated", down))
+    (row,) = await _rows(db, uid)
+    assert row["plan"] == "monthly"

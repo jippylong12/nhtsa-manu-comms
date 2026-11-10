@@ -20,8 +20,14 @@ class NotConfigured(Exception):
     """A Stripe setting is missing; the message names it."""
 
 
-async def create_checkout(user: dict, kind: str, vehicle_id: int | None) -> str:
-    """Create a Checkout Session for `user` and return its URL."""
+async def create_checkout(
+    user: dict, kind: str, vehicle_id: int | None, plan: str = "monthly"
+) -> str:
+    """Create a Checkout Session for `user` and return its URL.
+
+    `plan` picks the subscription (`monthly` or `all_access`). An account with any active
+    subscription is refused: changing plan happens in the Customer Portal, not a second one.
+    """
     settings = get_settings()
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -48,11 +54,14 @@ async def create_checkout(user: dict, kind: str, vehicle_id: int | None) -> str:
             raise Conflict("already unlocked" if kind == "unlock" else "already subscribed")
         customer = await entitlements.customer_id_for(conn, user["id"])
 
-    price = settings.stripe_price_unlock if kind == "unlock" else settings.stripe_price_monthly
+    if kind == "unlock":
+        price, setting = settings.stripe_price_unlock, "STRIPE_PRICE_UNLOCK"
+    elif plan == "all_access":
+        price, setting = settings.stripe_price_all_access, "STRIPE_PRICE_ALL_ACCESS"
+    else:
+        price, setting = settings.stripe_price_monthly, "STRIPE_PRICE_MONTHLY"
     if not price:
-        raise NotConfigured(
-            "STRIPE_PRICE_UNLOCK is not set" if kind == "unlock" else "STRIPE_PRICE_MONTHLY is not set"
-        )
+        raise NotConfigured(f"{setting} is not set")
     try:
         stripe = stripe_client.client()
     except RuntimeError as e:
@@ -65,6 +74,7 @@ async def create_checkout(user: dict, kind: str, vehicle_id: int | None) -> str:
         "client_reference_id": str(user["id"]),
         "metadata": {
             "kind": kind,
+            "plan": plan if kind == "subscription" else "",
             "vehicle_id": str(vehicle_id) if kind == "unlock" else "",
             "user_id": str(user["id"]),
         },
