@@ -1,5 +1,6 @@
 /* Labels for a vehicle's availability and access, shared by the card and the page. */
 
+import { displayVehicle } from '../vehicles/displayName';
 import type { Me, MyVehicle } from '@/client';
 
 export function availabilityLabel(v: MyVehicle): string {
@@ -15,6 +16,7 @@ export function accessLabel(v: MyVehicle, me: Me | undefined): 'Sample' | 'Unloc
     return subscribed ? 'Subscribed' : 'Unlocked';
 }
 
+/** The car's name as shown: "2024 Chevrolet Silverado EV" (stored values stay in NHTSA's capitals). */
 export function vehicleName(v: { year: number; make: string; model: string }): string {
-    return `${v.year} ${v.make} ${v.model}`;
+    return displayVehicle(v);
 }

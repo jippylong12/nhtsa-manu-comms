@@ -5,6 +5,7 @@ import { Clock, SearchX } from 'lucide-react';
 
 import { PRIORITY_COLORS } from '@/client';
 import type { CommPriority, LookupCounts, LookupResponse } from '@/client';
+import { displayVehicle } from '@/features/vehicles/displayName';
 import styles from './CountsCard.module.css';
 
 const TILES: { key: keyof LookupCounts; label: string; priority: CommPriority }[] = [
@@ -13,9 +14,7 @@ const TILES: { key: keyof LookupCounts; label: string; priority: CommPriority }[
     { key: 'small', label: 'Small', priority: 'low' },
 ];
 
-function vehicleName(v: { year: number; make: string; model: string }) {
-    return `${v.year} ${v.make} ${v.model}`;
-}
+const vehicleName = displayVehicle;
 
 type Freshness = 'week' | 'month' | 'older';
 

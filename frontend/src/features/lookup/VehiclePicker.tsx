@@ -5,6 +5,7 @@ import {
     useDiscoveryModels,
     useDiscoveryYears,
 } from '@/features/communications/hooks/useDiscovery';
+import { displayName } from '@/features/vehicles/displayName';
 import { Combobox } from './Combobox';
 import styles from './VehiclePicker.module.css';
 
@@ -40,6 +41,7 @@ export function VehiclePicker({ value, onChange }: VehiclePickerProps) {
                 label="Make"
                 placeholder={year ? 'Type a make' : 'Pick a year first'}
                 options={makesQuery.data ?? []}
+                format={displayName}
                 value={make}
                 disabled={!year}
                 loading={!!year && makesQuery.isLoading}
@@ -50,6 +52,7 @@ export function VehiclePicker({ value, onChange }: VehiclePickerProps) {
                     label="Model"
                     placeholder={make ? 'Type a model' : 'Pick a make first'}
                     options={modelsQuery.data ?? []}
+                    format={displayName}
                     value={model}
                     disabled={!make}
                     loading={!!make && modelsQuery.isLoading}

@@ -14,16 +14,15 @@ interface ComboboxProps {
     onChange: (next: string) => void;
     disabled?: boolean;
     loading?: boolean;
+    /** How an option is shown. The value passed to onChange is always the raw option. */
+    format?: (option: string) => string;
     /** Numeric keypad on phones (model years). */
     numeric?: boolean;
 }
 
 const MAX_SHOWN = 80;
 
-function matches(option: string, query: string): boolean {
-    const q = query.trim().toLowerCase();
-    return !q || option.toLowerCase().includes(q);
-}
+const asIs = (option: string) => option;
 
 export function Combobox({
     label,
@@ -34,6 +33,7 @@ export function Combobox({
     disabled = false,
     loading = false,
     numeric = false,
+    format = asIs,
 }: ComboboxProps) {
     const id = useId();
     const listId = `${id}-list`;
@@ -44,9 +44,12 @@ export function Combobox({
     const [draft, setDraft] = useState<string | null>(null);
     const [active, setActive] = useState(0);
 
-    const text = draft ?? value;
+    const text = draft ?? (value ? format(value) : '');
     const shown = useMemo(
-        () => options.filter((o) => matches(o, draft ?? '')).slice(0, MAX_SHOWN),
+        () => {
+            const q = (draft ?? '').trim().toLowerCase();
+            return options.filter((o) => !q || o.toLowerCase().includes(q)).slice(0, MAX_SHOWN);
+        },
         [options, draft]
     );
     const activeIndex = Math.min(active, Math.max(0, shown.length - 1));
@@ -120,7 +123,6 @@ export function Combobox({
                     role="combobox"
                     inputMode={numeric ? 'numeric' : 'text'}
                     autoComplete="off"
-                    autoCapitalize="characters"
                     spellCheck={false}
                     aria-expanded={open}
                     aria-controls={listId}
@@ -180,7 +182,7 @@ export function Combobox({
                                 }}
                                 onMouseEnter={() => setActive(i)}
                             >
-                                <span>{option}</span>
+                                <span>{format(option)}</span>
                                 {option === value && <Check size={15} aria-hidden="true" />}
                             </li>
                         ))
