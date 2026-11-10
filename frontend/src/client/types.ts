@@ -385,6 +385,10 @@ export interface MyVehicle {
     model: string;
     availability: MyVehicleAvailability;
     counts: SeverityCounts;
+    /** Bulletins newer than the reader's last visit, per severity tier. */
+    unread: SeverityCounts;
+    /** Bulletins that arrived in the last 7 days. */
+    newThisWeek: number;
     access: MyVehicleAccess;
     addedAt: string;
 }
@@ -405,6 +409,8 @@ export interface MyBulletin {
     severity: Severity;
     supersededCount?: number;
     locked: boolean;
+    /** Whether the reader has read it; absent means unread. */
+    read?: boolean;
     summary?: string | null;
     llmSummary?: string | null;
     symptoms?: string[] | null;
@@ -436,6 +442,18 @@ export interface MyBulletinsParams {
     search?: string;
     page?: number;
     perPage?: number;
+    unreadOnly?: boolean;
+    commType?: string;
+    systems?: string[];
+    dateFrom?: string;
+    dateTo?: string;
+    nhtsaId?: string;
+}
+
+/** Counts that ignore the severity and unreadOnly filters. */
+export interface Facets {
+    bySeverity: SeverityCounts;
+    unreadBySeverity: SeverityCounts;
 }
 
 export interface MyBulletinsResponse {
@@ -445,6 +463,7 @@ export interface MyBulletinsResponse {
     perPage: number;
     access: MyVehicleAccess;
     sampleCounts: SeverityCounts;
+    facets: Facets;
 }
 
 // Public lookup (GET /api/public/lookup)

@@ -1,7 +1,7 @@
 .page {
-  max-width: 64rem;
+  max-width: 82rem;
   margin: 0 auto;
-  padding: var(--space-xl) var(--space-md);
+  padding: var(--space-lg) var(--space-md);
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -16,8 +16,9 @@
 
 .heading {
   margin: 0;
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
+  font-size: 1.625rem;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
   line-height: var(--leading-tight);
 }
 
@@ -27,7 +28,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: var(--space-md);
 }
 
@@ -45,4 +46,10 @@
 
 .retry {
   min-height: 44px;
+}
+
+@media (min-width: 900px) {
+  .page {
+    padding: var(--space-lg) var(--space-xl);
+  }
 }

@@ -1,6 +1,7 @@
 """Business logic for the signed-in user's profile."""
 
 import logging
+from datetime import datetime
 
 from src.billing.entitlements import access_for
 from src.communications.flatfile import normalize_model
@@ -9,6 +10,7 @@ from src.corpus import service as corpus_service
 from src.db import get_pool
 from src.public import service as public_service
 from src.refresh import service as refresh_service
+from src.symptom_search.retrieval import REVISION_STEM_SQL
 from src.vehicles.service import VehicleService
 
 logger = logging.getLogger(__name__)
@@ -100,9 +102,12 @@ async def _my_vehicle(conn, user_id: int, vehicle_id: int) -> dict | None:
     if row is None:
         return None
     found = await public_service.counts_for(conn, vehicle_id)
+    reads = await counts_for_user(conn, user_id, vehicle_id)
     return {
         **dict(row),
         "counts": found["counts"],
+        "unread": reads["unread"],
+        "new_this_week": reads["new_this_week"],
         "availability": "ready" if sum(found["counts"].values()) else "processing",
         "access": await access_for(conn, user_id, vehicle_id),
     }
@@ -296,13 +301,22 @@ async def my_bulletins(
     page: int,
     per_page: int,
     search: str | None = None,
+    unread_only: bool = False,
+    comm_type: str | None = None,
+    systems: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    nhtsa_id: str | None = None,
 ) -> dict | None:
     """The caller's folded bulletins for one linked vehicle, or None when it is not linked.
 
     Under the sample rule the readable set is chosen across the whole folded list,
-    before the severity filter, the text search and the page are applied. A search
-    only ever matches rows that are readable, so a locked row's text cannot leak
-    through which rows match.
+    before any filter or the page is applied. A search or a systems filter (both read
+    document content) only ever matches rows that are readable, so a locked row's
+    text or tags cannot leak through which rows match or through the facets. Type
+    and date filters match locked rows too: those are identity fields a locked row shows.
+    `facets` counts the rows the search and filters select while ignoring `severity`,
+    `unread_only` and `nhtsa_id`, so the tabs can show their counts.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -315,18 +329,54 @@ async def my_bulletins(
             if r["nhtsa_id"] in readable and r["severity"] in sample_counts:
                 sample_counts[r["severity"]] += 1
 
-        shown = [r for r in rows if severity is None or r["severity"] == severity]
-        if search:
+        selected = rows
+        if search or comm_type or systems or date_from or date_to:
             found, _ = await corpus_service.list_communications(
                 vehicle_id=vehicle_id,
                 status="processed",
                 search=search,
+                comm_type=comm_type,
+                systems=systems,
+                date_from=date_from,
+                date_to=date_to,
                 revisions="latest",
                 page=1,
                 per_page=_ALL_ROWS,
             )
             matched = {r["nhtsa_id"] for r in found}
-            shown = [r for r in shown if r["nhtsa_id"] in readable and r["nhtsa_id"] in matched]
+            selected = [
+                r
+                for r in rows
+                if r["nhtsa_id"] in matched
+                and (not (search or systems) or r["nhtsa_id"] in readable)
+            ]
+
+        read_ids = {
+            r["nhtsa_id"]
+            for r in await conn.fetch(
+                "SELECT nhtsa_id FROM bulletin_reads "
+                "WHERE user_id = $1 AND nhtsa_id = ANY($2::text[])",
+                user_id,
+                [r["nhtsa_id"] for r in selected],
+            )
+        }
+        facets = {
+            "by_severity": dict.fromkeys(SAMPLE_QUOTA, 0),
+            "unread_by_severity": dict.fromkeys(SAMPLE_QUOTA, 0),
+        }
+        for r in selected:
+            if r["severity"] in SAMPLE_QUOTA:
+                facets["by_severity"][r["severity"]] += 1
+                if r["nhtsa_id"] not in read_ids:
+                    facets["unread_by_severity"][r["severity"]] += 1
+
+        shown = [
+            r
+            for r in selected
+            if (severity is None or r["severity"] == severity)
+            and (not unread_only or r["nhtsa_id"] not in read_ids)
+            and (nhtsa_id is None or r["nhtsa_id"] == nhtsa_id)
+        ]
         window = shown[(page - 1) * per_page : page * per_page]
         details = await _details(conn, [r["nhtsa_id"] for r in window if r["nhtsa_id"] in readable])
 
@@ -339,6 +389,7 @@ async def my_bulletins(
             "communication_date": r["communication_date"],
             "severity": r["severity"],
             "superseded_count": r["superseded_count"],
+            "read": r["nhtsa_id"] in read_ids,
         }
         if r["nhtsa_id"] in readable:
             items.append(
@@ -359,6 +410,7 @@ async def my_bulletins(
         "per_page": per_page,
         "access": access,
         "sample_counts": sample_counts,
+        "facets": facets,
     }
 
 
@@ -404,3 +456,94 @@ async def my_bulletin_detail(user_id: int, vehicle_id: int, nhtsa_id: str) -> di
     if detail is None:
         return None
     return {**detail, "locked": False}
+
+
+# The folded, processed families of one vehicle: the latest revision of each stem,
+# the same set `public.service.counts_for` counts.
+_FAMILIES_SQL = f"""
+    SELECT DISTINCT ON (stem) nhtsa_id, severity, communication_date
+    FROM (
+        SELECT c.nhtsa_id, c.severity, c.communication_date, {REVISION_STEM_SQL} AS stem
+        FROM communications c
+        JOIN communication_vehicles cv ON cv.communication_id = c.id
+        WHERE cv.vehicle_id = $1 AND c.status = 'processed'
+    ) c
+    ORDER BY stem, communication_date DESC NULLS LAST, nhtsa_id DESC
+"""
+
+
+async def counts_for_user(conn, user_id: int, vehicle_id: int) -> dict:
+    """`{unread: {serious, medium, small}, new_this_week}` for one vehicle and one user."""
+    rows = await conn.fetch(
+        f"""
+        SELECT f.severity,
+               count(*) FILTER (WHERE br.nhtsa_id IS NULL) AS unread,
+               count(*) FILTER (
+                   WHERE f.communication_date >= now() - interval '7 days') AS recent
+        FROM ({_FAMILIES_SQL}) f
+        LEFT JOIN bulletin_reads br ON br.user_id = $2 AND br.nhtsa_id = f.nhtsa_id
+        GROUP BY f.severity
+        """,
+        vehicle_id,
+        user_id,
+    )
+    unread = dict.fromkeys(SAMPLE_QUOTA, 0)
+    recent = 0
+    for r in rows:
+        if r["severity"] in unread:
+            unread[r["severity"]] = r["unread"]
+        recent += r["recent"]
+    return {"unread": unread, "new_this_week": recent}
+
+
+async def mark_read(user_id: int, nhtsa_id: str) -> bool:
+    """Record a read. False unless the bulletin is on one of the caller's linked vehicles."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        linked = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM communications c
+                JOIN communication_vehicles cv ON cv.communication_id = c.id
+                JOIN user_vehicles uv ON uv.vehicle_id = cv.vehicle_id AND uv.user_id = $1
+                WHERE c.nhtsa_id = $2)
+            """,
+            user_id,
+            nhtsa_id,
+        )
+        if not linked:
+            return False
+        await conn.execute(
+            "INSERT INTO bulletin_reads (user_id, nhtsa_id) VALUES ($1, $2) "
+            "ON CONFLICT DO NOTHING",
+            user_id,
+            nhtsa_id,
+        )
+    return True
+
+
+async def mark_all_read(user_id: int, vehicle_id: int, severity: str | None) -> int | None:
+    """Mark every unread family of a linked vehicle read; the number inserted, or None
+    when the vehicle is not linked to the caller."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        linked = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM user_vehicles WHERE user_id = $1 AND vehicle_id = $2)",
+            user_id,
+            vehicle_id,
+        )
+        if not linked:
+            return None
+        rows = await conn.fetch(
+            f"""
+            INSERT INTO bulletin_reads (user_id, nhtsa_id)
+            SELECT $2, f.nhtsa_id FROM ({_FAMILIES_SQL}) f
+            WHERE ($3::text IS NULL OR f.severity = $3)
+            ON CONFLICT DO NOTHING
+            RETURNING 1
+            """,
+            vehicle_id,
+            user_id,
+            severity,
+        )
+    return len(rows)

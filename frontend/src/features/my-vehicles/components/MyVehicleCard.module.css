@@ -8,8 +8,8 @@
 
 .card:hover,
 .card:focus-within {
+  background: var(--bg-hover);
   border-color: var(--border-default);
-  box-shadow: var(--shadow-md);
 }
 
 .link {
@@ -28,10 +28,18 @@
   outline-offset: 2px;
 }
 
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding-right: 44px; /* room for the menu button */
+}
+
 .title {
   margin: 0;
-  padding-right: 44px; /* room for the menu button */
-  font-size: 1.125rem;
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   line-height: var(--leading-tight);
   color: var(--text-primary);
@@ -55,22 +63,48 @@
   border-radius: var(--radius-md);
 }
 
-.skeleton {
-  opacity: 0.6;
+.skeletonCount {
+  display: block;
+  width: 2rem;
+  height: var(--font-size-xl);
+}
+
+.unread {
+  min-height: 1.2em;
+  font-size: var(--font-size-xs);
+  color: var(--color-primary);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.footerMuted {
+  color: var(--text-muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
 }
 
 .count {
   font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   line-height: 1;
-  color: var(--text-primary);
+  color: var(--tile-color);
 }
 
 .label {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .badges {

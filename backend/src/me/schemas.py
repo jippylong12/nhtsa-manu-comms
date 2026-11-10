@@ -24,6 +24,8 @@ class MyVehicle(CamelModel):
     model: str
     availability: Literal["ready", "processing"]
     counts: SeverityCounts
+    unread: SeverityCounts
+    new_this_week: int
     access: Literal["full", "sample"]
     added_at: datetime
 
@@ -70,6 +72,7 @@ class MyBulletin(CamelModel):
     severity: str
     superseded_count: int = 0
     locked: bool
+    read: bool = False
     summary: str | None = None
     llm_summary: str | None = None
     symptoms: list[str] | None = None
@@ -84,6 +87,13 @@ class MyBulletin(CamelModel):
     documents: list[BulletinDocument] | None = None
 
 
+class Facets(CamelModel):
+    """Tab counts for the current search and filters, ignoring `severity` and `unreadOnly`."""
+
+    by_severity: SeverityCounts
+    unread_by_severity: SeverityCounts
+
+
 class MyBulletinsResponse(CamelModel):
     items: list[MyBulletin]
     total: int
@@ -91,6 +101,7 @@ class MyBulletinsResponse(CamelModel):
     per_page: int
     access: Literal["full", "sample"]
     sample_counts: SeverityCounts
+    facets: Facets
 
 
 class MyBulletinFull(CommunicationDetail):
@@ -107,3 +118,7 @@ class MyBulletinLocked(CamelModel):
     communication_date: datetime | None = None
     severity: str
     locked: Literal[True] = True
+
+
+class MarkAllReadResponse(CamelModel):
+    marked: int
