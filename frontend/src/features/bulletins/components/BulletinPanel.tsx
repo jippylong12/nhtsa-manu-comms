@@ -157,20 +157,6 @@ export function BulletinPanel({
                 </section>
             )}
 
-            {(years.length > 0 || models.length > 0 || applicability) && (
-                <section className={styles.section}>
-                    <h3 className={styles.h3}>Applies to</h3>
-                    {years.length > 0 || models.length > 0 ? (
-                        <>
-                            {years.length > 0 && <Chips items={years} />}
-                            {models.length > 0 && <Chips items={models} />}
-                        </>
-                    ) : (
-                        <p className={styles.prose}>{applicability}</p>
-                    )}
-                </section>
-            )}
-
             <section className={styles.section}>
                 {docs.length > 0 ? (
                     <>
@@ -214,6 +200,21 @@ export function BulletinPanel({
                             <dt>Components</dt>
                             <dd>
                                 <Chips items={components} />
+                            </dd>
+                        </div>
+                    )}
+                    {(years.length > 0 || models.length > 0 || applicability) && (
+                        <div className={styles.row}>
+                            <dt>Applies to</dt>
+                            <dd>
+                                {years.length > 0 || models.length > 0 ? (
+                                    <>
+                                        {years.length > 0 && <Chips items={years} />}
+                                        {models.length > 0 && <Chips items={models} />}
+                                    </>
+                                ) : (
+                                    applicability
+                                )}
                             </dd>
                         </div>
                     )}
