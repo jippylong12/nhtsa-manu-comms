@@ -21,10 +21,11 @@ MAKE = "ZZQUEUE"
 async def world(monkeypatch):
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
     await conn.execute("DELETE FROM vehicles WHERE make = $1", MAKE)
-    w = SimpleNamespace(conn=conn, runs=[], outcome={}, spent=0.0, cap=10.0)
+    w = SimpleNamespace(conn=conn, runs=[], budgets=[], outcome={}, spent=0.0, cap=10.0, per_doc=0.5)
 
-    async def run_now(vehicle_id: int):
+    async def run_now(vehicle_id: int, llm_budget=None):
         w.runs.append(vehicle_id)
+        w.budgets.append(llm_budget)
         result = w.outcome.get(vehicle_id, "succeeded")
         if isinstance(result, list):
             result = result.pop(0) if len(result) > 1 else result[0]
@@ -35,11 +36,16 @@ async def world(monkeypatch):
     async def spent_since(c, started_at):
         return w.spent
 
+    async def per_document(c, sync):
+        assert sync is True  # the worker reads live, not through Batch
+        return w.per_doc
+
     async def no_sleep(seconds):
         return None
 
     monkeypatch.setattr(refresh_service, "run_now", run_now)
     monkeypatch.setattr(ingest_queue.processor, "_spent_since", spent_since)
+    monkeypatch.setattr(ingest_queue.processor, "_per_document_estimate", per_document)
     monkeypatch.setattr(
         ingest_queue, "get_settings", lambda: SimpleNamespace(nightly_spend_cap_usd=w.cap)
     )
@@ -169,3 +175,31 @@ async def test_a_vehicle_that_is_no_longer_tracked_is_dropped(world, monkeypatch
     await ingest_queue.enqueue(a)
     assert await ingest_queue.drain() == 0
     assert await world.queued() == []
+
+
+@pytest.mark.asyncio
+async def test_a_read_is_given_only_the_documents_the_cap_still_allows(world, monkeypatch):
+    await _only_ours(world, monkeypatch)
+    world.spent, world.cap, world.per_doc = 9.0, 10.0, 0.5  # $1 left: two documents
+    a = await world.vehicle("BIG")
+    await ingest_queue.enqueue(a)
+    assert await ingest_queue.drain() == 1
+    assert world.budgets == [2]
+
+
+@pytest.mark.asyncio
+async def test_without_a_cap_a_read_has_no_document_budget(world, monkeypatch):
+    await _only_ours(world, monkeypatch)
+    world.cap = 0
+    a = await world.vehicle("FREE")
+    await ingest_queue.enqueue(a)
+    assert await ingest_queue.drain() == 1
+    assert world.budgets == [None]
+
+
+def test_the_smaller_of_the_local_limit_and_the_cap_budget_wins():
+    assert refresh_service._llm_limit(None, None) is None
+    assert refresh_service._llm_limit(25, None) == 25
+    assert refresh_service._llm_limit(None, 2) == 2
+    assert refresh_service._llm_limit(25, 2) == 2
+    assert refresh_service._llm_limit(3, 40) == 3

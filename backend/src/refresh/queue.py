@@ -78,6 +78,29 @@ async def cap_reached(now: Optional[datetime] = None) -> bool:
     return spent >= cap
 
 
+async def document_budget(now: Optional[datetime] = None) -> Optional[int]:
+    """How many documents one read may send to the model under the daily cap.
+
+    None means no cap. 0 means the cap is reached. The same sum the nightly run does
+    (`run_pipeline._llm_document_budget`), priced for the live path the worker uses,
+    so one big car cannot spend past the cap after passing the check at its start.
+    """
+    cap = float(get_settings().nightly_spend_cap_usd)
+    if cap <= 0:
+        return None
+    now = now or datetime.now(timezone.utc)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        spent = await processor._spent_since(conn, now - timedelta(hours=24))
+        per_doc = await processor._per_document_estimate(conn, True)
+    remaining = cap - spent
+    if remaining <= 0:
+        return 0
+    if per_doc <= 0:
+        return None
+    return int(remaining / per_doc)
+
+
 async def _next_vehicle() -> Optional[int]:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -115,14 +138,17 @@ async def drain() -> int:
         vehicle_id = await _next_vehicle()
         if vehicle_id is None:
             return read
-        if await cap_reached():
+        budget = await document_budget()
+        if budget == 0:
             log.warning(
                 "daily spend cap of $%.2f reached: queued cars wait until spend drops",
                 get_settings().nightly_spend_cap_usd,
             )
             return read
         try:
-            run = await refresh_service.run_now(vehicle_id)
+            # A car with more documents than the budget is read up to it; the rest stay
+            # pending for the nightly run.
+            run = await refresh_service.run_now(vehicle_id, llm_budget=budget)
         except refresh_service.RefreshConflict:
             # An admin's manual refresh holds the one run slot. Wait, then try the same car.
             await asyncio.sleep(BUSY_WAIT_SECONDS)

@@ -25,6 +25,7 @@ from typing import Optional
 
 import asyncpg
 
+from src.billing.entitlements import access_for
 from src.config import get_settings
 from src.db import get_pool
 from src.symptom_search.retrieval import revision_stem
@@ -159,7 +160,19 @@ def baseline_for(user: dict) -> Optional[datetime]:
 async def build_for_user(
     conn, user: dict, since: Optional[datetime], generated_at: datetime
 ) -> UserAlert:
-    """Everything processed since `since` for the user's vehicles. Pure read."""
+    """Everything processed since `since` for the user's vehicles. Pure read.
+
+    Only cars the account reads in full: a car past the plan's count (after a move to a
+    smaller plan) is a sample, and an alert would hand out its new bulletins in full.
+    """
+    linked = await conn.fetch(
+        "SELECT vehicle_id FROM user_vehicles WHERE user_id = $1 AND alerts_enabled", user["id"]
+    )
+    readable = [
+        r["vehicle_id"]
+        for r in linked
+        if await access_for(conn, user["id"], r["vehicle_id"]) == "full"
+    ]
     rows = await conn.fetch(
         """
         SELECT
@@ -183,6 +196,7 @@ async def build_for_user(
         JOIN communications c ON c.id = cv.communication_id
         WHERE uv.user_id = $1
           AND uv.alerts_enabled
+          AND uv.vehicle_id = ANY($3::bigint[])
           AND c.status = 'processed'
           AND c.processed_at IS NOT NULL
           AND ($2::timestamptz IS NULL OR c.processed_at > $2)
@@ -190,6 +204,7 @@ async def build_for_user(
         """,
         user["id"],
         since,
+        readable,
     )
 
     # Per vehicle, keep the current revision of each bulletin family and count the rest.

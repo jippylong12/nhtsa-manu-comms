@@ -88,6 +88,11 @@ subscriptions are `kind = 'subscription'` in `entitlements`; the `plan` column (
 or `all_access`) says which. An account holds one subscription: changing plan happens in
 the Stripe Customer Portal, and `customer.subscription.updated` moves `plan` by the price id.
 
+A plan opens only the cars it covers: the account's first N cars that are not unlocked,
+oldest link first (`access_for`). A car linked past that, which happens after a move to a
+smaller plan, reads as a sample and is left out of alerts until a place frees up or the car
+is unlocked.
+
 Removing a car: an unlocked car, and any car on an account without a subscription, comes off
 freely (an unlocked car can be added back at no cost; a free sample that is removed hands
 out no new sample). A car on a subscription counts against the plan's removals for the

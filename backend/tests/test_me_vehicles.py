@@ -477,3 +477,37 @@ async def test_a_car_can_be_left_out_of_alerts_and_only_by_its_owner(db):
     assert await db.fetchval(
         "SELECT alerts_enabled FROM user_vehicles WHERE vehicle_id = $1", one
     ) is False
+
+
+async def _access(c, uid: str) -> dict[int, str]:
+    me = (await c.get("/api/me", headers=_as(uid))).json()
+    return {v["vehicleId"]: v["access"] for v in me["vehicles"]}
+
+
+async def test_moving_to_a_smaller_plan_leaves_only_its_car_count_open(db):
+    await _subscribe(db, USER_A, "all_access")
+    async with _http() as c:
+        ids = [await _add_id(c, USER_A, f"CAR{i}") for i in range(5)]
+        assert set((await _access(c, USER_A)).values()) == {"full"}
+        await db.execute(
+            "UPDATE entitlements SET plan = 'monthly' WHERE user_id = $1", await _user(db, USER_A)
+        )
+        access = await _access(c, USER_A)
+        assert [access[i] for i in ids] == ["full", "full", "sample", "sample", "sample"]
+        # A car past the plan is a sample everywhere, including its bulletins endpoint.
+        r = await c.get(f"/api/me/vehicles/{ids[4]}/bulletins", headers=_as(USER_A))
+        assert r.status_code == 200 and r.json()["access"] == "sample"
+
+
+async def test_an_unlocked_car_stays_open_and_takes_no_place_after_a_downgrade(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        ids = [await _add_id(c, USER_A, f"CAR{i}") for i in range(2)]
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, vehicle_id, status) "
+            "VALUES ($1, 'unlock', $2, 'active')",
+            await _user(db, USER_A), ids[0],
+        )
+        third = await _add_id(c, USER_A, "CAR2")
+        access = await _access(c, USER_A)
+    assert access == {ids[0]: "full", ids[1]: "full", third: "full"}

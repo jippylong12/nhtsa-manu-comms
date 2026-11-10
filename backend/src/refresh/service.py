@@ -313,13 +313,16 @@ async def start(vehicle_id: int) -> dict[str, Any]:
     return run
 
 
-async def run_now(vehicle_id: int) -> Optional[dict[str, Any]]:
+async def run_now(
+    vehicle_id: int, llm_budget: Optional[int] = None
+) -> Optional[dict[str, Any]]:
     """Run to completion and return the finished run row (the ingest queue's worker uses this).
 
+    `llm_budget` caps how many documents this read sends to the model (the daily spend cap).
     Raises RefreshConflict if a run is already active, LookupError if the vehicle is not tracked.
     """
     run = await _begin(vehicle_id)
-    await _execute(run["id"], vehicle_id)
+    await _execute(run["id"], vehicle_id, llm_budget)
     return await latest_run(vehicle_id)
 
 
@@ -415,7 +418,13 @@ async def _scan(vehicle_id: int) -> bool:
     return False
 
 
-async def _execute(run_id: int, vehicle_id: int) -> None:
+def _llm_limit(doc_limit: Optional[int], llm_budget: Optional[int]) -> Optional[int]:
+    """The smaller of the two caps on documents sent to the model; None when neither is set."""
+    limits = [n for n in (doc_limit, llm_budget) if n is not None]
+    return min(limits) if limits else None
+
+
+async def _execute(run_id: int, vehicle_id: int, llm_budget: Optional[int] = None) -> None:
     """The background worker. Never raises; every exit updates the run row."""
     try:
         # ---- scan NHTSA's bulletin files for this vehicle ----------------
@@ -464,7 +473,9 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         )
 
         # ---- llm -------------------------------------------------------
-        await processor.run_llm(doc_limit, sync=True, vehicle_id=vehicle_id)
+        await processor.run_llm(
+            _llm_limit(doc_limit, llm_budget), sync=True, vehicle_id=vehicle_id
+        )
         await llm_stage.promote_completed_communications()
         await _progress(run_id, stage="index", note="Indexing for search")
 
