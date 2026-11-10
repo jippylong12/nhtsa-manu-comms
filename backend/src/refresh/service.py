@@ -22,6 +22,7 @@ import asyncpg
 
 from src.communications import flatfile
 from src.communications.nhtsa_client import NHTSAClient
+from src.config import get_settings
 from src.db import get_pool
 from src.jobs import extract as extract_stage
 from src.jobs import llm as llm_stage
@@ -452,7 +453,9 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         )
 
         # ---- extract ---------------------------------------------------
-        extracted = await processor.run_extract(None, vehicle_id=vehicle_id)
+        # 0 is no limit. A limit is for local try-outs: the rest stays pending for the nightly.
+        doc_limit = get_settings().refresh_document_limit or None
+        extracted = await processor.run_extract(doc_limit, vehicle_id=vehicle_id)
         await _progress(
             run_id,
             stage="analyse",
@@ -461,7 +464,7 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         )
 
         # ---- llm -------------------------------------------------------
-        await processor.run_llm(None, sync=True, vehicle_id=vehicle_id)
+        await processor.run_llm(doc_limit, sync=True, vehicle_id=vehicle_id)
         await llm_stage.promote_completed_communications()
         await _progress(run_id, stage="index", note="Indexing for search")
 
