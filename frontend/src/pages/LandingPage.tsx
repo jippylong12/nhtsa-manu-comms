@@ -82,7 +82,6 @@ const PLANS = [
     features: [
       `An email the morning a new bulletin lands for one of your cars`,
       `Everything in Unlock, for ${MONTHLY_CARS} cars at a time`,
-      'Swap a car whenever you change one',
       'Cancel any time from your account page',
     ],
     cta: 'Start free, subscribe inside',
@@ -313,7 +312,7 @@ export function LandingPage() {
         <div className={styles.plans}>
           {PLANS.map((plan) => (
             <article key={plan.key} className={`${styles.plan} ${plan.featured ? styles.planFeatured : ''}`}>
-              {plan.featured && <span className={styles.planTag}>Most popular</span>}
+              {plan.featured && <span className={styles.planTag}>Recommended</span>}
               <h3 className={styles.planName}>{plan.name}</h3>
               <p className={styles.planPrice}>
                 <span className={styles.planAmount}>{plan.price}</span>

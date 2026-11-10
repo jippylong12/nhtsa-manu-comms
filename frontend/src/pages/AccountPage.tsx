@@ -251,7 +251,7 @@ export function AccountPage() {
                   const opening = checkingOut && checkout.variables?.plan === key;
                   return (
                     <article key={key} className={styles.offer} data-featured={key === 'monthly' || undefined}>
-                      {key === 'monthly' && <span className={styles.offerTag}>Most popular</span>}
+                      {key === 'monthly' && <span className={styles.offerTag}>Recommended</span>}
                       <h3 className={styles.offerName}>{offer.name}</h3>
                       <p className={styles.offerPrice}>{offer.price}</p>
                       <Benefits items={offer.benefits} />
