@@ -1,11 +1,11 @@
-/* Year -> make -> model picker, controlled by the landing page (URL-backed) */
+/* Year -> make -> model picker, controlled by the landing page (URL-backed). Each field is type-to-search. */
 
 import {
     useDiscoveryMakes,
     useDiscoveryModels,
     useDiscoveryYears,
 } from '@/features/communications/hooks/useDiscovery';
-import modalStyles from '@/features/vehicles/components/AddVehicleModal.module.css';
+import { Combobox } from './Combobox';
 import styles from './VehiclePicker.module.css';
 
 export interface PickerValue {
@@ -24,56 +24,37 @@ export function VehiclePicker({ value, onChange }: VehiclePickerProps) {
     const yearsQuery = useDiscoveryYears();
     const makesQuery = useDiscoveryMakes(year);
     const modelsQuery = useDiscoveryModels(year, make);
-    const selectClass = `input ${modalStyles.select}`;
 
     return (
         <div className={styles.picker}>
-            <div className="input-group">
-                <label className="input-label" htmlFor="pick-year">Model year</label>
-                <select
-                    id="pick-year"
-                    className={selectClass}
-                    value={year ?? ''}
-                    disabled={yearsQuery.isLoading}
-                    onChange={(e) =>
-                        onChange({ year: e.target.value ? Number(e.target.value) : null, make: '', model: '' })
-                    }
-                >
-                    <option value="">{yearsQuery.isLoading ? 'Loading years...' : 'Select year'}</option>
-                    {yearsQuery.data?.map((y) => (
-                        <option key={y} value={y}>{y}</option>
-                    ))}
-                </select>
-            </div>
-            <div className="input-group">
-                <label className="input-label" htmlFor="pick-make">Make</label>
-                <select
-                    id="pick-make"
-                    className={selectClass}
-                    value={make}
-                    disabled={!year || makesQuery.isLoading}
-                    onChange={(e) => onChange({ year, make: e.target.value, model: '' })}
-                >
-                    <option value="">{makesQuery.isLoading && year ? 'Loading makes...' : 'Select make'}</option>
-                    {makesQuery.data?.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                    ))}
-                </select>
-            </div>
-            <div className="input-group">
-                <label className="input-label" htmlFor="pick-model">Model</label>
-                <select
-                    id="pick-model"
-                    className={selectClass}
+            <Combobox
+                label="Year"
+                placeholder="2024"
+                numeric
+                options={(yearsQuery.data ?? []).map(String)}
+                value={year ? String(year) : ''}
+                loading={yearsQuery.isLoading}
+                onChange={(next) => onChange({ year: next ? Number(next) : null, make: '', model: '' })}
+            />
+            <Combobox
+                label="Make"
+                placeholder={year ? 'Type a make' : 'Pick a year first'}
+                options={makesQuery.data ?? []}
+                value={make}
+                disabled={!year}
+                loading={!!year && makesQuery.isLoading}
+                onChange={(next) => onChange({ year, make: next, model: '' })}
+            />
+            <div className={styles.model}>
+                <Combobox
+                    label="Model"
+                    placeholder={make ? 'Type a model' : 'Pick a make first'}
+                    options={modelsQuery.data ?? []}
                     value={model}
-                    disabled={!make || modelsQuery.isLoading}
-                    onChange={(e) => onChange({ year, make, model: e.target.value })}
-                >
-                    <option value="">{modelsQuery.isLoading && make ? 'Loading models...' : 'Select model'}</option>
-                    {modelsQuery.data?.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                    ))}
-                </select>
+                    disabled={!make}
+                    loading={!!make && modelsQuery.isLoading}
+                    onChange={(next) => onChange({ year, make, model: next })}
+                />
             </div>
         </div>
     );

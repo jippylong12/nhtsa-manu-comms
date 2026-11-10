@@ -1,15 +1,18 @@
+/* Year and make share a row, model takes the next one. Nothing can spill out of the card. */
 .picker {
   display: grid;
-  grid-template-columns: 1fr 1.4fr 1.6fr;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
   gap: var(--space-md);
+  min-width: 0;
 }
 
-.picker select {
-  min-height: 44px;
+.model {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
-@media (max-width: 599px) {
+@media (max-width: 420px) {
   .picker {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
