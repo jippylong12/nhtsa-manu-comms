@@ -9,6 +9,7 @@ from src.me import service
 from src.me.schemas import (
     AlertsStatus,
     AlertsUpdate,
+    MarkAllReadResponse,
     MeResponse,
     MyBulletinFull,
     MyBulletinLocked,
@@ -112,3 +113,32 @@ async def my_bulletin_detail(
     if result is None:
         raise HTTPException(status_code=404, detail="bulletin not found")
     return result
+
+
+@router.post(
+    "/bulletins/{nhtsa_id}/read",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Mark one bulletin read (idempotent)",
+)
+async def mark_read(nhtsa_id: str, user: dict = Depends(current_user)) -> Response:
+    """404 unless the bulletin is on one of the caller's linked vehicles."""
+    if not await service.mark_read(user["id"], nhtsa_id):
+        raise HTTPException(status_code=404, detail="bulletin not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/vehicles/{vehicle_id}/read-all",
+    response_model=MarkAllReadResponse,
+    summary="Mark every unread bulletin of one of my vehicles read",
+)
+async def mark_all_read(
+    vehicle_id: int,
+    severity: Literal["serious", "medium", "small"] | None = None,
+    user: dict = Depends(current_user),
+) -> MarkAllReadResponse:
+    """Optionally only one severity; 404 unless the vehicle is linked to the caller."""
+    marked = await service.mark_all_read(user["id"], vehicle_id, severity)
+    if marked is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return MarkAllReadResponse(marked=marked)

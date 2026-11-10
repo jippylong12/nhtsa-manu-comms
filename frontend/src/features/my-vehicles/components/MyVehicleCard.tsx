@@ -1,6 +1,7 @@
 /* A vehicle on /app: the whole card is one link to its page; Remove sits in a menu. */
 
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { MoreHorizontal, Trash2 } from 'lucide-react';
 
@@ -20,15 +21,19 @@ interface Props {
     me: Me | undefined;
     onRemove: (id: number) => void;
     removing?: boolean;
+    /** Extra menu items shown above Remove (for example Refresh on /admin). */
+    actions?: ReactNode;
 }
 
-export function MyVehicleCard({ vehicle, me, onRemove, removing }: Props) {
+export function MyVehicleCard({ vehicle, me, onRemove, removing, actions }: Props) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [confirming, setConfirming] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const name = vehicleName(vehicle);
     const processing = vehicle.availability === 'processing';
     const access = accessLabel(vehicle, me);
+    const total = vehicle.counts.serious + vehicle.counts.medium + vehicle.counts.small;
+    const unreadTotal = vehicle.unread.serious + vehicle.unread.medium + vehicle.unread.small;
 
     useEffect(() => {
         if (!menuOpen) return;
@@ -54,28 +59,51 @@ export function MyVehicleCard({ vehicle, me, onRemove, removing }: Props) {
 
     return (
         <article className={styles.card}>
-            <Link to={`/app/vehicles/${vehicle.vehicleId}`} className={styles.link} aria-label={name}>
-                <h2 className={styles.title}>{name}</h2>
+            <Link
+                to={`/app/vehicles/${vehicle.vehicleId}`}
+                className={styles.link}
+                aria-label={`${name}, ${total} bulletins, ${unreadTotal} unread`}
+            >
+                <div className={styles.header}>
+                    <h2 className={styles.title}>{name}</h2>
+                    <div className={styles.badges}>
+                        <span className={`${styles.badge} ${processing ? styles.badgeWarn : styles.badgeReady}`}>
+                            {availabilityLabel(vehicle)}
+                        </span>
+                        <span className={`${styles.badge} ${access === 'Sample' ? '' : styles.badgeAccess}`}>
+                            {access}
+                        </span>
+                    </div>
+                </div>
                 <div className={styles.tiles}>
                     {TILES.map((t) => (
                         <div
                             key={t.key}
-                            className={`${styles.tile} ${processing ? styles.skeleton : ''}`}
+                            className={styles.tile}
                             style={{ ['--tile-color' as string]: PRIORITY_COLORS[t.priority] }}
                         >
-                            <span className={styles.count}>{processing ? '–' : vehicle.counts[t.key]}</span>
+                            {processing ? (
+                                <span className={`skeleton ${styles.skeletonCount}`} aria-hidden="true" />
+                            ) : (
+                                <span className={styles.count}>{vehicle.counts[t.key]}</span>
+                            )}
                             <span className={styles.label}>{t.label}</span>
+                            <span className={styles.unread}>
+                                {!processing && vehicle.unread[t.key] > 0 ? `${vehicle.unread[t.key]} unread` : ''}
+                            </span>
                         </div>
                     ))}
                 </div>
-                <div className={styles.badges}>
-                    <span className={`${styles.badge} ${processing ? styles.badgeWarn : styles.badgeReady}`}>
-                        {availabilityLabel(vehicle)}
-                    </span>
-                    <span className={`${styles.badge} ${access === 'Sample' ? '' : styles.badgeAccess}`}>
-                        {access}
-                    </span>
-                </div>
+                {processing ? (
+                    <p className={styles.footer}>We're reading this car's bulletins.</p>
+                ) : vehicle.newThisWeek > 0 ? (
+                    <p className={styles.footer}>
+                        <span className={styles.dot} aria-hidden="true" />
+                        {vehicle.newThisWeek} new this week
+                    </p>
+                ) : (
+                    <p className={`${styles.footer} ${styles.footerMuted}`}>Nothing new this week</p>
+                )}
             </Link>
 
             <div className={styles.menu} ref={menuRef}>
@@ -116,6 +144,8 @@ export function MyVehicleCard({ vehicle, me, onRemove, removing }: Props) {
                                 </div>
                             </>
                         ) : (
+                            <>
+                            {actions}
                             <button
                                 type="button"
                                 className={styles.menuItem}
@@ -123,6 +153,7 @@ export function MyVehicleCard({ vehicle, me, onRemove, removing }: Props) {
                             >
                                 <Trash2 size={15} /> Remove
                             </button>
+                            </>
                         )}
                     </div>
                 )}

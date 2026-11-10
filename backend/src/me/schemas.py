@@ -24,6 +24,8 @@ class MyVehicle(CamelModel):
     model: str
     availability: Literal["ready", "processing"]
     counts: SeverityCounts
+    unread: SeverityCounts
+    new_this_week: int
     access: Literal["full", "sample"]
     added_at: datetime
 
@@ -107,3 +109,7 @@ class MyBulletinLocked(CamelModel):
     communication_date: datetime | None = None
     severity: str
     locked: Literal[True] = True
+
+
+class MarkAllReadResponse(CamelModel):
+    marked: int

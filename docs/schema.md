@@ -307,6 +307,9 @@ Five tables sit beside the corpus. None of them changes `communications`,
   starts from the time their subscription began (an admin with no subscription is baselined,
   silently, on the first sending pass), so a first email never replays a car's history. Rows
   are created the first time the alert run sees the user as a recipient.
+- `bulletin_reads` (migration 0016) is one row per (user, `nhtsa_id`) the user has read,
+  keyed on the latest revision of a family so a new revision arrives unread; it drives
+  the `unread` and `newThisWeek` counts on `GET /api/me`.
 
 ## Alerts (migration 0015)
 

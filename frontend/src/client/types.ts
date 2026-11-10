@@ -385,6 +385,10 @@ export interface MyVehicle {
     model: string;
     availability: MyVehicleAvailability;
     counts: SeverityCounts;
+    /** Bulletins newer than the reader's last visit, per severity tier. */
+    unread: SeverityCounts;
+    /** Bulletins that arrived in the last 7 days. */
+    newThisWeek: number;
     access: MyVehicleAccess;
     addedAt: string;
 }
