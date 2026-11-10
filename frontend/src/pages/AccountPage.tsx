@@ -325,7 +325,7 @@ export function AccountPage() {
                   </label>
                 </div>
                 {alertsOn && me.vehicles.length > 0 && (
-                  <ul className={styles.list} aria-label="Alerts per car">
+                  <ul className={`${styles.list} ${styles.alertCars}`} aria-label="Alerts per car">
                     {me.vehicles.map((v) => (
                       <li key={v.vehicleId} className={styles.row}>
                         <span className={styles.car}>{vehicleName(v)}</span>

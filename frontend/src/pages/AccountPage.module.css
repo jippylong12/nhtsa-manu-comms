@@ -436,6 +436,12 @@
   color: var(--text-primary);
 }
 
+/* Per-car rows sit on the same left and right edges as the content of the box above,
+   so every switch is in one column. */
+.alertCars {
+  padding-inline: calc(var(--space-md) + 1px);
+}
+
 /* A real switch: the input covers the track so the whole thing is the 44px target. */
 .switch {
   position: relative;
