@@ -63,6 +63,14 @@ async def add_vehicle(payload: MyVehicleCreate, user: dict = Depends(current_use
         return await service.add_vehicle(user["id"], payload.year, payload.make, payload.model)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except service.SampleLimitReached:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"You've used your {service.FREE_SAMPLE_VEHICLES} free samples. "
+                "Subscribe to add more cars, or unlock one you already have."
+            ),
+        ) from None
     except service.VehicleLimitReached:
         raise HTTPException(
             status_code=409, detail=f"at most {service.MAX_VEHICLES} vehicles per account"

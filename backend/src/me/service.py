@@ -88,6 +88,46 @@ class VehicleLimitReached(Exception):
     """The account already links the maximum number of vehicles."""
 
 
+# A free account may sample this many different cars, ever (see migration 0018).
+FREE_SAMPLE_VEHICLES = 2
+
+
+class SampleLimitReached(Exception):
+    """A free account has used its free samples and is adding another car."""
+
+
+async def _sample_slot_free(conn, user_id: int, year: int, make: str, model: str) -> bool:
+    """May this account add this car under the free-sample rule?
+
+    Yes for an admin or an active subscriber, for a car the account was already granted,
+    and while fewer than FREE_SAMPLE_VEHICLES grants are in use. A grant is not in use
+    once the account holds an active unlock for that car.
+    """
+    return await conn.fetchval(
+        """
+        SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = $1 AND u.is_admin)
+            OR EXISTS (
+                SELECT 1 FROM entitlements e
+                WHERE e.user_id = $1 AND e.kind = 'subscription' AND e.status = 'active')
+            OR EXISTS (
+                SELECT 1 FROM sample_grants g JOIN vehicles v ON v.id = g.vehicle_id
+                WHERE g.user_id = $1 AND v.year = $3 AND v.make = $4 AND v.model = $5)
+            OR (
+                SELECT count(*) FROM sample_grants g
+                WHERE g.user_id = $1 AND NOT EXISTS (
+                    SELECT 1 FROM entitlements e
+                    WHERE e.user_id = $1 AND e.kind = 'unlock' AND e.status = 'active'
+                      AND e.vehicle_id = g.vehicle_id)
+            ) < $2
+        """,
+        user_id,
+        FREE_SAMPLE_VEHICLES,
+        year,
+        make.strip().upper(),
+        normalize_model(model),
+    )
+
+
 async def _my_vehicle(conn, user_id: int, vehicle_id: int) -> dict | None:
     """One of the caller's linked vehicles as a MyVehicle dict, or None when not linked."""
     row = await conn.fetchrow(
@@ -128,7 +168,8 @@ async def list_my_vehicles(user_id: int) -> list[dict]:
 async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
     """Track the identity, link it to the caller (idempotent) and start ingest if it is empty.
 
-    Raises ValueError for a bad identity and VehicleLimitReached past MAX_VEHICLES.
+    Raises ValueError for a bad identity, VehicleLimitReached past MAX_VEHICLES, and
+    SampleLimitReached when a free account has used its free samples.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -148,8 +189,12 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
             make.strip().upper(),
             normalize_model(model),
         )
+        # Same reasoning for the free-sample rule: refuse before a vehicle is created.
+        slot_free = at_cap or await _sample_slot_free(conn, user_id, year, make, model)
     if at_cap:
         raise VehicleLimitReached()
+    if not slot_free:
+        raise SampleLimitReached()
     vehicle = await VehicleService.create_vehicle(year=str(year), make=make, model=model)
     vehicle_id = vehicle["vehicle_id"]
     async with pool.acquire() as conn:
@@ -166,8 +211,17 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
             )
             if not exists and linked >= MAX_VEHICLES:
                 raise VehicleLimitReached()
+            # Re-checked under the user lock so two adds cannot both take the last slot.
+            if not exists and not await _sample_slot_free(conn, user_id, year, make, model):
+                raise SampleLimitReached()
             await conn.execute(
                 "INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2) "
+                "ON CONFLICT DO NOTHING",
+                user_id,
+                vehicle_id,
+            )
+            await conn.execute(
+                "INSERT INTO sample_grants (user_id, vehicle_id) VALUES ($1, $2) "
                 "ON CONFLICT DO NOTHING",
                 user_id,
                 vehicle_id,

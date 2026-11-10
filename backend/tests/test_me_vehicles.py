@@ -91,6 +91,21 @@ async def _vehicle(conn, model: str, processed: int = 0) -> int:
     return vid
 
 
+async def _user(conn, uid: str) -> int:
+    return await conn.fetchval(
+        """INSERT INTO users (firebase_uid, email) VALUES ($1, $2)
+           ON CONFLICT (firebase_uid) DO UPDATE SET email = EXCLUDED.email RETURNING id""",
+        uid, uid + "@example.com",
+    )
+
+
+async def _subscribe(conn, uid: str) -> None:
+    await conn.execute(
+        "INSERT INTO entitlements (user_id, kind, status) VALUES ($1, 'subscription', 'active')",
+        await _user(conn, uid),
+    )
+
+
 def _body(model: str) -> dict:
     return {"year": YEAR, "make": MAKE, "model": model}
 
@@ -132,6 +147,7 @@ async def test_adding_twice_is_idempotent(db):
 
 
 async def test_the_eleventh_vehicle_is_409(db):
+    await _subscribe(db, USER_A)  # only a subscriber can reach ten cars
     async with _http() as c:
         for i in range(10):
             r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body(f"CAR{i}"))
@@ -212,6 +228,7 @@ async def test_a_user_id_in_the_request_is_ignored(db):
 
 
 async def test_a_capped_account_cannot_create_vehicles_by_collecting_409s(db, refresh_calls):
+    await _subscribe(db, USER_A)
     async with _http() as c:
         for i in range(10):
             assert (
@@ -235,3 +252,61 @@ async def test_read_only_mode_links_a_new_vehicle_without_starting_a_refresh(
     assert r.status_code == 201
     assert r.json()["availability"] == "processing"
     assert refresh_calls == []
+
+
+async def _add(c, uid: str, model: str) -> int:
+    return (await c.post("/api/me/vehicles", headers=_as(uid), json=_body(model))).status_code
+
+
+async def test_a_free_account_gets_two_sample_cars_and_the_third_is_refused(db, refresh_calls):
+    async with _http() as c:
+        assert await _add(c, USER_A, "ONE") == 201
+        assert await _add(c, USER_A, "TWO") == 201
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("THREE"))
+    assert r.status_code == 402
+    assert "2 free samples" in r.json()["detail"]
+    # The refused car was never created, so nothing is queued or read for it.
+    assert await db.fetchval(
+        "SELECT count(*) FROM vehicles WHERE make = $1 AND model = 'THREE'", MAKE
+    ) == 0
+    assert len(refresh_calls) == 2
+
+
+async def test_removing_a_sample_car_does_not_hand_out_a_new_sample(db):
+    async with _http() as c:
+        assert await _add(c, USER_A, "ONE") == 201
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("TWO"))
+        assert r.status_code == 201
+        await c.delete(f"/api/me/vehicles/{r.json()['vehicleId']}", headers=_as(USER_A))
+        assert await _add(c, USER_A, "THREE") == 402
+        # The car that was removed can come back: it was already one of the two.
+        assert await _add(c, USER_A, "TWO") == 201
+
+
+async def test_unlocking_a_car_frees_its_sample_slot(db):
+    async with _http() as c:
+        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("ONE"))
+        assert await _add(c, USER_A, "TWO") == 201
+        assert await _add(c, USER_A, "THREE") == 402
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, vehicle_id, status) "
+            "VALUES ($1, 'unlock', $2, 'active')",
+            await _user(db, USER_A), r.json()["vehicleId"],
+        )
+        assert await _add(c, USER_A, "THREE") == 201
+        assert await _add(c, USER_A, "FOUR") == 402
+
+
+async def test_a_subscriber_is_not_held_to_two_cars(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        for model in ("ONE", "TWO", "THREE", "FOUR"):
+            assert await _add(c, USER_A, model) == 201
+
+
+async def test_one_accounts_samples_do_not_count_against_another(db):
+    async with _http() as c:
+        assert await _add(c, USER_A, "ONE") == 201
+        assert await _add(c, USER_A, "TWO") == 201
+        assert await _add(c, USER_B, "ONE") == 201
+        assert await _add(c, USER_B, "THREE") == 201
