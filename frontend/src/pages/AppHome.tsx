@@ -24,6 +24,7 @@ import {
   MONTHLY_CARS,
   MONTHLY_PRICE_LABEL,
 } from '../features/billing/prices';
+import { trackLimitReached } from '../analytics/analytics';
 import styles from './AppHome.module.css';
 
 export function AppHome() {
@@ -53,6 +54,7 @@ export function AppHome() {
           if (err instanceof ApiError && err.status === 402) {
             setModalOpen(false);
             setSampleLimit(err.message);
+            trackLimitReached(plan ?? 'free');
             return;
           }
           showToast(err.message || 'We could not add that car.');

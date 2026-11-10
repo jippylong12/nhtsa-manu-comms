@@ -12,7 +12,7 @@ import {
 } from '../../features/billing/prices';
 
 export const COMPANY = 'JippylongTwelve LLC';
-export const PRODUCT = 'NHTSA Comms';
+export const PRODUCT = 'Not Just My Car';
 /** Where people write to us. */
 export const CONTACT_EMAIL = 'support@jippylong12.xyz';
 export const LAST_UPDATED = 'November 10, 2026';
@@ -125,7 +125,7 @@ export const TERMS: LegalDoc = {
 
 export const PRIVACY: LegalDoc = {
     title: 'Privacy Policy',
-    intro: `This explains what ${COMPANY} collects when you use ${PRODUCT}, why, and who else handles it. The short version: we collect what the service needs to work, we do not sell it, and we do not run advertising trackers.`,
+    intro: `This explains what ${COMPANY} collects when you use ${PRODUCT}, why, and who else handles it. The short version: we collect what the service needs to work, we measure how the site is used, and we do not sell your information.`,
     sections: [
         {
             heading: 'What we collect',
@@ -135,6 +135,7 @@ export const PRIVACY: LegalDoc = {
                 'How you use it: which bulletins you have opened, your alert settings, and the text of the symptom searches you run.',
                 'Payments: what you bought, when, and whether a subscription is active. Card details go straight to Stripe and never reach our servers.',
                 'Technical records: standard server logs such as IP address, browser type and the time of each request.',
+                'Site usage: which pages are visited and which steps are taken (looking up a car, creating an account, adding a car, starting a checkout, buying). These records carry the year, make and model of a car, never your email, your name or the words you type into a search.',
             ],
         },
         {
@@ -143,7 +144,8 @@ export const PRIVACY: LegalDoc = {
                 'to show you the bulletins for your cars and remember which you have read;',
                 'to email you when a new bulletin lands, if you are on a plan and alerts are on;',
                 'to take payment and know what your account includes;',
-                'to keep the service secure, stop abuse and fix problems.',
+                'to keep the service secure, stop abuse and fix problems;',
+                'to understand how people find and use the site, and whether our advertising works.',
             ],
         },
         {
@@ -154,6 +156,7 @@ export const PRIVACY: LegalDoc = {
                 'Stripe: payments and billing.',
                 'Resend: sending email.',
                 'Railway: hosting and the database.',
+                'Google Tag Manager and Google Analytics: measuring visits and the steps above. If we advertise, Google Ads may also learn that a visit or a purchase followed one of our ads. Google sets cookies in your browser to do this.',
                 'Anthropic and Google: the AI models. When you run a symptom search, the text you type is sent to them to produce the answer. Do not put personal details in a search.',
             ],
         },
@@ -161,14 +164,15 @@ export const PRIVACY: LegalDoc = {
             heading: 'What we do not do',
             bullets: [
                 'We do not sell or rent your information.',
-                'We do not show ads or use advertising or cross-site tracking cookies.',
+                'We do not show other companies\' ads on the site.',
+                'We do not send your email address, your name or your search text to analytics or advertising services.',
                 'We do not send marketing email. The only email we send is about your account, and alerts you can turn off.',
             ],
         },
         {
             heading: 'Storage in your browser',
             paragraphs: [
-                'Signing in keeps a session in your browser so you stay signed in, and we remember a purchase in progress while you are at Stripe. That is all we store there.',
+                'Signing in keeps a session in your browser so you stay signed in, and we remember a purchase in progress while you are at Stripe. Google Analytics sets its own cookies to tell visits apart. You can block those with your browser settings or Google\'s Analytics opt-out add-on, and the site works the same without them.',
             ],
         },
         {

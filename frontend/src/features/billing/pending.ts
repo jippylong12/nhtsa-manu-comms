@@ -1,12 +1,13 @@
 /* Remembers what was being bought across the Stripe redirect. Display only: access comes from /api/me. */
 
-import type { CheckoutKind } from '@/client';
+import type { CheckoutKind, SubscriptionPlan } from '@/client';
 
 const KEY = 'pendingCheckout';
 
 export interface PendingCheckout {
     kind: CheckoutKind;
     vehicleId?: number;
+    plan?: SubscriptionPlan;
 }
 
 export function rememberCheckout(p: PendingCheckout): void {

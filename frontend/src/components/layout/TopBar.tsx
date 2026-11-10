@@ -17,7 +17,7 @@ export function TopBar() {
 
   return (
     <header className={styles.bar}>
-      <Link to={user ? '/app' : '/'} className={styles.brand} aria-label="NHTSA Comms, home">
+      <Link to={user ? '/app' : '/'} className={styles.brand} aria-label="Not Just My Car, home">
         <Logo size={28} />
       </Link>
       <div className={styles.right}>

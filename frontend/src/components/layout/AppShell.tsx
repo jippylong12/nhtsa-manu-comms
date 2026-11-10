@@ -100,7 +100,7 @@ export function AppShell({ sidebar, children }: AppShellProps) {
           >
             <Menu size={20} />
           </button>
-          <span className={styles.topBarTitle}>NHTSA Comms</span>
+          <span className={styles.topBarTitle}>Not Just My Car</span>
         </header>
 
         <div

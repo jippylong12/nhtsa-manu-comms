@@ -4,14 +4,14 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 
-import { LAST_UPDATED, PRIVACY, TERMS } from './content';
+import { LAST_UPDATED, PRIVACY, PRODUCT, TERMS } from './content';
 import type { LegalDoc } from './content';
 import styles from './LegalPage.module.css';
 
 function LegalPage({ doc, other }: { doc: LegalDoc; other: { to: string; label: string } }) {
   useEffect(() => {
     const previous = document.title;
-    document.title = `${doc.title} · NHTSA Comms`;
+    document.title = `${doc.title} · ${PRODUCT}`;
     window.scrollTo(0, 0);
     return () => {
       document.title = previous;

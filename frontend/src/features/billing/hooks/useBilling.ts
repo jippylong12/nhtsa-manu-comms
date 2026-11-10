@@ -5,14 +5,16 @@ import { useMutation } from '@tanstack/react-query';
 import { billingApi } from '@/client';
 import type { CheckoutKind, SubscriptionPlan } from '@/client';
 import { rememberCheckout } from '../pending';
+import { trackBeginCheckout, trackCancelStart } from '../../../analytics/analytics';
 
 /** Creates a Checkout session on the server, then leaves for the URL it returned. */
 export function useCheckout() {
     return useMutation<string, Error, { kind: CheckoutKind; vehicleId?: number; plan?: SubscriptionPlan }>({
         mutationFn: async ({ kind, vehicleId, plan }) =>
             (await billingApi.checkout(kind, vehicleId, plan)).url,
-        onSuccess: (url, { kind, vehicleId }) => {
-            rememberCheckout({ kind, vehicleId });
+        onSuccess: (url, { kind, vehicleId, plan }) => {
+            rememberCheckout({ kind, vehicleId, plan });
+            trackBeginCheckout(kind, plan);
             window.location.assign(url);
         },
     });
@@ -23,6 +25,9 @@ export function useCheckout() {
 export function usePortal() {
     return useMutation<string, Error, 'manage' | 'cancel' | void>({
         mutationFn: async (flow) => (await billingApi.portal(flow ?? 'manage')).url,
-        onSuccess: (url) => window.location.assign(url),
+        onSuccess: (url, flow) => {
+            if (flow === 'cancel') trackCancelStart();
+            window.location.assign(url);
+        },
     });
 }

@@ -44,11 +44,11 @@ export function Logo({ variant = 'full', size = 28, className = '' }: LogoProps)
       <LogoMark size={size} />
       {variant === 'full' ? (
         <span className={styles.word}>
-          <span className={styles.wordStrong}>NHTSA</span>
-          <span className={styles.wordLight}>Comms</span>
+          <span className={styles.wordStrong}>Not Just</span>
+          <span className={styles.wordLight}>My Car</span>
         </span>
       ) : (
-        <span className={styles.srOnly}>NHTSA Comms</span>
+        <span className={styles.srOnly}>Not Just My Car</span>
       )}
     </span>
   );

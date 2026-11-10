@@ -10,6 +10,8 @@ import { recallCheckout } from '../features/billing/pending';
 import { useMeQuery } from '../features/my-vehicles/hooks/useMyVehicles';
 import { vehicleName } from '../features/my-vehicles/access';
 import { meKeys } from '../features/queryKeys';
+import { planOf } from '../features/billing/plan';
+import { trackPurchase } from '../analytics/analytics';
 import styles from './BillingSuccessPage.module.css';
 
 const POLL_MS = 2_000;
@@ -58,6 +60,12 @@ export function BillingSuccessPage() {
       clearTimeout(giveUp);
     };
   }, [done, refetch, queryClient]);
+
+  // Counted once the entitlement exists, so an abandoned or failed payment is never a sale.
+  const boughtPlan = landed?.kind === 'subscription' ? (pending?.plan ?? planOf(meQuery.data)) : null;
+  useEffect(() => {
+    if (landed) trackPurchase(landed.kind, boughtPlan, sessionId);
+  }, [landed, boughtPlan, sessionId]);
 
   const kind = landed?.kind ?? pending?.kind;
   const vehicle = vehicleFor(meQuery.data, landed?.vehicleId ?? pending?.vehicleId);

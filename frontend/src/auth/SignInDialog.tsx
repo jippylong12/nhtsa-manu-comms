@@ -8,6 +8,7 @@ import { Eye, EyeOff, Lock, Mail, X } from 'lucide-react';
 
 import styles from './SignInDialog.module.css';
 import { useAuth } from './AuthContext';
+import { trackLogin, trackSignUp } from '../analytics/analytics';
 
 interface Props {
   onClose: () => void;
@@ -83,11 +84,14 @@ export function SignInDialog({ onClose, onSignedIn, initialMode = 'signin' }: Pr
     }
   };
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>, method: 'google' | 'email') => {
     setBusy(true);
     setError(null);
     try {
       await action();
+      // Google is one button for both; it counts as whichever the dialog was showing.
+      if (mode === 'signup') trackSignUp(method);
+      else trackLogin(method);
       (onSignedIn ?? onClose)();
     } catch (err) {
       setError(messageFor(err));
@@ -98,8 +102,9 @@ export function SignInDialog({ onClose, onSignedIn, initialMode = 'signin' }: Pr
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    void run(() =>
-      mode === 'signin' ? signInWithEmail(email, password) : signUpWithEmail(email, password),
+    void run(
+      () => (mode === 'signin' ? signInWithEmail(email, password) : signUpWithEmail(email, password)),
+      'email',
     );
   };
 
@@ -140,7 +145,7 @@ export function SignInDialog({ onClose, onSignedIn, initialMode = 'signin' }: Pr
           type="button"
           className={styles.provider}
           disabled={disabled}
-          onClick={() => void run(signInWithGoogle)}
+          onClick={() => void run(signInWithGoogle, 'google')}
         >
           <svg className={styles.google} viewBox="0 0 18 18" aria-hidden="true">
             <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />

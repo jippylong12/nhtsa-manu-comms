@@ -6,6 +6,7 @@ import { meApi } from '@/client';
 import type { Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle, Severity } from '@/client';
 import { useAuth } from '@/auth/AuthContext';
 import { meKeys } from '../../queryKeys';
+import { trackAddVehicle, trackRemoveVehicle } from '../../../analytics/analytics';
 
 // While any car is still being read, poll so the card flips to Ready by itself.
 const PROCESSING_POLL_MS = 10_000;
@@ -31,7 +32,10 @@ export function useAddVehicle() {
         mutationFn: ({ year, make, model }) => meApi.addVehicle(year, make, model),
         // Returning the promise holds the mutation open until `me` has refetched,
         // so callers that navigate on success land on a page that knows the car.
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: meKeys.all }),
+        onSuccess: (_added, car) => {
+            trackAddVehicle(car);
+            return queryClient.invalidateQueries({ queryKey: meKeys.all });
+        },
     });
 }
 
@@ -39,7 +43,10 @@ export function useRemoveVehicle() {
     const queryClient = useQueryClient();
     return useMutation<void, Error, number>({
         mutationFn: (id) => meApi.removeVehicle(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: meKeys.all }),
+        onSuccess: () => {
+            trackRemoveVehicle();
+            return queryClient.invalidateQueries({ queryKey: meKeys.all });
+        },
     });
 }
 

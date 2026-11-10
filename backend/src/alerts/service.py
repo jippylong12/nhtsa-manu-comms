@@ -303,7 +303,7 @@ def _footer_line() -> str:
 def render_text(alert: UserAlert, unsubscribe_url: str) -> str:
     """Plain-text alternative part."""
     base = _base_url()
-    lines = [f"NHTSA Comms alert - {alert.generated_at:%b %d, %Y}"]
+    lines = [f"Not Just My Car alert - {alert.generated_at:%b %d, %Y}"]
     if alert.total_items:
         lines.append(f"{alert.total_items} new communication(s) for your vehicles.")
     lines.append("")
@@ -407,7 +407,7 @@ def render_html(alert: UserAlert, unsubscribe_url: str) -> str:
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;
      font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <tr><td>
-        <div style="font-size:22px;font-weight:700;color:#f9fafb;">NHTSA Comms alert</div>
+        <div style="font-size:22px;font-weight:700;color:#f9fafb;">Not Just My Car alert</div>
         <div style="font-size:14px;color:#9ca3af;margin-top:4px;">
             {alert.generated_at:%B %d, %Y}{count_line}
         </div>
@@ -545,7 +545,7 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
             log.info("DRY RUN: user %s to %s, preview %s", user["id"], destination, path)
             continue
 
-        subject = f"NHTSA Comms: {alert.total_items} new for your vehicles"
+        subject = f"Not Just My Car: {alert.total_items} new for your vehicles"
         text = render_text(alert, unsubscribe_url)
         try:
             outcome.message_id = await asyncio.to_thread(

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
-import { CONTACT_EMAIL } from './legal/content';
+import { trackLookup, trackSignUpStart } from '../analytics/analytics';
+import { CONTACT_EMAIL, PRODUCT } from './legal/content';
 import { ArrowRight, ArrowUp, BellRing, Check, FileText, ListFilter, Stethoscope } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext';
@@ -184,6 +185,14 @@ export function LandingPage() {
     }
   }, [user, addAndOpen]);
 
+  // One lookup event per car looked at, when its answer arrives.
+  const lookedUp = lookup.data;
+  useEffect(() => {
+    if (!lookedUp) return;
+    const c = lookedUp.counts;
+    trackLookup(lookedUp, lookedUp.availability, c.serious + c.medium + c.small);
+  }, [lookedUp]);
+
   const yearRef = useRef<HTMLInputElement>(null);
   const checkRef = useRef<HTMLDivElement>(null);
 
@@ -202,6 +211,7 @@ export function LandingPage() {
     }
     if (!user) {
       pendingAdd.current = true;
+      trackSignUpStart('landing');
       setSignInOpen(true);
       return;
     }
@@ -212,6 +222,7 @@ export function LandingPage() {
     setAddError(null);
     if (!user) {
       pendingAdd.current = true;
+      trackSignUpStart('landing');
       setSignInOpen(true);
       return;
     }
@@ -373,7 +384,7 @@ export function LandingPage() {
 
       <footer className={styles.footer}>
         Bulletins are sourced from NHTSA's public files and summarized automatically; check the source
-        document before acting on one. NHTSA Comms is an independent service and is not affiliated
+        document before acting on one. {PRODUCT} is an independent service and is not affiliated
         with NHTSA or any carmaker.
         <span className={styles.footerLinks}>
           <Link to="/terms">Terms</Link>

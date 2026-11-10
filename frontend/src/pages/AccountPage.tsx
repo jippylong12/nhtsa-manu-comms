@@ -23,7 +23,7 @@ import {
 import { accessLabel, isUnlocked, vehicleName } from '../features/my-vehicles/access';
 import { RemoveVehicleDialog } from '../features/my-vehicles/components/RemoveVehicleDialog';
 import { useMeQuery, useRemoveVehicle } from '../features/my-vehicles/hooks/useMyVehicles';
-import { CONTACT_EMAIL } from './legal/content';
+import { CONTACT_EMAIL, PRODUCT } from './legal/content';
 import styles from './AccountPage.module.css';
 
 interface PlanInfo {
@@ -463,7 +463,7 @@ export function AccountPage() {
               </div>
               <a
                 className={`btn btn-secondary ${styles.btn}`}
-                href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('NHTSA Comms support')}`}
+                href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`${PRODUCT} support`)}`}
               >
                 Email support
               </a>
