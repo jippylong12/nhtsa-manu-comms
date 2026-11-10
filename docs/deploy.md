@@ -42,6 +42,7 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `ANTHROPIC_EXTRACTION_CONCURRENCY` | no | optional | no | Live extraction calls at once (default 6) |
 | `EXTRACTION_MODEL` | no | optional | no | Extraction model (default `claude-haiku-5-5`) |
 | `COMPOSE_MODEL` | optional | no | no | Symptom-search answer model (default `claude-haiku-5-5`) |
+| `NIGHTLY_SPEND_CAP_USD` | optional | optional | no | Daily model-spend cap, shared by the nightly run and the API's background reads of newly added cars (default 10, counted over the last 24 hours). At the cap no more new documents are read; they wait until spend drops. 0 turns it off. Set the same value on both services |
 | `COMPOSE_TIMEOUT_SECONDS` | optional | no | no | Per-call ceiling for the symptom-search answer (default 30) |
 | `GEMINI_API_KEY` | yes | yes | yes | Embeddings (the symptom-search query vector and the corpus) |
 | `GEMINI_MODEL` | no | optional | no | Eval harness and bake-off arms only; compose no longer reads it |
@@ -60,6 +61,7 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `STRIPE_PRICE_UNLOCK` | yes | no | no | Stripe price id |
 | `STRIPE_PRICE_MONTHLY` | yes | no | no | Stripe price id |
 | `CORS_ORIGINS` | optional | no | no | JSON list; the SPA is same-origin in production, leave the default |
+| `REFRESH_DOCUMENT_LIMIT` | optional | no | no | Most documents read per in-app read of one car (default 0, no limit). Only for a local try-out; leave unset in production |
 | `READ_ONLY` | optional (leave unset or `false`) | no | no | Read-only mode, see above |
 | `FRONTEND_DIST` | optional | no | no | Built frontend directory (default `../frontend/dist`; the image sets `/app/frontend/dist`) |
 | `PDF_ARCHIVE_DIR` | no | yes | no | Where PDFs are archived: a Railway volume mount or `/tmp` |

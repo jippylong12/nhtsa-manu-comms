@@ -9,7 +9,7 @@ from src.config import get_settings
 from src.corpus import service as corpus_service
 from src.db import get_pool
 from src.public import service as public_service
-from src.refresh import service as refresh_service
+from src.refresh import queue as ingest_queue
 from src.symptom_search.retrieval import REVISION_STEM_SQL
 from src.vehicles.service import VehicleService
 
@@ -178,10 +178,8 @@ async def add_vehicle(user_id: int, year: int, make: str, model: str) -> dict:
             # Read-only mode unmounts the refresh routes; a user add must not start one either.
             logger.info("read-only: ingest not started (vehicle %s)", vehicle_id)
             return result
-        try:
-            await refresh_service.start(vehicle_id)
-        except refresh_service.RefreshConflict:
-            logger.info("ingest deferred to the nightly run (vehicle %s)", vehicle_id)
+        # Queued, not started here: a background worker reads the queue one car at a time.
+        await ingest_queue.request(vehicle_id)
     return result
 
 

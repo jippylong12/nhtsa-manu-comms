@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     # The model symptom-search compose calls (src/symptom_search/compose.py). Haiku at
     # list price is a third of Flash-Lite on this prompt; see src/symptom_search/cost.py.
     compose_model: str = "claude-haiku-5-5"
+    # The nightly run stops reading new documents once the last 24 hours of model spend
+    # reaches this many dollars; what is left waits for the next night. 0 turns the cap off.
+    nightly_spend_cap_usd: float = 10.0
+    # At most this many documents are read per in-app read of one car (the queue worker and
+    # the admin's Refresh). 0 means no limit, which is production's setting; a small number
+    # makes a local try-out quick and cheap. What is left over stays pending for the nightly.
+    refresh_document_limit: int = 0
     # Per-call ceiling for the compose call only. It runs inside a user-facing search
     # request, so it must fail in seconds; the shared anthropic_timeout_seconds is sized
     # for the extraction job's PDF calls.

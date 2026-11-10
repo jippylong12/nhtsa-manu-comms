@@ -69,8 +69,8 @@ async def world(monkeypatch, tmp_path):
     w = World(conn, tmp_path)
     w.baseline_run = await conn.fetchval("SELECT coalesce(max(id), 0) FROM pipeline_runs")
 
-    async def fake_scan(c, vehicle_id):
-        w.calls.append(("scan", vehicle_id))
+    async def fake_scan(c, vehicles):
+        w.calls.append(("scan", tuple(vehicles)))
         return {}
 
     async def fake_sync(vehicle_ids, limit):
@@ -110,7 +110,7 @@ async def world(monkeypatch, tmp_path):
 
     monkeypatch.setattr(process, "_unresolved_batches", unresolved)
     monkeypatch.setattr(llm_stage, "collect_batch", fake_collect)
-    monkeypatch.setattr(flatfile, "scan_vehicle", fake_scan)
+    monkeypatch.setattr(flatfile, "refresh_index", fake_scan)
     monkeypatch.setattr(sync_job, "run", fake_sync)
     monkeypatch.setattr(process, "run_extract", fake_extract)
     monkeypatch.setattr(process, "_batch_llm_once", fake_llm)
@@ -154,6 +154,8 @@ async def test_apply_creates_the_vehicles_syncs_exactly_them_and_runs_the_stages
     assert len(ids) == 2
     syncs = [c for c in world.calls if c[0] == "sync"]
     assert syncs == [("sync", tuple(ids), None)]
+    # One scan call for all the vehicles: each flat-file window is read once, not once per vehicle.
+    assert [c for c in world.calls if c[0] == "scan"] == [("scan", tuple(ids))]
     stages = [(c[0], c[-1]) for c in world.calls if c[0] in ("extract", "llm", "embed")]
     assert stages == [(s, v) for s in ("extract", "llm", "embed") for v in ids]
     kinds = [c[0] for c in world.calls]

@@ -22,6 +22,7 @@ import asyncpg
 
 from src.communications import flatfile
 from src.communications.nhtsa_client import NHTSAClient
+from src.config import get_settings
 from src.db import get_pool
 from src.jobs import extract as extract_stage
 from src.jobs import llm as llm_stage
@@ -255,8 +256,8 @@ async def _progress(
         )
 
 
-async def start(vehicle_id: int) -> dict[str, Any]:
-    """Begin a run. Raises RefreshConflict if one is already active."""
+async def _begin(vehicle_id: int) -> dict[str, Any]:
+    """Claim the single run slot and write the run row. Raises RefreshConflict if it is taken."""
     vehicle = await VehicleService.get_vehicle(vehicle_id)
     if vehicle is None:
         raise LookupError(f"vehicle {vehicle_id} is not tracked")
@@ -300,11 +301,26 @@ async def start(vehicle_id: int) -> dict[str, Any]:
             run_id,
         )
 
-    run = _row(row)
+    return _row(row)
+
+
+async def start(vehicle_id: int) -> dict[str, Any]:
+    """Begin a run in the background. Raises RefreshConflict if one is already active."""
+    run = await _begin(vehicle_id)
     task = asyncio.create_task(_execute(run["id"], vehicle_id))
     _running.add(task)
     task.add_done_callback(_running.discard)
     return run
+
+
+async def run_now(vehicle_id: int) -> Optional[dict[str, Any]]:
+    """Run to completion and return the finished run row (the ingest queue's worker uses this).
+
+    Raises RefreshConflict if a run is already active, LookupError if the vehicle is not tracked.
+    """
+    run = await _begin(vehicle_id)
+    await _execute(run["id"], vehicle_id)
+    return await latest_run(vehicle_id)
 
 
 # --------------------------------------------------------------------------
@@ -437,7 +453,9 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         )
 
         # ---- extract ---------------------------------------------------
-        extracted = await processor.run_extract(None, vehicle_id=vehicle_id)
+        # 0 is no limit. A limit is for local try-outs: the rest stays pending for the nightly.
+        doc_limit = get_settings().refresh_document_limit or None
+        extracted = await processor.run_extract(doc_limit, vehicle_id=vehicle_id)
         await _progress(
             run_id,
             stage="analyse",
@@ -446,7 +464,7 @@ async def _execute(run_id: int, vehicle_id: int) -> None:
         )
 
         # ---- llm -------------------------------------------------------
-        await processor.run_llm(None, sync=True, vehicle_id=vehicle_id)
+        await processor.run_llm(doc_limit, sync=True, vehicle_id=vehicle_id)
         await llm_stage.promote_completed_communications()
         await _progress(run_id, stage="index", note="Indexing for search")
 

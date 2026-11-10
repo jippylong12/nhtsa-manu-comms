@@ -360,6 +360,14 @@ async def test_the_analyse_stage_reads_documents_live_not_through_a_batch_queue(
     await service._execute(1, 1)
 
     assert llm_calls == [(None, True, 1)]
+
+    # With a document limit set (a local try-out), the read stages are capped at it.
+    llm_calls.clear()
+    monkeypatch.setattr(
+        service, "get_settings", lambda: SimpleNamespace(refresh_document_limit=25)
+    )
+    await service._execute(1, 1)
+    assert llm_calls == [(25, True, 1)]
     assert (
         "analyse",
         "Reading each document with the model. This is the long part",

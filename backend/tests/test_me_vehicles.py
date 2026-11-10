@@ -1,6 +1,6 @@
 """/api/me/vehicles: link, create-and-ingest, unlink, per-user isolation (JIP-1587).
 
-`firebase.verify` and `refresh.service.start` are the only faked boundaries. Runs
+`firebase.verify` and `refresh.queue.request` are the only faked boundaries. Runs
 against the real database on committed connections and deletes its own TESTME rows.
 """
 
@@ -12,7 +12,7 @@ import pytest_asyncio
 from src.auth import firebase
 from src.config import get_settings
 from src.main import create_app
-from src.refresh import service as refresh_service
+from src.refresh import queue as ingest_queue
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,7 +46,7 @@ def refresh_calls(monkeypatch):
         calls.append(vehicle_id)
         return {"id": 1}
 
-    monkeypatch.setattr(refresh_service, "start", fake_start)
+    monkeypatch.setattr(ingest_queue, "request", fake_start)
     monkeypatch.setattr(
         firebase,
         "verify",
@@ -111,7 +111,7 @@ async def test_adding_a_tracked_processed_vehicle_links_it_ready_without_refresh
     assert [v["vehicleId"] for v in me.json()["vehicles"]] == [vid]
 
 
-async def test_adding_an_unknown_identity_creates_it_and_starts_one_refresh(db, refresh_calls):
+async def test_adding_an_unknown_identity_creates_it_and_queues_one_read(db, refresh_calls):
     async with _http() as c:
         r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("NEWCAR"))
     assert r.status_code == 201
@@ -119,17 +119,6 @@ async def test_adding_an_unknown_identity_creates_it_and_starts_one_refresh(db, 
     vid = await db.fetchval("SELECT id FROM vehicles WHERE make = $1 AND model = 'NEWCAR'", MAKE)
     assert vid == r.json()["vehicleId"]
     assert refresh_calls == [vid]
-
-
-async def test_a_refresh_conflict_is_swallowed(db, monkeypatch):
-    async def busy(vehicle_id: int):
-        raise refresh_service.RefreshConflict({})
-
-    monkeypatch.setattr(refresh_service, "start", busy)
-    async with _http() as c:
-        r = await c.post("/api/me/vehicles", headers=_as(USER_A), json=_body("BUSYCAR"))
-    assert r.status_code == 201
-    assert r.json()["availability"] == "processing"
 
 
 async def test_adding_twice_is_idempotent(db):
