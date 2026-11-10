@@ -389,7 +389,6 @@
 }
 
 .faqList {
-  max-width: 46rem;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -436,7 +435,7 @@
 
 .faqA {
   margin: 0 0 var(--space-md);
-  max-width: 42rem;
+  max-width: 60rem;
   color: var(--text-secondary);
   line-height: 1.65;
 }
