@@ -1,4 +1,10 @@
-/* Year and make share a row, model takes the next one. Nothing can spill out of the card. */
+/* The picker sizes itself to the space it is given: three columns when wide, year and make
+   over model when medium, one column on a phone. Nothing can spill out of its card. */
+.wrap {
+  container-type: inline-size;
+  min-width: 0;
+}
+
 .picker {
   display: grid;
   grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
@@ -11,7 +17,17 @@
   min-width: 0;
 }
 
-@media (max-width: 420px) {
+@container (min-width: 600px) {
+  .picker {
+    grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr) minmax(0, 1.25fr);
+  }
+
+  .model {
+    grid-column: auto;
+  }
+}
+
+@container (max-width: 359px) {
   .picker {
     grid-template-columns: minmax(0, 1fr);
   }

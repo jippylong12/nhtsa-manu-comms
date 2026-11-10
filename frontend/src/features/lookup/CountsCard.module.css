@@ -95,8 +95,11 @@
 }
 
 .cta {
-  align-self: flex-start;
-  min-height: 44px;
+  align-self: stretch;
+  min-height: 52px;
+  justify-content: center;
+  gap: var(--space-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 @media (max-width: 599px) {

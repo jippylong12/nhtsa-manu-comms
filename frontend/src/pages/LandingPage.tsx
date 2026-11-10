@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, BellRing, Check, FileText, ListFilter, Stethoscope } from 'lucide-react';
+import { ArrowRight, ArrowUp, BellRing, Check, FileText, ListFilter, Stethoscope } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext';
 import { SignInDialog } from '../auth/SignInDialog';
@@ -12,6 +12,13 @@ import { useAddVehicle } from '../features/my-vehicles/hooks/useMyVehicles';
 import { useLookup } from '../features/lookup/useLookup';
 import { VehiclePicker, type PickerValue } from '../features/lookup/VehiclePicker';
 import styles from './LandingPage.module.css';
+
+// One click fills the lookup, so a visitor sees a real result before typing anything.
+const TRY_CARS: { label: string; value: PickerValue }[] = [
+  { label: '2024 Silverado EV', value: { year: 2024, make: 'CHEVROLET', model: 'SILVERADO EV' } },
+  { label: '2023 RAV4', value: { year: 2023, make: 'TOYOTA', model: 'RAV4' } },
+  { label: '2021 Civic', value: { year: 2021, make: 'HONDA', model: 'CIVIC' } },
+];
 
 const POINTS = [
   {
@@ -151,9 +158,22 @@ export function LandingPage() {
     }
   }, [user, addAndOpen]);
 
-  // "Start free": sign in if needed, then add the car already picked (or just open the account).
+  const yearRef = useRef<HTMLInputElement>(null);
+  const checkRef = useRef<HTMLDivElement>(null);
+
+  // Send the visitor back to the lookup: it is the first step for everyone.
+  function goToCheck() {
+    checkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => yearRef.current?.focus({ preventScroll: true }), 350);
+  }
+
+  // "Start free": with no car picked yet, the lookup comes first; otherwise sign in and add it.
   function handleStart() {
     setAddError(null);
+    if (!selected) {
+      goToCheck();
+      return;
+    }
     if (!user) {
       pendingAdd.current = true;
       setSignInOpen(true);
@@ -175,24 +195,37 @@ export function LandingPage() {
   return (
     <div className={styles.page}>
       <section className={styles.hero} aria-labelledby="hero-title">
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>From NHTSA's manufacturer files</p>
-          <h1 id="hero-title" className={styles.heading}>
-            Your dealer got the memo. <span className={styles.accent}>You didn't.</span>
-          </h1>
-          <p className={styles.value}>
-            Carmakers send dealers thousands of bulletins about known problems, repairs and recalls.
-            We read every one filed for your car and tell you which ones matter.
-          </p>
-        </div>
+        <p className={styles.eyebrow}>From NHTSA's manufacturer files</p>
+        <h1 id="hero-title" className={styles.heading}>
+          Your dealer got the memo. <span className={styles.accent}>You didn't.</span>
+        </h1>
+        <p className={styles.value}>
+          Carmakers send dealers thousands of bulletins about known problems, repairs and recalls.
+          See how many are on file for your car, in about ten seconds.
+        </p>
 
-        <div className={styles.check}>
-          <p className={styles.checkLabel}>Check your car. Free, no account.</p>
-          <VehiclePicker value={value} onChange={handleChange} />
+        <div className={styles.check} ref={checkRef}>
+          <div className={styles.checkHead}>
+            <h2 className={styles.checkLabel}>Check your car</h2>
+            <span className={styles.checkFree}>Free. No account. No card.</span>
+          </div>
+          <VehiclePicker value={value} onChange={handleChange} yearRef={yearRef} />
+          {!selected && (
+            <div className={styles.tryRow}>
+              <span className={styles.tryLabel}>Or try one:</span>
+              {TRY_CARS.map((car) => (
+                <button
+                  key={car.label}
+                  type="button"
+                  className={styles.tryChip}
+                  onClick={() => handleChange(car.value)}
+                >
+                  {car.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={styles.result}>
-            {!selected && (
-              <p className={styles.hint}>Pick a year, make and model to see how many bulletins it has.</p>
-            )}
             {selected && lookup.isLoading && (
               <p className={styles.status} role="status">Looking up your car...</p>
             )}
@@ -279,13 +312,13 @@ export function LandingPage() {
                 className={`btn ${plan.featured ? 'btn-primary' : 'btn-secondary'} ${styles.planCta}`}
                 onClick={handleStart}
               >
-                {plan.cta}
+                {selected ? plan.cta : 'Check your car first'}
               </button>
             </article>
           ))}
         </div>
         <p className={styles.pricingNote}>
-          Every account starts free. You choose Unlock or Subscribe on your car's page, after you have seen the sample.
+          Every account starts free: check your car above, then sign up to read the sample. You choose Unlock or Subscribe on your car's page.
         </p>
       </section>
 
@@ -304,7 +337,11 @@ export function LandingPage() {
       <section className={styles.final} aria-labelledby="final-title">
         <h2 id="final-title" className={styles.finalTitle}>See what your carmaker has been telling dealers.</h2>
         <button type="button" className={`btn btn-primary btn-lg ${styles.finalCta}`} onClick={handleStart}>
-          Start free <ArrowRight size={18} aria-hidden="true" />
+          {selected ? (
+            <>Start free <ArrowRight size={18} aria-hidden="true" /></>
+          ) : (
+            <>Check your car <ArrowUp size={18} aria-hidden="true" /></>
+          )}
         </button>
       </section>
 

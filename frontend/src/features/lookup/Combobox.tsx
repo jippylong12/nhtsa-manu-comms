@@ -16,6 +16,10 @@ interface ComboboxProps {
     loading?: boolean;
     /** How an option is shown. The value passed to onChange is always the raw option. */
     format?: (option: string) => string;
+    /** A step number shown beside the label; it fills in once a value is chosen. */
+    step?: number;
+    /** Lets the parent move focus here (the picker walks year, make, model). */
+    inputRef?: React.RefObject<HTMLInputElement | null>;
     /** Numeric keypad on phones (model years). */
     numeric?: boolean;
 }
@@ -34,10 +38,13 @@ export function Combobox({
     loading = false,
     numeric = false,
     format = asIs,
+    step,
+    inputRef: externalRef,
 }: ComboboxProps) {
     const id = useId();
     const listId = `${id}-list`;
-    const inputRef = useRef<HTMLInputElement>(null);
+    const ownRef = useRef<HTMLInputElement>(null);
+    const inputRef = externalRef ?? ownRef;
     const wrapRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     // What is typed. null means "show the committed value".
@@ -112,6 +119,11 @@ export function Combobox({
     return (
         <div className={styles.field} ref={wrapRef}>
             <label className={styles.label} htmlFor={id}>
+                {step !== undefined && (
+                    <span className={styles.step} data-done={value ? true : undefined} aria-hidden="true">
+                        {step}
+                    </span>
+                )}
                 {label}
             </label>
             <div className={styles.control} data-disabled={disabled || undefined}>

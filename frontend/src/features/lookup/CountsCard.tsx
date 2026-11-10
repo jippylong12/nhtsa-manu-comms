@@ -1,7 +1,7 @@
 /* Severity counts card: ready, processing and unknown (example) states */
 
 import { differenceInCalendarDays, format, formatDistanceToNowStrict, parseISO } from 'date-fns';
-import { Clock, SearchX } from 'lucide-react';
+import { ArrowRight, Clock, SearchX } from 'lucide-react';
 
 import { PRIORITY_COLORS } from '@/client';
 import type { CommPriority, LookupCounts, LookupResponse } from '@/client';
@@ -56,6 +56,7 @@ export function CountsCard({ data, onSeeAll }: CountsCardProps) {
     const unknown = data.availability === 'unknown';
     const shown = unknown && data.example ? data.example : data;
     const latest = processing ? null : latestOf(shown.latestDate);
+    const total = shown.counts.serious + shown.counts.medium + shown.counts.small;
 
     return (
         <section className={styles.card} aria-label="Update counts">
@@ -114,8 +115,13 @@ export function CountsCard({ data, onSeeAll }: CountsCardProps) {
                     </>
                 )}
             </div>
-            <button type="button" className={`btn btn-primary ${styles.cta}`} onClick={onSeeAll}>
-                {unknown ? 'Add my car free' : 'See them all'}
+            <button type="button" className={`btn btn-primary btn-lg ${styles.cta}`} onClick={onSeeAll}>
+                {unknown
+                    ? 'Add my car free'
+                    : processing
+                      ? 'Sign up free and get notified'
+                      : `See all ${total} bulletins, free`}
+                <ArrowRight size={18} aria-hidden="true" />
             </button>
         </section>
     );
