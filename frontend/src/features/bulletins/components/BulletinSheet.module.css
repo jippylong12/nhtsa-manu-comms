@@ -9,8 +9,9 @@
 }
 
 @keyframes sheet-in {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  /* A short rise, never an off-screen start: a stalled first frame still shows the sheet. */
+  from { transform: translateY(12px); }
+  to { transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
