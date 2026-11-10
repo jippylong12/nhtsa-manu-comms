@@ -7,12 +7,23 @@ and `/api/*` from one domain on port 8000. Two Railway services use that image.
 
 | Service | Start command | Notes |
 |---------|---------------|-------|
-| `api` | image CMD, `backend/start.sh` (runs `python -m src.db.migrate`, then `exec uvicorn`) | `railway.json` sets the Dockerfile builder, healthcheck `/api/health`, restart on failure |
+| `api` | image CMD, `backend/start.sh` (runs `python -m src.db.migrate`, then `exec uvicorn`) | `.railway/railway.py` sets the Dockerfile builder, healthcheck `/api/health`, restart on failure (up to 5 retries) |
 | `nightly` | `python -m src.jobs.run_pipeline --send-digest` (the last stage sends the alert emails) | same image, cron schedule `0 9 * * *` (UTC), does not migrate |
 
 Railway cron runs the start command to completion and expects the process to exit; a new run is
-skipped while the previous one is still running. Set the cron schedule and start command in the
-`nightly` service settings (service-level overrides of `railway.json`).
+skipped while the previous one is still running. The cron schedule and start command of `nightly`
+are in `.railway/railway.py`.
+
+### Service settings live in `.railway/railway.py`
+
+Railway's Infrastructure as Code file replaced `railway.json` on 2026-11-10 (Railway stops
+reading `railway.json` on 2026-12-01). It describes the three services (`api`, `nightly`,
+`pgvector` with its volume) and the custom domains; variables are unmanaged, so no secret is
+ever in the file. To change a service setting: edit the file, run `railway config plan` (a
+read-only preview; needs `pip install -r .railway/requirements.txt`), read every line of the
+plan, then `railway config apply`. A plan that adds or destroys anything, touches `pgvector`
+or removes a domain is a stop: the Stripe webhook posts to the Railway service domain of
+`api`. Deploying code is unchanged: `railway up` per service.
 
 ## Read-only mode
 
