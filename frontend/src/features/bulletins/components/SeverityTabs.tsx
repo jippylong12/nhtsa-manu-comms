@@ -1,9 +1,11 @@
 /* Severity tabs with counts and unread pills, the Unread only switch and Mark all read. */
 
+import { useRef, useState } from 'react';
 import { MailOpen } from 'lucide-react';
 
 import { PRIORITY_COLORS } from '@/client';
 import type { CommPriority, Facets, Severity } from '@/client';
+import { ConfirmDialog } from './ConfirmDialog';
 import styles from './SeverityTabs.module.css';
 
 export type SeverityTab = 'all' | Severity;
@@ -54,12 +56,21 @@ export function SeverityTabs({
     };
 
     const currentUnread = unread(selected);
+    const [confirming, setConfirming] = useState(false);
+    const markAllRef = useRef<HTMLButtonElement>(null);
+    const where = selected === 'all' ? '' : ` ${selected}`;
+
+    const doMark = () => onMarkAllRead(selected === 'all' ? undefined : selected);
     const markAll = () => {
         if (currentUnread > CONFIRM_ABOVE) {
-            const where = selected === 'all' ? '' : ` ${selected}`;
-            if (!window.confirm(`Mark all ${currentUnread}${where} unread bulletins as read?`)) return;
+            setConfirming(true);
+            return;
         }
-        onMarkAllRead(selected === 'all' ? undefined : selected);
+        doMark();
+    };
+    const closeConfirm = () => {
+        setConfirming(false);
+        markAllRef.current?.focus();
     };
 
     return (
@@ -108,6 +119,7 @@ export function SeverityTabs({
                     <MailOpen size={16} aria-hidden="true" /> Unread only
                 </button>
                 <button
+                    ref={markAllRef}
                     type="button"
                     className="btn btn-ghost btn-sm"
                     disabled={currentUnread === 0 || marking}
@@ -116,6 +128,17 @@ export function SeverityTabs({
                     Mark all read
                 </button>
             </div>
+            {confirming && (
+                <ConfirmDialog
+                    title={`Mark all ${currentUnread}${where} unread bulletins as read?`}
+                    confirmLabel="Mark as read"
+                    onCancel={closeConfirm}
+                    onConfirm={() => {
+                        doMark();
+                        closeConfirm();
+                    }}
+                />
+            )}
         </div>
     );
 }
