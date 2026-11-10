@@ -53,10 +53,45 @@
   gap: var(--space-xs);
 }
 
+.nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.nav:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.nav:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.navActive {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
 @media (max-width: 640px) {
   .email,
   .label {
     display: none;
+  }
+
+  .nav {
+    min-width: 2.75rem;
+    height: 2.75rem;
+    justify-content: center;
   }
 
   .action {

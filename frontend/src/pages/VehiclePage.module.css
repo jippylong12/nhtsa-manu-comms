@@ -12,17 +12,23 @@
 .back {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 32px;
+  gap: 8px;
+  height: 36px;
   width: fit-content;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  padding: 0 14px 0 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   text-decoration: none;
-  transition: color var(--transition-fast);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .back:hover {
-  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }
 
 .back:focus-visible {
@@ -266,6 +272,10 @@
 
 /* Phone: the plan bar sticks to the bottom of the viewport. */
 @media (max-width: 899.98px) {
+  .back {
+    height: 44px;
+  }
+
   .pagerBtn,
   .retry {
     min-height: 44px;

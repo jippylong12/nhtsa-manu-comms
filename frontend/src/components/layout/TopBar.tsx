@@ -2,8 +2,8 @@
  * in, and Sign in / Sign out. On narrow screens the text collapses to icons. */
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut } from 'lucide-react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Car, CircleUser, LogIn, LogOut } from 'lucide-react';
 
 import { useAuth } from '../../auth/AuthContext';
 import { SignInDialog } from '../../auth/SignInDialog';
@@ -23,7 +23,22 @@ export function TopBar() {
       <div className={styles.right}>
         {user ? (
           <>
-            <span className={styles.email}>{user.email}</span>
+            <NavLink
+              to="/app"
+              end
+              className={({ isActive }) => `${styles.nav} ${isActive ? styles.navActive : ''}`}
+            >
+              <Car size={16} aria-hidden="true" />
+              <span className={styles.label}>My vehicles</span>
+            </NavLink>
+            <NavLink
+              to="/app/account"
+              className={({ isActive }) => `${styles.nav} ${isActive ? styles.navActive : ''}`}
+              title={user.email ?? undefined}
+            >
+              <CircleUser size={16} aria-hidden="true" />
+              <span className={styles.label}>Account</span>
+            </NavLink>
             <button
               className={`btn btn-ghost btn-sm ${styles.action}`}
               onClick={() => void signOut().then(() => navigate('/'))}
