@@ -310,6 +310,10 @@ Five tables sit beside the corpus. None of them changes `communications`,
 - `bulletin_reads` (migration 0016) is one row per (user, `nhtsa_id`) the user has read,
   keyed on the latest revision of a family so a new revision arrives unread; it drives
   the `unread` and `newThisWeek` counts on `GET /api/me`.
+- `sample_grants` (migration 0018) is one row per (user, vehicle) the account was ever
+  given a free sample of. A free account may hold two that are not covered by an active
+  unlock; a removed car keeps its row, so removing and adding hands out no new sample.
+  Subscribers and admins are not limited.
 - `ingest_queue` (migration 0017) is the list of cars waiting to be read after a user added
   them: one row per vehicle, oldest first, with `attempts` and `last_error`. A background
   worker inside the API (`src/refresh/queue.py`) reads them one at a time and stops when the
