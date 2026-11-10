@@ -156,7 +156,7 @@ export const PRIVACY: LegalDoc = {
                 'Stripe: payments and billing.',
                 'Resend: sending email.',
                 'Railway: hosting and the database.',
-                'Google Tag Manager and Google Analytics: measuring visits and the steps above. If we advertise, Google Ads may also learn that a visit or a purchase followed one of our ads. Google sets cookies in your browser to do this.',
+                'Google Analytics: measuring visits and the steps above. If we advertise, Google Ads may also learn that a visit or a purchase followed one of our ads. Google sets cookies in your browser to do this.',
                 'Anthropic and Google: the AI models. When you run a symptom search, the text you type is sent to them to produce the answer. Do not put personal details in a search.',
             ],
         },

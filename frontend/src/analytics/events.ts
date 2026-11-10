@@ -38,7 +38,7 @@ export function transactionId(sessionId: string | null | undefined): string | un
     return sessionId ? sessionId.slice(-12) : undefined;
 }
 
-/** Tag Manager stays off on a developer's machine and on pages whose address is private. */
+/** The Google tag stays off on a developer's machine and on pages whose address is private. */
 export function shouldLoad(hostname: string, pathname: string): boolean {
     const local =
         hostname === 'localhost' ||

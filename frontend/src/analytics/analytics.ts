@@ -1,9 +1,9 @@
-/* Google Tag Manager and the funnel events.
+/* The Google tag and the funnel events.
  *
- * `track` only pushes onto `window.dataLayer`; Tag Manager decides what to do with each
- * event (send it to Google Analytics, count it as an ad conversion). Nothing is sent
- * anywhere until `initAnalytics` has loaded the container, which it does not do on a
- * developer's machine, on /unsubscribe or on /admin. */
+ * GTM-TW42MFGP is a Google tag (not a Tag Manager container): it is already connected to
+ * the Google Analytics property, counts page views by itself, and takes events as
+ * `gtag('event', name, params)`. Nothing is sent anywhere until `initAnalytics` has loaded
+ * the tag, which it does not do on a developer's machine, on /unsubscribe or on /admin. */
 
 import { GTM_ID, ecommerce, productOf, shouldLoad, transactionId } from './events';
 
@@ -13,17 +13,18 @@ declare global {
     }
 }
 
-function push(entry: Record<string, unknown>): void {
+// The Google tag only understands the `arguments` object itself, not an array copy of it.
+const gtag = function () {
     window.dataLayer = window.dataLayer ?? [];
-    window.dataLayer.push(entry);
-}
+    // eslint-disable-next-line prefer-rest-params
+    window.dataLayer.push(arguments);
+} as (...args: unknown[]) => void;
 
-/** Load the Tag Manager container once. Safe to call on every page. */
+/** Load the Google tag once. Safe to call on every page. */
 export function initAnalytics(): void {
     if (!shouldLoad(window.location.hostname, window.location.pathname)) return;
     if (document.querySelector(`script[data-gtm="${GTM_ID}"]`)) return;
-    // Tag Manager's own bootstrap: without this event its page-load triggers never fire.
-    push({ 'gtm.start': Date.now(), event: 'gtm.js' });
+    gtag('js', new Date());
     const script = document.createElement('script');
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtm.js?id=${GTM_ID}`;
@@ -32,7 +33,7 @@ export function initAnalytics(): void {
 }
 
 export function track(event: string, params: Record<string, unknown> = {}): void {
-    push({ event, ...params });
+    gtag('event', event, params);
 }
 
 type Car = { year: number | string; make: string; model: string };
@@ -56,8 +57,7 @@ export const trackAddVehicle = (c: Car) => track('add_vehicle', car(c));
 export const trackLimitReached = (plan: string) => track('limit_reached', { plan });
 
 export function trackBeginCheckout(kind: 'unlock' | 'subscription', plan?: string | null): void {
-    push({ ecommerce: null }); // GA4: clear the previous ecommerce object first
-    track('begin_checkout', { ecommerce: ecommerce(productOf(kind, plan)) });
+    track('begin_checkout', ecommerce(productOf(kind, plan)));
 }
 
 /** Once per purchase: a refresh of the thank-you page must not count it again. */
@@ -74,8 +74,7 @@ export function trackPurchase(
     } catch {
         // Storage blocked: better to count than to lose the sale.
     }
-    push({ ecommerce: null });
-    track('purchase', { ecommerce: { transaction_id: id, ...ecommerce(productOf(kind, plan)) } });
+    track('purchase', { transaction_id: id, ...ecommerce(productOf(kind, plan)) });
 }
 
 /** A symptom search ran. The words typed are never sent. */
