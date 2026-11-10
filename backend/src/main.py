@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -78,6 +78,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def www_to_apex(request: Request, call_next):
+        """www.example.com answers with a permanent redirect to example.com, path and query kept."""
+        host = request.headers.get("host", "")
+        if host.lower().startswith("www."):
+            target = request.url.replace(scheme="https", netloc=host[4:])
+            return RedirectResponse(str(target), status_code=308)
+        return await call_next(request)
 
     # Mount routers
     app.include_router(vehicles_read_router, prefix="/api")

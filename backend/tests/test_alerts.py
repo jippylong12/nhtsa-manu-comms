@@ -131,7 +131,7 @@ async def test_a_subscriber_gets_one_email_with_both_new_bulletins_and_their_wat
 
     [mail] = mailbox.to(email)
     assert "LLM summary ALERT-A1" in mail["html"] and "LLM summary ALERT-A2" in mail["html"]
-    assert mail["html"].count("2099 TESTMAKE ALERTTRUCK") == 1  # grouped under the car
+    assert mail["html"].count("2099 Testmake Alerttruck") == 1  # grouped under the car, named as the app does
     assert "Serious" in mail["html"] and "Medium" in mail["html"]
     token = await conn.fetchval("SELECT unsubscribe_token FROM alert_state WHERE user_id=$1", uid)
     assert f"https://app.example.test/unsubscribe/{token}" in mail["html"]
@@ -246,8 +246,11 @@ async def test_a_car_first_processed_after_the_subscription_is_now_ready_once(co
     await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
 
     [mail] = mailbox.to(email)
-    assert f"/app/vehicles/{new_car}" in mail["html"]
-    assert f"/app/vehicles/{old_car}" not in mail["html"]
+    # Only the car that became ready is under "Now ready"; the old car is just news.
+    ready = mail["text"].split("== Now ready ==")[1].split("\n\n")[0]
+    assert f"/app/vehicles/{new_car}" in ready
+    assert f"/app/vehicles/{old_car}" not in ready
+    assert "Now ready" in mail["html"]
 
 
 async def test_an_admin_without_a_subscription_is_baselined_silently_on_the_first_pass(
@@ -485,7 +488,7 @@ def test_a_javascript_document_url_never_becomes_a_link():
     html = A.render_html(_alert(_item(url="javascript:alert(document.cookie)")), UNSUB)
 
     assert "javascript:" not in html
-    assert "View source document" not in html
+    assert "Original document" not in html
 
 
 def test_summaries_are_html_escaped():
@@ -521,7 +524,7 @@ def test_an_alert_with_nothing_in_it_does_not_claim_anything_new():
 
     assert alert.has_news is False
     for body in (A.render_html(alert, UNSUB), A.render_text(alert, UNSUB)):
-        assert "new communication" not in body
+        assert "new bulletin" not in body and "new communication" not in body
         assert "Now ready" not in body
 
 
@@ -566,3 +569,61 @@ async def test_a_car_past_the_plans_count_is_not_in_the_email(conn, mailbox):
     [mail] = mailbox.to(email)
     assert "ALERT-P01" in mail["html"] and "ALERT-P11" in mail["html"]
     assert "ALERT-P21" not in mail["html"] and "PLANCAR2" not in mail["html"]
+
+
+def _car_alert(*items, vehicle_id=77, label="2023 Audi A5"):
+    return A.UserAlert(
+        generated_at=BASE,
+        since=None,
+        groups=[A.VehicleGroup(label=label, items=list(items), vehicle_id=vehicle_id)],
+        ready_vehicles=[],
+        watermark=None,
+    )
+
+
+def test_each_bulletin_links_into_the_app_and_to_its_original_document(monkeypatch):
+    monkeypatch.setattr(get_settings(), "app_base_url", "https://app.example.test")
+    alert = _car_alert(_item(nhtsa_id="110/27 376"))
+
+    html, text = A.render_html(alert, UNSUB), A.render_text(alert, UNSUB)
+
+    link = "https://app.example.test/app/vehicles/77?b=110%2F27%20376"
+    assert link in html and link in text
+    assert "See if your car has this" in html
+    assert "https://static.nhtsa.gov/x.pdf" in html and "Original document" in html
+    assert "https://app.example.test/app/account" in html  # manage alerts
+
+
+def test_the_email_does_not_show_dealer_type_codes_or_the_raw_unsubscribe_address():
+    html = A.render_html(_car_alert(_item(communication_type="TSB")), UNSUB)
+
+    assert "TSB" not in html
+    assert f">{UNSUB}<" not in html and "Unsubscribe</a>" in html
+
+
+def test_a_group_without_a_vehicle_id_has_no_links_into_the_app():
+    html = A.render_html(_alert(_item()), UNSUB)
+
+    assert "/app/vehicles/" not in html and "See if your car has this" not in html
+
+
+@pytest.mark.parametrize(
+    "alert,subject",
+    [
+        (_car_alert(_item()), "1 new bulletin for your 2023 Audi A5"),
+        (_car_alert(_item(), _item(nhtsa_id="X2")), "2 new bulletins for your 2023 Audi A5"),
+    ],
+)
+def test_the_subject_says_what_is_new_for_which_car(alert, subject):
+    assert A.subject_for(alert) == subject
+
+
+def test_the_subject_for_several_cars_and_for_a_car_that_became_ready():
+    two = _car_alert(_item())
+    two.groups.append(A.VehicleGroup(label="2021 Honda Civic", items=[_item(nhtsa_id="X9")], vehicle_id=78))
+    assert A.subject_for(two) == "2 new bulletins for your cars"
+    ready = A.UserAlert(
+        generated_at=BASE, since=None, groups=[], watermark=None,
+        ready_vehicles=[A.ReadyVehicle(vehicle_id=5, label="2023 Toyota RAV4", count=71)],
+    )
+    assert A.subject_for(ready) == "Your 2023 Toyota RAV4 is ready to read"

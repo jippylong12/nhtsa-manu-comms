@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
 from typing import Optional
+from urllib.parse import quote
 
 import asyncpg
 
@@ -29,6 +30,7 @@ from src.billing.entitlements import access_for
 from src.config import get_settings
 from src.db import get_pool
 from src.symptom_search.retrieval import revision_stem
+from src.vehicles.display_name import display_vehicle
 
 log = logging.getLogger("alerts")
 
@@ -55,6 +57,8 @@ class AlertItem:
 class VehicleGroup:
     label: str
     items: list[AlertItem] = field(default_factory=list)
+    # 0 when unknown: the email then leaves out the links into the app for this car.
+    vehicle_id: int = 0
 
 
 @dataclass
@@ -212,7 +216,7 @@ async def build_for_user(
     labels: dict[int, str] = {}
     watermark = since
     for r in rows:
-        labels[r["vehicle_id"]] = f"{r['year']} {r['make']} {r['model']}".strip()
+        labels[r["vehicle_id"]] = display_vehicle(r["year"], r["make"], r["model"])
         families.setdefault(r["vehicle_id"], {}).setdefault(_stem(r), []).append(r)
         if watermark is None or r["processed_at"] > watermark:
             watermark = r["processed_at"]
@@ -224,6 +228,7 @@ async def build_for_user(
         groups.append(
             VehicleGroup(
                 label=labels[vid],
+                vehicle_id=vid,
                 items=[
                     AlertItem(
                         nhtsa_id=r["nhtsa_id"],
@@ -300,124 +305,220 @@ def _footer_line() -> str:
     return f"You get this because you subscribe at {_base_url()}."
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def subject_for(alert: UserAlert) -> str:
+    """The subject line: what is new, in the owner's words."""
+    n = alert.total_items
+    cars = [g.label for g in alert.groups] or [rv.label for rv in alert.ready_vehicles]
+    one = cars[0] if len(cars) == 1 else None
+    if n:
+        return f"{_plural(n, 'new bulletin')} for your {one or 'cars'}"
+    return f"Your {one} is ready to read" if one else "Your cars are ready to read"
+
+
+def _item_url(base: str, vehicle_id: int, item: AlertItem) -> str:
+    """The bulletin opened in the app, where "how to tell if your car has this" lives."""
+    return f"{base}/app/vehicles/{vehicle_id}?b={quote(item.nhtsa_id, safe='')}"
+
+
 def render_text(alert: UserAlert, unsubscribe_url: str) -> str:
     """Plain-text alternative part."""
     base = _base_url()
-    lines = [f"Not Just My Car alert - {alert.generated_at:%b %d, %Y}"]
+    lines = [f"Not Just My Car - {alert.generated_at:%b %d, %Y}"]
     if alert.total_items:
-        lines.append(f"{alert.total_items} new communication(s) for your vehicles.")
+        lines.append(f"{_plural(alert.total_items, 'new bulletin')} for your cars.")
     lines.append("")
     if alert.ready_vehicles:
         lines.append("== Now ready ==")
         for rv in alert.ready_vehicles:
-            lines.append(f"- {rv.label}: {rv.count} communication(s) {base}/app/vehicles/{rv.vehicle_id}")
+            lines.append(
+                f"- {rv.label}: {_plural(rv.count, 'bulletin')} {base}/app/vehicles/{rv.vehicle_id}"
+            )
         lines.append("")
     for grp in alert.groups:
         lines.append(f"== {grp.label} ({len(grp.items)}) ==")
         for it in grp.items:
             date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
             label, _ = _severity(it)
-            lines.append(
-                f"- [{label}] [{it.communication_type or 'OTHER'}] {date}{_revision_note(it)}"
-            )
+            lines.append(f"- [{label}] {date}{_revision_note(it)}")
             lines.append(f"  {it.llm_summary or it.summary}")
             if it.systems:
                 lines.append(f"  Systems: {', '.join(it.systems)}")
             if it.symptoms:
                 lines.append(f"  Symptoms: {', '.join(it.symptoms[:5])}")
+            if grp.vehicle_id:
+                lines.append(f"  See if your car has this: {_item_url(base, grp.vehicle_id, it)}")
             if it.url:
-                lines.append(f"  {it.url}")
+                lines.append(f"  Original document: {it.url}")
             lines.append("")
     lines.append(_footer_line())
+    lines.append(f"Manage alerts: {base}/app/account")
     lines.append(f"Unsubscribe: {unsubscribe_url}")
     return "\n".join(lines)
 
 
+_FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+
+def _logo_html() -> str:
+    """The brand mark drawn with table cells (email clients drop SVG), beside the wordmark."""
+    rows = "".join(
+        f'<tr><td style="padding:2px 4px 2px 0;"><div style="width:7px;height:7px;'
+        f'border-radius:4px;background:{dot};font-size:0;line-height:0;">&nbsp;</div></td>'
+        f'<td style="padding:2px 0;"><div style="width:{bar}px;height:5px;border-radius:3px;'
+        f'background:#f8fafc;opacity:{alpha};font-size:0;line-height:0;">&nbsp;</div></td></tr>'
+        for dot, bar, alpha in (("#ef4444", 16, 1), ("#f5b400", 11, 0.82), ("#34c777", 14, 0.64))
+    )
+    return (
+        '<table cellpadding="0" cellspacing="0" role="presentation"><tr>'
+        '<td style="width:40px;height:40px;background:#16233f;border:1px solid #3b82f6;'
+        'border-radius:10px;padding:0 0 0 7px;" valign="middle">'
+        f'<table cellpadding="0" cellspacing="0" role="presentation">{rows}</table></td>'
+        f'<td style="padding-left:12px;font-family:{_FONT};font-size:20px;letter-spacing:-0.3px;" '
+        'valign="middle"><span style="font-weight:700;color:#f8fafc;">Not Just</span> '
+        '<span style="font-weight:500;color:#8fb4ff;">My Car</span></td>'
+        "</tr></table>"
+    )
+
+
+def _button(href: str, label: str) -> str:
+    return (
+        f'<a href="{escape(href)}" style="display:inline-block;background:#3b82f6;color:#ffffff;'
+        f"font-size:14px;font-weight:600;text-decoration:none;padding:10px 16px;"
+        f'border-radius:8px;">{escape(label)} &rarr;</a>'
+    )
+
+
 def render_html(alert: UserAlert, unsubscribe_url: str) -> str:
-    """Dark-mode-friendly HTML with inline styles only (email clients strip <style>)."""
+    """The alert email. Inline styles and tables only: email clients strip <style> and SVG."""
     base = _base_url()
     sections = []
 
     if alert.ready_vehicles:
         ready_rows = "".join(
-            f'<div style="padding:6px 0;font-size:15px;color:#e5e7eb;">{escape(rv.label)} '
-            f'<span style="color:#9ca3af;">({rv.count} communication{"s" if rv.count != 1 else ""})'
-            f'</span> &middot; <a href="{escape(base)}/app/vehicles/{rv.vehicle_id}" '
-            f'style="color:#60a5fa;text-decoration:none;">Open &rarr;</a></div>'
+            f'<div style="padding:8px 0;font-size:15px;color:#e5e7eb;">'
+            f'<strong style="color:#f8fafc;">{escape(rv.label)}</strong> '
+            f'<span style="color:#9ca3af;">&middot; {_plural(rv.count, "bulletin")} on file</span> '
+            f'&middot; <a href="{escape(base)}/app/vehicles/{rv.vehicle_id}" '
+            f'style="color:#8fb4ff;text-decoration:none;font-weight:600;">Open &rarr;</a></div>'
             for rv in alert.ready_vehicles
         )
         sections.append(
-            '<tr><td style="padding-top:24px;"><div style="font-size:13px;font-weight:600;'
-            'text-transform:uppercase;letter-spacing:0.05em;color:#22c55e;">Now ready</div>'
-            f"{ready_rows}</td></tr>"
+            '<tr><td style="padding:20px 0 0;"><table width="100%" cellpadding="0" cellspacing="0" '
+            'role="presentation" style="background:#10231b;border:1px solid #1f5137;'
+            'border-radius:12px;"><tr><td style="padding:16px 18px;">'
+            '<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:#34c777;">Now ready</div>'
+            f"{ready_rows}</td></tr></table></td></tr>"
         )
 
     for grp in alert.groups:
-        rows = []
+        cards = []
         for it in grp.items:
             date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
             label, color = _severity(it)
             chips = "".join(
-                f'<span style="display:inline-block;font-size:11px;color:#93c5fd;'
-                f"background:rgba(59,130,246,0.15);border-radius:10px;padding:2px 8px;"
-                f'margin:2px 4px 2px 0;">{escape(s)}</span>'
+                f'<span style="display:inline-block;font-size:12px;color:#aac4f5;'
+                f"background:#1a2740;border-radius:10px;padding:3px 9px;"
+                f'margin:0 6px 6px 0;">{escape(s)}</span>'
                 for s in it.systems[:4]
             )
-            link = (
-                f'<a href="{escape(it.url)}" style="color:#60a5fa;text-decoration:none;'
-                f'font-size:13px;">View source document &rarr;</a>'
-                if _safe_link(it.url)
-                else ""
-            )
-            rows.append(
+            actions = []
+            if grp.vehicle_id:
+                actions.append(
+                    _button(_item_url(base, grp.vehicle_id, it), "See if your car has this")
+                )
+            if _safe_link(it.url):
+                actions.append(
+                    f'<a href="{escape(it.url)}" style="display:inline-block;color:#8fb4ff;'
+                    f'font-size:13px;text-decoration:none;padding:10px 0 10px '
+                    f'{14 if actions else 0}px;">Original document (PDF)</a>'
+                )
+            cards.append(
                 f"""
-                <tr><td style="padding:14px 0;border-bottom:1px solid #1f2937;">
-                    <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">
+                <tr><td style="padding:0 0 12px;">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                       style="background:#141c2e;border:1px solid #243049;
+                              border-left:4px solid {color};border-radius:12px;">
+                <tr><td style="padding:16px 18px;">
+                    <div style="font-size:13px;color:#9ca3af;margin-bottom:8px;">
                         <strong style="color:{color};">{label}</strong>
-                        &nbsp;&middot;&nbsp;{escape(it.communication_type or 'OTHER')}
                         &nbsp;&middot;&nbsp;{date}{escape(_revision_note(it))}
                     </div>
-                    <div style="font-size:15px;color:#e5e7eb;line-height:1.5;margin-bottom:6px;">
+                    <div style="font-size:16px;color:#e8edf5;line-height:1.55;margin-bottom:12px;">
                         {escape(it.llm_summary or it.summary or 'No summary available')}
                     </div>
                     <div>{chips}</div>
-                    <div style="margin-top:6px;">{link}</div>
+                    <div style="margin-top:6px;">{''.join(actions)}</div>
+                </td></tr></table>
                 </td></tr>
                 """
             )
+        open_car = (
+            f'<a href="{escape(base)}/app/vehicles/{grp.vehicle_id}" style="color:#8fb4ff;'
+            f'font-size:13px;text-decoration:none;font-weight:600;">Open this car &rarr;</a>'
+            if grp.vehicle_id
+            else ""
+        )
         sections.append(
             f"""
-            <tr><td style="padding-top:24px;">
-                <div style="font-size:13px;font-weight:600;text-transform:uppercase;
-                     letter-spacing:0.05em;color:#60a5fa;">{escape(grp.label)}
-                     <span style="color:#6b7280;">({len(grp.items)})</span></div>
-                <table width="100%" cellpadding="0" cellspacing="0">{''.join(rows)}</table>
+            <tr><td style="padding:28px 0 12px;">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>
+                <td style="font-size:19px;font-weight:700;color:#f8fafc;">{escape(grp.label)}
+                    <span style="font-size:13px;font-weight:500;color:#9ca3af;">
+                    &nbsp;{len(grp.items)} new</span></td>
+                <td align="right" style="white-space:nowrap;">{open_car}</td>
+                </tr></table>
             </td></tr>
+            {''.join(cards)}
             """
         )
 
     n = alert.total_items
-    count_line = (
-        f" &middot; {n} new communication{'s' if n != 1 else ''} for your vehicles" if n else ""
-    )
+    if n:
+        whose = "car" if len(alert.groups) == 1 else "cars"
+        headline = f"{_plural(n, 'new bulletin')} for your {whose}"
+        lede = (
+            "Your carmaker sent these to its dealers. Here is what each one means for you."
+        )
+    elif alert.ready_vehicles:
+        headline, lede = "Your car is ready to read", "We have finished reading its bulletins."
+    else:
+        headline, lede = "Nothing to report", "There is nothing for your cars today."
     return f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#0b0f17;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#0b0f17;">
-<tr><td align="center" style="padding:32px 16px;">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;
-     font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark">
+<title>{escape(headline)}</title></head>
+<body style="margin:0;padding:0;background:#0b1120;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{escape(lede)}</div>
+<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#0b1120;">
+<tr><td align="center" style="padding:28px 14px 40px;">
+<table width="600" cellpadding="0" cellspacing="0" role="presentation"
+       style="width:100%;max-width:600px;font-family:{_FONT};">
+    <tr><td style="padding-bottom:24px;">{_logo_html()}</td></tr>
     <tr><td>
-        <div style="font-size:22px;font-weight:700;color:#f9fafb;">Not Just My Car alert</div>
-        <div style="font-size:14px;color:#9ca3af;margin-top:4px;">
-            {alert.generated_at:%B %d, %Y}{count_line}
+        <div style="font-size:26px;line-height:1.25;font-weight:700;color:#f8fafc;
+                    letter-spacing:-0.4px;">{escape(headline)}</div>
+        <div style="font-size:15px;line-height:1.5;color:#9ca3af;margin-top:6px;">
+            {escape(lede)} <span style="white-space:nowrap;">{alert.generated_at:%B %d, %Y}</span>
         </div>
     </td></tr>
     {''.join(sections)}
-    <tr><td style="padding-top:32px;font-size:12px;color:#6b7280;border-top:1px solid #1f2937;">
-        Communications are sourced from NHTSA and summarized automatically; verify against
-        the source document before acting.<br><br>
-        {escape(_footer_line())}
-        <a href="{escape(unsubscribe_url)}" style="color:#9ca3af;">Unsubscribe: {escape(unsubscribe_url)}</a>
+    <tr><td style="padding-top:28px;">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+               style="border-top:1px solid #1f2a3d;"><tr>
+        <td style="padding-top:18px;font-size:12px;line-height:1.6;color:#6b7686;">
+            Bulletins come from NHTSA's public files and are summarized automatically. Check the
+            original document before acting on one.<br><br>
+            {escape(_footer_line())}<br>
+            <a href="{escape(base)}/app/account" style="color:#9ca3af;">Manage alerts</a>
+            &nbsp;&middot;&nbsp;
+            <a href="{escape(unsubscribe_url)}" style="color:#9ca3af;">Unsubscribe</a>
+        </td></tr></table>
     </td></tr>
 </table>
 </td></tr></table>
@@ -545,7 +646,7 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
             log.info("DRY RUN: user %s to %s, preview %s", user["id"], destination, path)
             continue
 
-        subject = f"Not Just My Car: {alert.total_items} new for your vehicles"
+        subject = subject_for(alert)
         text = render_text(alert, unsubscribe_url)
         try:
             outcome.message_id = await asyncio.to_thread(
