@@ -188,6 +188,18 @@ async def test_a_sample_user_searching_keeps_the_same_free_rows_unlocked(db):
     assert all(not i["locked"] and "read" in i for i in body["items"])
 
 
+async def test_a_sample_user_filtering_by_system_never_matches_locked_rows(db):
+    """A locked row's system tags are paid content: neither rows nor facets may reveal them."""
+    vid = await _seed(db)
+    await _link(db, USER_A, vid, unlock=False)
+    plain = await _get(USER_A, vid, perPage=200)
+    locked = {i["nhtsaId"].removeprefix(PREFIX) for i in plain["items"] if i["locked"]}
+    assert {"serious-0", "serious-1"} <= locked  # both carry the Hydraulics tag
+    body = await _get(USER_A, vid, systems="Hydraulics", perPage=200)
+    assert body["items"] == []
+    assert body["facets"]["bySeverity"] == {"serious": 0, "medium": 0, "small": 0}
+
+
 async def test_systems_filters_by_tag_ignoring_case_and_matching_any(db):
     vid = await _seed(db)
     await _link(db, USER_A, vid)

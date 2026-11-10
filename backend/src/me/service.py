@@ -311,8 +311,10 @@ async def my_bulletins(
     """The caller's folded bulletins for one linked vehicle, or None when it is not linked.
 
     Under the sample rule the readable set is chosen across the whole folded list,
-    before any filter or the page is applied. A search only ever matches rows that
-    are readable, so a locked row's text cannot leak through which rows match.
+    before any filter or the page is applied. A search or a systems filter (both read
+    document content) only ever matches rows that are readable, so a locked row's
+    text or tags cannot leak through which rows match or through the facets. Type
+    and date filters match locked rows too: those are identity fields a locked row shows.
     `facets` counts the rows the search and filters select while ignoring `severity`,
     `unread_only` and `nhtsa_id`, so the tabs can show their counts.
     """
@@ -345,7 +347,8 @@ async def my_bulletins(
             selected = [
                 r
                 for r in rows
-                if r["nhtsa_id"] in matched and (not search or r["nhtsa_id"] in readable)
+                if r["nhtsa_id"] in matched
+                and (not (search or systems) or r["nhtsa_id"] in readable)
             ]
 
         read_ids = {

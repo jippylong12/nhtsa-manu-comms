@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { meApi } from '@/client';
 import type { Me, MyBulletinsResponse, Severity } from '@/client';
 import { meKeys } from '../../queryKeys';
+import { hasData, isUnnarrowed } from './markReadCache';
 
 export interface MarkReadVars {
     nhtsaId: string;
@@ -18,12 +19,6 @@ interface Snapshot {
 
 const dec = (n: number) => Math.max(0, n - 1);
 
-// A list narrowed by search or filters may not contain the bulletin, so a miss says nothing about its facets.
-function isUnnarrowed(key: readonly unknown[]): boolean {
-    const p = (key[5] ?? {}) as Record<string, unknown>;
-    return !(p.search || p.commType || p.systems || p.dateFrom || p.dateTo || p.nhtsaId);
-}
-
 export function useMarkRead(vehicleId: number, options: { onError?: () => void } = {}) {
     const queryClient = useQueryClient();
     const listsKey = meKeys.vehicleBulletins(vehicleId);
@@ -31,7 +26,8 @@ export function useMarkRead(vehicleId: number, options: { onError?: () => void }
     return useMutation<void, Error, MarkReadVars, Snapshot>({
         mutationFn: ({ nhtsaId }) => meApi.markRead(nhtsaId),
         onMutate: async ({ nhtsaId, severity }) => {
-            await queryClient.cancelQueries({ queryKey: listsKey });
+            // Only lists that already have data: a cancelled first fetch would never be restarted.
+            await queryClient.cancelQueries({ queryKey: listsKey, predicate: hasData });
             await queryClient.cancelQueries({ queryKey: meKeys.all, exact: true });
 
             const snapshot: Snapshot = {
