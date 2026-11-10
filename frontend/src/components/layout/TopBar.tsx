@@ -17,7 +17,7 @@ export function TopBar() {
 
   return (
     <header className={styles.bar}>
-      <Link to="/" className={styles.brand} aria-label="NHTSA Comms, home">
+      <Link to={user ? '/app' : '/'} className={styles.brand} aria-label="NHTSA Comms, home">
         <Logo size={28} />
       </Link>
       <div className={styles.right}>
@@ -59,7 +59,16 @@ export function TopBar() {
           </button>
         )}
       </div>
-      {signInOpen && <SignInDialog onClose={() => setSignInOpen(false)} />}
+      {signInOpen && (
+        <SignInDialog
+          onClose={() => setSignInOpen(false)}
+          // Signing in from the top bar goes straight to the person's cars.
+          onSignedIn={() => {
+            setSignInOpen(false);
+            navigate('/app');
+          }}
+        />
+      )}
     </header>
   );
 }
