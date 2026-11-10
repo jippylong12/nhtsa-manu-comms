@@ -26,7 +26,7 @@ MAKE = "TESTSAMPMAKE"
 SECRET = "SECRETSUMMARYTEXT"
 LOCKED_KEYS = {
     "nhtsaId", "communicationNumber", "communicationType", "communicationDate",
-    "severity", "supersededCount", "locked",
+    "severity", "supersededCount", "locked", "read",
 }
 _app = create_app()
 

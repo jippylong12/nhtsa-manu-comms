@@ -1,10 +1,12 @@
 """/api/me: who is signed in, their vehicles, and what they may read."""
 
+from datetime import date, datetime, time, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.auth.deps import current_user
+from src.corpus.router import _csv
 from src.me import service
 from src.me.schemas import (
     AlertsStatus,
@@ -91,10 +93,29 @@ async def my_bulletins(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200, alias="perPage"),
     search: str | None = Query(None, max_length=200),
+    unread_only: bool = Query(False, alias="unreadOnly"),
+    comm_type: str | None = Query(None, alias="commType", max_length=20),
+    systems: str | None = Query(None, max_length=500),
+    date_from: date | None = Query(None, alias="dateFrom"),
+    date_to: date | None = Query(None, alias="dateTo"),
+    nhtsa_id: str | None = Query(None, alias="nhtsaId", max_length=100),
     user: dict = Depends(current_user),
 ):
     """Folded bulletins newest first; 404 unless the vehicle is linked to the caller."""
-    result = await service.my_bulletins(user["id"], vehicle_id, severity, page, per_page, search)
+    result = await service.my_bulletins(
+        user["id"],
+        vehicle_id,
+        severity,
+        page,
+        per_page,
+        search,
+        unread_only=unread_only,
+        comm_type=comm_type,
+        systems=_csv(systems),
+        date_from=datetime.combine(date_from, time.min, timezone.utc) if date_from else None,
+        date_to=datetime.combine(date_to, time.max, timezone.utc) if date_to else None,
+        nhtsa_id=nhtsa_id,
+    )
     if result is None:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return MyBulletinsResponse(**result)

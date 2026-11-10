@@ -1,6 +1,7 @@
 """Business logic for the signed-in user's profile."""
 
 import logging
+from datetime import datetime
 
 from src.billing.entitlements import access_for
 from src.communications.flatfile import normalize_model
@@ -300,13 +301,20 @@ async def my_bulletins(
     page: int,
     per_page: int,
     search: str | None = None,
+    unread_only: bool = False,
+    comm_type: str | None = None,
+    systems: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    nhtsa_id: str | None = None,
 ) -> dict | None:
     """The caller's folded bulletins for one linked vehicle, or None when it is not linked.
 
     Under the sample rule the readable set is chosen across the whole folded list,
-    before the severity filter, the text search and the page are applied. A search
-    only ever matches rows that are readable, so a locked row's text cannot leak
-    through which rows match.
+    before any filter or the page is applied. A search only ever matches rows that
+    are readable, so a locked row's text cannot leak through which rows match.
+    `facets` counts the rows the search and filters select while ignoring `severity`,
+    `unread_only` and `nhtsa_id`, so the tabs can show their counts.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -319,18 +327,53 @@ async def my_bulletins(
             if r["nhtsa_id"] in readable and r["severity"] in sample_counts:
                 sample_counts[r["severity"]] += 1
 
-        shown = [r for r in rows if severity is None or r["severity"] == severity]
-        if search:
+        selected = rows
+        if search or comm_type or systems or date_from or date_to:
             found, _ = await corpus_service.list_communications(
                 vehicle_id=vehicle_id,
                 status="processed",
                 search=search,
+                comm_type=comm_type,
+                systems=systems,
+                date_from=date_from,
+                date_to=date_to,
                 revisions="latest",
                 page=1,
                 per_page=_ALL_ROWS,
             )
             matched = {r["nhtsa_id"] for r in found}
-            shown = [r for r in shown if r["nhtsa_id"] in readable and r["nhtsa_id"] in matched]
+            selected = [
+                r
+                for r in rows
+                if r["nhtsa_id"] in matched and (not search or r["nhtsa_id"] in readable)
+            ]
+
+        read_ids = {
+            r["nhtsa_id"]
+            for r in await conn.fetch(
+                "SELECT nhtsa_id FROM bulletin_reads "
+                "WHERE user_id = $1 AND nhtsa_id = ANY($2::text[])",
+                user_id,
+                [r["nhtsa_id"] for r in selected],
+            )
+        }
+        facets = {
+            "by_severity": dict.fromkeys(SAMPLE_QUOTA, 0),
+            "unread_by_severity": dict.fromkeys(SAMPLE_QUOTA, 0),
+        }
+        for r in selected:
+            if r["severity"] in SAMPLE_QUOTA:
+                facets["by_severity"][r["severity"]] += 1
+                if r["nhtsa_id"] not in read_ids:
+                    facets["unread_by_severity"][r["severity"]] += 1
+
+        shown = [
+            r
+            for r in selected
+            if (severity is None or r["severity"] == severity)
+            and (not unread_only or r["nhtsa_id"] not in read_ids)
+            and (nhtsa_id is None or r["nhtsa_id"] == nhtsa_id)
+        ]
         window = shown[(page - 1) * per_page : page * per_page]
         details = await _details(conn, [r["nhtsa_id"] for r in window if r["nhtsa_id"] in readable])
 
@@ -343,6 +386,7 @@ async def my_bulletins(
             "communication_date": r["communication_date"],
             "severity": r["severity"],
             "superseded_count": r["superseded_count"],
+            "read": r["nhtsa_id"] in read_ids,
         }
         if r["nhtsa_id"] in readable:
             items.append(
@@ -363,6 +407,7 @@ async def my_bulletins(
         "per_page": per_page,
         "access": access,
         "sample_counts": sample_counts,
+        "facets": facets,
     }
 
 

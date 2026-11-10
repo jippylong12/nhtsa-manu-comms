@@ -87,66 +87,75 @@
   min-width: 0;
 }
 
-.searchWrap {
-  position: relative;
-}
-
-.searchIcon {
-  position: absolute;
-  left: var(--space-md);
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  pointer-events: none;
-}
-
-.search {
-  width: 100%;
-  min-height: 44px;
-  padding-left: 2.5rem;
-}
-
-.tabs {
+.searchRow {
   display: flex;
-  gap: var(--space-xs);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.tab {
-  display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
+}
+
+.searchRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 599px) {
+  .searchRow {
+    flex-wrap: wrap;
+  }
+
+  .searchRow > :first-child {
+    flex-basis: 100%;
+  }
+
+  .searchRow > :last-child {
+    margin-left: auto;
+  }
+}
+
+.filteredLine {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.filteredClear {
   min-height: 44px;
-  padding: 0 var(--space-md);
-  background: transparent;
+  padding: 0;
+  background: none;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
+  color: var(--color-primary-light);
+  font: inherit;
+  text-decoration: underline;
   cursor: pointer;
 }
 
-.tab:hover {
-  color: var(--text-primary);
-}
-
-.tab:focus-visible {
+.filteredClear:focus-visible {
   outline: 2px solid var(--color-primary);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
-.tabActive {
-  color: var(--text-primary);
-  border-bottom-color: var(--color-primary);
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 
-.tabCount {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+.list > li {
+  min-width: 0;
+}
+
+.unreadLine {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.panelCol {
+  display: none;
+  min-width: 0;
 }
 
 .pager {
@@ -193,6 +202,31 @@
   .side {
     grid-column: 2;
     grid-row: 1;
+    position: sticky;
+    top: calc(var(--header-height) + var(--space-md));
+  }
+}
+
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+
+  .main {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .side {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .panelCol {
+    display: block;
+    grid-column: 2;
+    grid-row: 2;
     position: sticky;
     top: calc(var(--header-height) + var(--space-md));
   }

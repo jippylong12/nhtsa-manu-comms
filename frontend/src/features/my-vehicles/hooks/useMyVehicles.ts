@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { meApi } from '@/client';
-import type { Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle } from '@/client';
+import type { Me, MyBulletinsParams, MyBulletinsResponse, MyVehicle, Severity } from '@/client';
 import { useAuth } from '@/auth/AuthContext';
 import { meKeys } from '../../queryKeys';
 
@@ -49,10 +49,22 @@ export function useMyBulletinsQuery(
     enabled = true
 ) {
     return useQuery<MyBulletinsResponse>({
-        queryKey: meKeys.bulletins(vehicleId, { ...params }),
+        queryKey: meKeys.bulletins(vehicleId, {
+            ...params,
+            systems: params.systems ? [...params.systems].sort() : undefined,
+        }),
         queryFn: () => meApi.bulletins(vehicleId, params),
         enabled: enabled && Number.isInteger(vehicleId),
         placeholderData: keepPreviousData,
         retry: false,
+    });
+}
+
+export function useMarkAllRead(vehicleId: number) {
+    const queryClient = useQueryClient();
+    return useMutation<{ marked: number }, Error, Severity | undefined>({
+        mutationFn: (severity) => meApi.readAll(vehicleId, severity),
+        // me.vehicles[].unread and every bulletins list (read flags, facets) are stale now.
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: meKeys.all }),
     });
 }
