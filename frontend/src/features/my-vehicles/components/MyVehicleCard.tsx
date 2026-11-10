@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { MoreHorizontal, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Trash2, Lock } from 'lucide-react';
 
 import { PRIORITY_COLORS } from '@/client';
 import type { CommPriority, Me, MyVehicle, SeverityCounts } from '@/client';
@@ -70,8 +70,9 @@ export function MyVehicleCard({ vehicle, me, onRemove, removing, actions }: Prop
                         <span className={`${styles.badge} ${processing ? styles.badgeWarn : styles.badgeReady}`}>
                             {availabilityLabel(vehicle)}
                         </span>
-                        <span className={`${styles.badge} ${access === 'Sample' ? '' : styles.badgeAccess}`}>
-                            {access}
+                        <span className={`${styles.badge} ${access === 'Sample' ? styles.badgeSample : styles.badgeAccess}`}>
+                            {access === 'Sample' && <Lock size={12} aria-hidden="true" />}
+                            {access === 'Sample' ? 'Free sample' : access}
                         </span>
                     </div>
                 </div>

@@ -344,3 +344,15 @@
     transition: none;
   }
 }
+
+/* Sample access is the thing a free user should notice: it is why most rows are locked. */
+.badgeSample {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  color: hsl(40, 95%, 66%);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+  font-weight: var(--font-weight-semibold);
+}

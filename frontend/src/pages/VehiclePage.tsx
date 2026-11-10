@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileText, Lock } from 'lucide-react';
 
 import { ApiError } from '@/client';
 import type { Facets, MyBulletinsParams, Severity, Vehicle } from '@/client';
@@ -379,7 +379,10 @@ export function VehiclePage() {
               <span className={styles.metaSep} aria-hidden="true">·</span>
             </>
           )}
-          <span className={`${styles.badge} ${full ? styles.badgeAccess : ''}`}>{access}</span>
+          <span className={`${styles.badge} ${full ? styles.badgeAccess : styles.badgeSample}`}>
+            {!full && <Lock size={12} aria-hidden="true" />}
+            {full ? access : 'Free sample'}
+          </span>
           {!ready && <span className={styles.badge}>{availabilityLabel(vehicle)}</span>}
         </p>
         {!ready && (
