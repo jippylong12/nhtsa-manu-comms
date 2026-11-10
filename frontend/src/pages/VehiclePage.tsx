@@ -152,6 +152,14 @@ export function VehiclePage() {
     updatedAt: vehicle.addedAt,
   };
 
+  // Unread only with matches in this tab that are all read: caught up, not "no match".
+  const tabKey = severity ?? 'all';
+  const sumC = (c: { serious: number; medium: number; small: number }) =>
+    c.serious + c.medium + c.small;
+  const tabMatches = tabKey === 'all' ? sumC(facets.bySeverity) : facets.bySeverity[tabKey];
+  const tabUnread = tabKey === 'all' ? sumC(facets.unreadBySeverity) : facets.unreadBySeverity[tabKey];
+  const caughtUp = unreadOnly && tabMatches > 0 && tabUnread === 0;
+
   const list = (
     <>
       {!ready && <BulletinListSkeleton />}
@@ -166,7 +174,9 @@ export function VehiclePage() {
       )}
       {data && data.items.length === 0 && (
         <div className="empty-state">
-          {search ? (
+          {caughtUp ? (
+            <h3 className="empty-state-title">You're all caught up</h3>
+          ) : search ? (
             <>
               <h3 className="empty-state-title">No bulletins match your search</h3>
               <button type="button" className="btn btn-secondary" onClick={clearSearch}>
@@ -296,6 +306,8 @@ export function VehiclePage() {
               onToggleUnread={(on) => update({ unread: on ? '1' : null, page: null })}
               onMarkAllRead={(sev) => markAllRead.mutate(sev)}
               marking={markAllRead.isPending}
+              totalUnread={vehicle.unread}
+              narrowed={Boolean(search || filtersActive)}
             />
 
             {filtersActive && (

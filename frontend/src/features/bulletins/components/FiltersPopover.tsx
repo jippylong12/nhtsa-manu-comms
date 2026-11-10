@@ -69,6 +69,23 @@ export function FiltersPopover({ vehicleId, value, onChange, onClear }: Props) {
         ? systems
         : systems.filter((s, i) => i < TOP_SYSTEMS || value.systems.includes(s.tag));
 
+    // Popover: never taller than the room between the trigger and the viewport bottom.
+    const [maxHeight, setMaxHeight] = useState<number | undefined>();
+    useEffect(() => {
+        if (!open || isSheet) return;
+        const measure = () => {
+            const r = triggerRef.current?.getBoundingClientRect();
+            if (r) setMaxHeight(Math.max(240, window.innerHeight - r.bottom - 8 - 16));
+        };
+        measure();
+        window.addEventListener('resize', measure);
+        window.addEventListener('scroll', measure, true);
+        return () => {
+            window.removeEventListener('resize', measure);
+            window.removeEventListener('scroll', measure, true);
+        };
+    }, [open, isSheet]);
+
     const close = () => {
         setOpen(false);
         triggerRef.current?.focus();
@@ -134,6 +151,7 @@ export function FiltersPopover({ vehicleId, value, onChange, onClear }: Props) {
             role={isSheet ? 'dialog' : 'group'}
             aria-modal={isSheet ? true : undefined}
             aria-label="Filters"
+            style={!isSheet && maxHeight ? { maxHeight } : undefined}
             onKeyDown={trap}
         >
             {isSheet && <div className={styles.handle} aria-hidden="true" />}
@@ -170,11 +188,13 @@ export function FiltersPopover({ vehicleId, value, onChange, onClear }: Props) {
                             <label key={s.tag} className={styles.check}>
                                 <input
                                     type="checkbox"
+                                    aria-labelledby={`${panelId}-sys-${s.tag}`}
                                     checked={value.systems.includes(s.tag)}
                                     onChange={() => toggleSystem(s.tag)}
                                 />
-                                <span className={styles.checkName}>{s.tag}</span>
-                                <span className={styles.count}>{s.count}</span>
+                                <span id={`${panelId}-sys-${s.tag}`} className={styles.checkName}>
+                                    {s.tag} ({s.count})
+                                </span>
                             </label>
                         ))}
                     </div>

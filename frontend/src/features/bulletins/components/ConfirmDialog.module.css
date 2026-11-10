@@ -28,6 +28,13 @@
   color: var(--color-text, #e6e8ee);
 }
 
+.message {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text-secondary, #a0a4ae);
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

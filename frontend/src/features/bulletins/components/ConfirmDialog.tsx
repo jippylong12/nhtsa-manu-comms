@@ -6,12 +6,13 @@ import styles from './ConfirmDialog.module.css';
 
 interface Props {
     title: string;
+    message?: string;
     confirmLabel: string;
     onConfirm: () => void;
     onCancel: () => void;
 }
 
-export function ConfirmDialog({ title, confirmLabel, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: Props) {
     const titleId = useId();
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
@@ -56,6 +57,7 @@ export function ConfirmDialog({ title, confirmLabel, onConfirm, onCancel }: Prop
                 <h2 id={titleId} className={styles.title}>
                     {title}
                 </h2>
+                {message && <p className={styles.message}>{message}</p>}
                 <div className={styles.actions}>
                     <button
                         ref={cancelRef}

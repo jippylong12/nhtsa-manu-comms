@@ -27,6 +27,10 @@ interface Props {
     onToggleUnread: (next: boolean) => void;
     onMarkAllRead: (severity: Severity | undefined) => void;
     marking?: boolean;
+    /** The vehicle's unfiltered unread counts: what Mark all read really marks. */
+    totalUnread: { serious: number; medium: number; small: number };
+    /** A search or any filter is active, so the list shows less than Mark all read touches. */
+    narrowed?: boolean;
 }
 
 function sum(c: { serious: number; medium: number; small: number }): number {
@@ -41,6 +45,8 @@ export function SeverityTabs({
     onToggleUnread,
     onMarkAllRead,
     marking = false,
+    totalUnread,
+    narrowed = false,
 }: Props) {
     const count = (k: SeverityTab) => (k === 'all' ? sum(facets.bySeverity) : facets.bySeverity[k]);
     const unread = (k: SeverityTab) =>
@@ -55,14 +61,14 @@ export function SeverityTabs({
         document.getElementById(`sev-tab-${next.key}`)?.focus();
     };
 
-    const currentUnread = unread(selected);
+    const currentUnread = selected === 'all' ? sum(totalUnread) : totalUnread[selected];
     const [confirming, setConfirming] = useState(false);
     const markAllRef = useRef<HTMLButtonElement>(null);
     const where = selected === 'all' ? '' : ` ${selected}`;
 
     const doMark = () => onMarkAllRead(selected === 'all' ? undefined : selected);
     const markAll = () => {
-        if (currentUnread > CONFIRM_ABOVE) {
+        if (narrowed || currentUnread > CONFIRM_ABOVE) {
             setConfirming(true);
             return;
         }
@@ -121,7 +127,7 @@ export function SeverityTabs({
                 <button
                     ref={markAllRef}
                     type="button"
-                    className="btn btn-ghost btn-sm"
+                    className={`btn btn-ghost btn-sm ${styles.markAll}`}
                     disabled={currentUnread === 0 || marking}
                     onClick={markAll}
                 >
@@ -131,6 +137,11 @@ export function SeverityTabs({
             {confirming && (
                 <ConfirmDialog
                     title={`Mark all ${currentUnread}${where} unread bulletins as read?`}
+                    message={
+                        narrowed
+                            ? "This includes bulletins that don't match your current search or filters."
+                            : undefined
+                    }
                     confirmLabel="Mark as read"
                     onCancel={closeConfirm}
                     onConfirm={() => {
