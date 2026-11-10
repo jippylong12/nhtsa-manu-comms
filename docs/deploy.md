@@ -42,6 +42,7 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `ANTHROPIC_EXTRACTION_CONCURRENCY` | no | optional | no | Live extraction calls at once (default 6) |
 | `EXTRACTION_MODEL` | no | optional | no | Extraction model (default `claude-haiku-5-5`) |
 | `COMPOSE_MODEL` | optional | no | no | Symptom-search answer model (default `claude-haiku-5-5`) |
+| `NIGHTLY_SPEND_CAP_USD` | no | optional | no | Daily model-spend cap for the nightly run (default 10). At the cap the run reads no more new documents; they wait for the next night. 0 turns it off |
 | `COMPOSE_TIMEOUT_SECONDS` | optional | no | no | Per-call ceiling for the symptom-search answer (default 30) |
 | `GEMINI_API_KEY` | yes | yes | yes | Embeddings (the symptom-search query vector and the corpus) |
 | `GEMINI_MODEL` | no | optional | no | Eval harness and bake-off arms only; compose no longer reads it |

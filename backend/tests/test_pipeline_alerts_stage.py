@@ -36,6 +36,10 @@ def calls(monkeypatch):
         seen.append(("alerts", send))
         return alerts_service.AlertRunSummary()
 
+    async def no_cap(now, sync):
+        return None
+
+    monkeypatch.setattr(run_pipeline, "_llm_document_budget", no_cap)
     monkeypatch.setattr(run_pipeline.processor, "run_extract", run_extract)
     monkeypatch.setattr(run_pipeline.processor, "run_llm", run_llm)
     monkeypatch.setattr(run_pipeline.processor, "run_embed", run_embed)

@@ -190,9 +190,9 @@ async def apply(
 
     # 2. Scan each against the flat-file index (the app does this in the background on add;
     #    already-current scans cost only a HEAD request), then sync their bulletins.
-    for vehicle_id in ids:
-        async with pool.acquire() as conn:
-            await flatfile.scan_vehicle(conn, vehicle_id)
+    #    One call for every listed vehicle: each window is read once, not once per vehicle.
+    async with pool.acquire() as conn:
+        await flatfile.refresh_index(conn, vehicles=ids)
     stats = await sync_job.run(vehicle_ids=ids, limit=None)
     sync_counts = {
         k: getattr(stats, k, 0)

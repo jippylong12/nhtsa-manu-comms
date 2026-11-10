@@ -27,11 +27,12 @@ import asyncio
 import logging
 import os
 import pathlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.alerts import service as alerts
 from src.communications import flatfile
+from src.config import get_settings
 from src.db import close_pool, get_pool
 from src.jobs import extract as extract_stage
 from src.jobs import process as processor
@@ -127,6 +128,27 @@ def _configure_logging(run_id: str) -> pathlib.Path:
     return log_file
 
 
+async def _llm_document_budget(now: datetime, sync: bool) -> Optional[int]:
+    """How many documents tonight's LLM stage may read under the daily spend cap.
+
+    None means no cap (``NIGHTLY_SPEND_CAP_USD`` is 0 or less). Otherwise the cap minus the
+    model spend of the last 24 hours, divided by the expected cost of one document on the
+    path about to run. 0 means the cap is already reached: the stage is skipped and the
+    documents stay pending for the next night.
+    """
+    cap = float(get_settings().nightly_spend_cap_usd)
+    if cap <= 0:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        spent = await processor._spent_since(conn, now - timedelta(hours=24))
+        per_doc = await processor._per_document_estimate(conn, sync)
+    remaining = cap - spent
+    if remaining <= 0 or per_doc <= 0:
+        return 0 if remaining <= 0 else None
+    return int(remaining / per_doc)
+
+
 async def _run(args, now: datetime) -> int:
     failures: list[str] = []
 
@@ -159,7 +181,17 @@ async def _run(args, now: datetime) -> int:
         log.info("=== STAGE: process (extract -> llm -> embed) ===")
         try:
             await processor.run_extract(None)
-            await processor.run_llm(None, sync=args.sync_llm)
+            budget = await _llm_document_budget(now, args.sync_llm)
+            if budget == 0:
+                # Not a failure: the cap did its job. The documents stay pending.
+                log.warning(
+                    "daily spend cap of $%.2f reached: reading no new documents tonight",
+                    get_settings().nightly_spend_cap_usd,
+                )
+            else:
+                if budget is not None:
+                    log.info("daily spend cap: at most %d document(s) tonight", budget)
+                await processor.run_llm(budget, sync=args.sync_llm)
             await processor.run_embed(None)
         except Exception as e:  # noqa: BLE001
             log.exception("processor stage failed")
