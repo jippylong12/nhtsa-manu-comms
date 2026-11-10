@@ -1,7 +1,7 @@
 /* /app/vehicles/:id: one car's bulletins, the free sample, locked rows and the plan buttons. */
 
-import { useRef } from 'react';
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 
 import { ApiError } from '@/client';
@@ -10,6 +10,9 @@ import { SymptomSearchView } from '../features/symptom-search/components/Symptom
 import { PlanBar } from '../features/my-vehicles/components/PlanBar';
 import { BulletinListSkeleton } from '../features/my-vehicles/components/ProductBulletinList';
 import { BulletinRow } from '../features/bulletins/components/BulletinRow';
+import { BulletinSheet } from '../features/bulletins/components/BulletinSheet';
+import { useInboxKeyboard } from '../features/bulletins/hooks/useInboxKeyboard';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   BulletinPanel,
   FiltersPopover,
@@ -23,6 +26,8 @@ import {
   useMeQuery,
   useMyBulletinsQuery,
 } from '../features/my-vehicles/hooks/useMyVehicles';
+import { useMarkRead } from '../features/my-vehicles/hooks/useMarkRead';
+import { useToast } from '../features/my-vehicles/hooks/useToast';
 import { PastDueBanner } from '../features/billing/components/PastDueBanner';
 import { useCheckout } from '../features/billing/hooks/useBilling';
 import { isPastDue } from '../features/billing/plan';
@@ -30,6 +35,9 @@ import styles from './VehiclePage.module.css';
 
 const PER_PAGE = 50;
 const NOT_YOURS = "That car isn't on your account.";
+const NOT_ON_CAR = "That bulletin isn't on this car.";
+// Below this the panel is a full-screen sheet. Same number as the panel's own CSS breakpoint.
+const COMPACT_QUERY = '(max-width: 899.98px)';
 
 function parseSeverity(v: string | null): Severity | undefined {
   return v === 'serious' || v === 'medium' || v === 'small' ? v : undefined;
@@ -56,6 +64,18 @@ export function VehiclePage() {
   const view = params.get('view') === 'symptoms' ? 'symptoms' : 'bulletins';
   const searchRef = useRef<HTMLInputElement>(null);
   const markAllRead = useMarkAllRead(vehicleId);
+  const navigate = useNavigate();
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const { toast, showToast } = useToast();
+  const markRead = useMarkRead(vehicleId, { onError: () => showToast("Couldn't mark as read") });
+  const listRef = useRef<HTMLUListElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const markedRef = useRef(new Set<string>());
+  const pushedRef = useRef(false);
+  const prevSelectedRef = useRef(selectedId);
+  // Roving highlight: the id of the row the keyboard is on; `kbMode` shows it as selected.
+  const [highlightId, setHighlightId] = useState<string | undefined>();
+  const [kbMode, setKbMode] = useState(false);
 
   const listParams: MyBulletinsParams = {
     severity,
@@ -76,6 +96,92 @@ export function VehiclePage() {
     { nhtsaId: selectedId, perPage: 1 },
     ready && Boolean(selectedId) && bulletins.isSuccess && !inList
   );
+
+  const selected =
+    bulletins.data?.items.find((b) => b.nhtsaId === selectedId) ??
+    selectedFetch.data?.items.find((b) => b.nhtsaId === selectedId);
+
+  // A ?b= id that is neither on this page nor on the car: drop it and say so.
+  const unknownId = Boolean(
+    selectedId &&
+      ready &&
+      bulletins.isSuccess &&
+      !bulletins.isPlaceholderData &&
+      !inList &&
+      (selectedFetch.isError ||
+        (selectedFetch.isSuccess &&
+          !selectedFetch.isPlaceholderData &&
+          !selectedFetch.data.items.some((b) => b.nhtsaId === selectedId)))
+  );
+  useEffect(() => {
+    if (!unknownId) return;
+    const next = new URLSearchParams(params);
+    next.delete('b');
+    setParams(next, { replace: true });
+    showToast(NOT_ON_CAR);
+  }, [unknownId, params, setParams, showToast]);
+
+  // Opening an unread, unlocked bulletin reads it: once per bulletin, never for a locked one.
+  const markReadMutate = markRead.mutate;
+  useEffect(() => {
+    if (!selected || selected.locked || selected.read === true) return;
+    if (markedRef.current.has(selected.nhtsaId)) return;
+    markedRef.current.add(selected.nhtsaId);
+    markReadMutate({ nhtsaId: selected.nhtsaId, severity: selected.severity });
+  }, [selected, markReadMutate]);
+
+  // When the panel closes, focus goes back to the row that opened it.
+  useEffect(() => {
+    const prev = prevSelectedRef.current;
+    prevSelectedRef.current = selectedId;
+    if (prev && !selectedId) {
+      pushedRef.current = false;
+      rowRefs.current.get(prev)?.focus({ preventScroll: true });
+    }
+  }, [selectedId]);
+
+  const items = bulletins.data?.items ?? [];
+  const activeId =
+    (selectedId && items.some((b) => b.nhtsaId === selectedId) ? selectedId : undefined) ??
+    (highlightId && items.some((b) => b.nhtsaId === highlightId) ? highlightId : undefined) ??
+    items[0]?.nhtsaId;
+  const activeIndex = Math.max(0, items.findIndex((b) => b.nhtsaId === activeId));
+
+  // Click and Enter push a history entry; arrowing with the panel open replaces it.
+  const openRow = (nhtsaId: string, push: boolean) => {
+    setHighlightId(nhtsaId);
+    if (push && !selectedId) pushedRef.current = true;
+    update({ b: nhtsaId }, push && !selectedId);
+  };
+  // Back out of the panel: undo our own push when there is one, so Back never reopens it.
+  const closePanel = () => {
+    if (pushedRef.current) navigate(-1);
+    else update({ b: null });
+  };
+
+  useInboxKeyboard({
+    enabled: ready && view === 'bulletins',
+    count: items.length,
+    highlighted: activeIndex,
+    onHighlight: (i) => {
+      const id = items[i].nhtsaId;
+      setHighlightId(id);
+      setKbMode(true);
+      if (selectedId) update({ b: id });
+      const el = rowRefs.current.get(id);
+      el?.focus({ preventScroll: true });
+      el?.scrollIntoView({ block: 'nearest' });
+    },
+    onOpen: (i) => openRow(items[i].nhtsaId, true),
+    panelOpen: Boolean(selectedId),
+    modal: compact,
+    onClosePanel: closePanel,
+    searchRef,
+    listRef,
+    onClearSearch: () => {
+      if (search) update({ search: null, page: null });
+    },
+  });
 
   // A car that is not on this account (or does not exist) goes back to the list.
   const notFound =
@@ -130,9 +236,6 @@ export function VehiclePage() {
   const data = bulletins.data;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.perPage)) : 1;
   const access = accessLabel(vehicle, meQuery.data);
-  const selected =
-    data?.items.find((b) => b.nhtsaId === selectedId) ??
-    selectedFetch.data?.items.find((b) => b.nhtsaId === selectedId);
   const clearSearch = () => update({ search: null, page: null });
   const filterValues = { type: commType, systems: systems ?? [], from: dateFrom, to: dateTo };
   const filtersActive = Boolean(commType || systems?.length || dateFrom || dateTo);
@@ -191,17 +294,28 @@ export function VehiclePage() {
         </div>
       )}
       {data && data.items.length > 0 && (
-        <ul className={styles.list}>
-          {data.items.map((b) => (
-            <li key={b.nhtsaId}>
-              <BulletinRow
-                variant="product"
-                bulletin={b}
-                selected={b.nhtsaId === selectedId}
-                onOpen={(nhtsaId) => update({ b: nhtsaId }, true)}
-              />
-            </li>
-          ))}
+        <ul ref={listRef} className={styles.list}>
+          {data.items.map((b) => {
+            const highlighted = kbMode && b.nhtsaId === activeId;
+            return (
+              <li key={b.nhtsaId} data-highlighted={highlighted}>
+                <BulletinRow
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(b.nhtsaId, el);
+                    else rowRefs.current.delete(b.nhtsaId);
+                  }}
+                  variant="product"
+                  bulletin={b}
+                  selected={b.nhtsaId === selectedId || highlighted}
+                  tabIndex={b.nhtsaId === activeId ? 0 : -1}
+                  onOpen={(nhtsaId) => {
+                    setKbMode(false);
+                    openRow(nhtsaId, true);
+                  }}
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
       {data && totalPages > 1 && (
@@ -230,8 +344,20 @@ export function VehiclePage() {
     </>
   );
 
+  const panel = selected && (
+    <BulletinPanel
+      bulletin={selected}
+      variant="product"
+      vehicleId={vehicleId}
+      onClose={closePanel}
+      onUnlock={() => checkout.mutate({ kind: 'unlock', vehicleId })}
+      onSubscribe={() => checkout.mutate({ kind: 'subscription' })}
+    />
+  );
+
   return (
     <div className={styles.page}>
+      {toast}
       <Link to="/app" className={styles.back}>
         <ArrowLeft size={16} /> My vehicles
       </Link>
@@ -322,15 +448,13 @@ export function VehiclePage() {
             {list}
           </div>
 
-          {selected && (
-            <div className={styles.panelCol}>
-              <BulletinPanel
-                bulletin={selected}
-                onClose={() => update({ b: null }, true)}
-                onUnlock={() => checkout.mutate({ kind: 'unlock', vehicleId })}
-                onSubscribe={() => checkout.mutate({ kind: 'subscription' })}
-              />
-            </div>
+          {selected && !compact && (
+            <div className={styles.panelCol}>{panel}</div>
+          )}
+          {selected && compact && (
+            <BulletinSheet title={vehicleName(vehicle)} onClose={closePanel}>
+              {panel}
+            </BulletinSheet>
           )}
 
           {!full && ready && data && (

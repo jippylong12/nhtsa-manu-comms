@@ -28,8 +28,11 @@ export const corpusKeys = {
 // The signed-in user's account. AuthContext reads ['me'] for the profile.
 export const meKeys = {
     all: ['me'] as const,
+    /** Prefix of every cached bulletins list (and one-id fetch) for one car. */
+    vehicleBulletins: (vehicleId: number) =>
+        [...meKeys.all, 'vehicles', vehicleId, 'bulletins'] as const,
     bulletins: (vehicleId: number, params: Record<string, unknown>) =>
-        [...meKeys.all, 'vehicles', vehicleId, 'bulletins', params] as const,
+        [...meKeys.vehicleBulletins(vehicleId), params] as const,
     bulletin: (vehicleId: number, nhtsaId: string) =>
         [...meKeys.all, 'vehicles', vehicleId, 'bulletin', nhtsaId] as const,
 };
