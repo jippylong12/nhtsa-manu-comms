@@ -11,6 +11,8 @@ import { useAuth } from './AuthContext';
 
 interface Props {
   onClose: () => void;
+  /** Called after a successful sign-in instead of onClose, when the two differ. */
+  onSignedIn?: () => void;
 }
 
 const FOCUSABLE =
@@ -37,7 +39,7 @@ function messageFor(err: unknown): string {
   }
 }
 
-export function SignInDialog({ onClose }: Props) {
+export function SignInDialog({ onClose, onSignedIn }: Props) {
   const { authDisabled, signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -84,7 +86,7 @@ export function SignInDialog({ onClose }: Props) {
     setError(null);
     try {
       await action();
-      onClose();
+      (onSignedIn ?? onClose)();
     } catch (err) {
       setError(messageFor(err));
     } finally {

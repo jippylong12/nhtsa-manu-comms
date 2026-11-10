@@ -1,0 +1,38 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  line-height: 1;
+}
+
+.mark {
+  flex: none;
+  display: block;
+}
+
+.word {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.28em;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.wordStrong {
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+
+.wordLight {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-primary-light);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

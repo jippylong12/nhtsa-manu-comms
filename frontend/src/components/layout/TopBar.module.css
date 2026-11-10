@@ -22,7 +22,13 @@
 }
 
 .brand:hover {
-  color: var(--color-primary-light);
+  opacity: 0.88;
+}
+
+.brand:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .right {

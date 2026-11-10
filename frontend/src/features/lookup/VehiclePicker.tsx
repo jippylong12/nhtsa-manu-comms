@@ -30,7 +30,7 @@ export function VehiclePicker({ value, onChange }: VehiclePickerProps) {
         <div className={styles.picker}>
             <Combobox
                 label="Year"
-                placeholder="2024"
+                placeholder="Year"
                 numeric
                 options={(yearsQuery.data ?? []).map(String)}
                 value={year ? String(year) : ''}

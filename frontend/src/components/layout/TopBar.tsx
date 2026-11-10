@@ -2,21 +2,23 @@
  * in, and Sign in / Sign out. On narrow screens the text collapses to icons. */
 
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, LogOut } from 'lucide-react';
 
 import { useAuth } from '../../auth/AuthContext';
 import { SignInDialog } from '../../auth/SignInDialog';
+import { Logo } from '../brand/Logo';
 import styles from './TopBar.module.css';
 
 export function TopBar() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [signInOpen, setSignInOpen] = useState(false);
 
   return (
     <header className={styles.bar}>
-      <Link to="/" className={styles.brand}>
-        NHTSA Comms
+      <Link to="/" className={styles.brand} aria-label="NHTSA Comms, home">
+        <Logo size={28} />
       </Link>
       <div className={styles.right}>
         {user ? (
@@ -24,7 +26,7 @@ export function TopBar() {
             <span className={styles.email}>{user.email}</span>
             <button
               className={`btn btn-ghost btn-sm ${styles.action}`}
-              onClick={() => void signOut()}
+              onClick={() => void signOut().then(() => navigate('/'))}
               aria-label="Sign out"
             >
               <LogOut size={16} />
