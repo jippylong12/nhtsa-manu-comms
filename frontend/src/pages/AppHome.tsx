@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Car, Plus } from 'lucide-react';
+import { Car, Plus, Lock } from 'lucide-react';
 
 import type { VehicleCreate } from '@/client';
 import { AddVehicleModal } from '../features/vehicles/components/AddVehicleModal';
@@ -15,6 +15,9 @@ import {
 import { PastDueBanner } from '../features/billing/components/PastDueBanner';
 import { isPastDue } from '../features/billing/plan';
 import { useToast } from '../features/my-vehicles/hooks/useToast';
+import { ApiError } from '@/client';
+import { useCheckout } from '../features/billing/hooks/useBilling';
+import { MONTHLY_PRICE_LABEL } from '../features/billing/prices';
 import styles from './AppHome.module.css';
 
 export function AppHome() {
@@ -22,6 +25,8 @@ export function AppHome() {
   const handedToast = (location.state as { toast?: string } | null)?.toast ?? null;
   const { toast, showToast } = useToast(handedToast);
   const [modalOpen, setModalOpen] = useState(false);
+  const [sampleLimit, setSampleLimit] = useState<string | null>(null);
+  const checkout = useCheckout();
   const meQuery = useMeQuery();
   const addVehicle = useAddVehicle();
   const removeVehicle = useRemoveVehicle();
@@ -32,7 +37,15 @@ export function AppHome() {
       { year: Number(data.year), make: data.make, model: data.model },
       {
         onSuccess: () => setModalOpen(false),
-        onError: (err) => showToast(err.message || 'We could not add that car.'),
+        onError: (err) => {
+          // 402: the free samples are used up. That is an offer, not an error toast.
+          if (err instanceof ApiError && err.status === 402) {
+            setModalOpen(false);
+            setSampleLimit(err.message);
+            return;
+          }
+          showToast(err.message || 'We could not add that car.');
+        },
       }
     );
   };
@@ -53,6 +66,35 @@ export function AppHome() {
           <Plus size={18} /> Add vehicle
         </button>
       </div>
+
+      {sampleLimit && (
+        <div className={styles.upsell} role="status">
+          <span className={styles.upsellIcon} aria-hidden="true">
+            <Lock size={18} />
+          </span>
+          <div className={styles.upsellText}>
+            <p className={styles.upsellTitle}>{sampleLimit}</p>
+            <p className={styles.upsellBody}>
+              A subscription covers every car on your account, up to 10, with a daily email when a
+              new bulletin lands.
+            </p>
+            {checkout.isError && <p className={styles.upsellError}>{checkout.error.message}</p>}
+          </div>
+          <div className={styles.upsellActions}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={checkout.isPending || checkout.isSuccess}
+              onClick={() => checkout.mutate({ kind: 'subscription' })}
+            >
+              {checkout.isPending || checkout.isSuccess ? 'Opening checkout...' : `Subscribe ${MONTHLY_PRICE_LABEL}`}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setSampleLimit(null)}>
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
 
       {meQuery.isPending && (
         <div className={styles.grid} aria-busy="true" aria-label="Loading your vehicles">

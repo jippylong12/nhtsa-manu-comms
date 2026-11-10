@@ -53,3 +53,80 @@
     padding: var(--space-lg) var(--space-xl);
   }
 }
+
+/* Free samples used up: an offer with a way forward, not an error. */
+.upsell {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: start;
+  padding: var(--space-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 10%, var(--bg-surface)) 0%,
+    var(--bg-surface) 70%
+  );
+  border: 1px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+  border-radius: var(--radius-lg);
+}
+
+.upsellIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: hsl(40, 95%, 66%);
+}
+
+.upsellText {
+  min-width: 0;
+}
+
+.upsellTitle {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.upsellBody {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.upsellError {
+  margin: var(--space-sm) 0 0;
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}
+
+.upsellActions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.upsellActions :global(.btn) {
+  min-height: 44px;
+}
+
+@media (max-width: 599px) {
+  .upsell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .upsellActions {
+    grid-column: 1;
+  }
+
+  .upsellActions :global(.btn) {
+    flex: 1;
+    justify-content: center;
+  }
+}
