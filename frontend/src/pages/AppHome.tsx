@@ -28,9 +28,11 @@ import styles from './AppHome.module.css';
 
 export function AppHome() {
   const location = useLocation();
-  const handedToast = (location.state as { toast?: string } | null)?.toast ?? null;
+  const handed = location.state as { toast?: string; add?: boolean } | null;
+  const handedToast = handed?.toast ?? null;
   const { toast, showToast } = useToast(handedToast);
-  const [modalOpen, setModalOpen] = useState(false);
+  // The account page's "Add a car" arrives here with the picker already open.
+  const [modalOpen, setModalOpen] = useState(Boolean(handed?.add));
   const [sampleLimit, setSampleLimit] = useState<string | null>(null);
   const checkout = useCheckout();
   const portal = usePortal();

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Bell, BellOff, Check, Crown, Lock, Sparkles, Trash2 } from 'lucide-react';
+import { Bell, BellOff, Check, Crown, Lock, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 import type { Me, MyVehicle, SubscriptionPlan } from '@/client';
 import { useAuth } from '../auth/AuthContext';
@@ -380,13 +380,13 @@ export function AccountPage() {
               <h2 id="vehicles-title" className={styles.cardTitle}>
                 My cars
               </h2>
-              <Link to="/app" className={styles.cardLink}>
-                Add a car
+              <Link to="/app" state={{ add: true }} className={`btn btn-primary ${styles.btn}`}>
+                <Plus size={18} aria-hidden="true" /> Add a car
               </Link>
             </div>
             {me.vehicles.length === 0 ? (
               <p className={styles.note}>
-                No cars yet. <Link to="/app">Add one</Link>
+                No cars yet. <Link to="/app" state={{ add: true }}>Add one</Link>
               </p>
             ) : (
               <ul className={styles.list}>
