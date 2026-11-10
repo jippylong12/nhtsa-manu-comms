@@ -13,6 +13,8 @@ interface Props {
   onClose: () => void;
   /** Called after a successful sign-in instead of onClose, when the two differ. */
   onSignedIn?: () => void;
+  /** Which form opens first. A visitor starting from the landing page is creating an account. */
+  initialMode?: 'signin' | 'signup';
 }
 
 const FOCUSABLE =
@@ -39,9 +41,9 @@ function messageFor(err: unknown): string {
   }
 }
 
-export function SignInDialog({ onClose, onSignedIn }: Props) {
+export function SignInDialog({ onClose, onSignedIn, initialMode = 'signin' }: Props) {
   const { authDisabled, signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

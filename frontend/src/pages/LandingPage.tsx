@@ -351,7 +351,7 @@ export function LandingPage() {
         with NHTSA or any carmaker.
       </footer>
 
-      {signInOpen && <SignInDialog onClose={() => setSignInOpen(false)} />}
+      {signInOpen && <SignInDialog initialMode="signup" onClose={() => setSignInOpen(false)} />}
     </div>
   );
 }
