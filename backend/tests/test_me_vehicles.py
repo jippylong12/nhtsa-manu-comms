@@ -355,7 +355,10 @@ async def test_a_canceled_plan_no_longer_covers_new_cars(db):
     async with _http() as c:
         for model in ("ONE", "TWO", "THREE"):
             assert await _add(c, USER_A, model) == 201
-        await db.execute("UPDATE entitlements SET status = 'canceled'")
+        await db.execute(
+            "UPDATE entitlements SET status = 'canceled' WHERE user_id = $1",
+            await _user(db, USER_A),
+        )
         assert await _add(c, USER_A, "FOUR") == 402
 
 
