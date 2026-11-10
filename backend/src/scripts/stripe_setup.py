@@ -22,14 +22,14 @@ PRICES = [
     {
         "env": "STRIPE_PRICE_MONTHLY",
         "lookup_key": "nhtsa_monthly",
-        "product": "NHTSA Comms monthly",
+        "product": "Not Just My Car Monthly",
         "amount": 500,
         "recurring": {"interval": "month"},
     },
     {
         "env": "STRIPE_PRICE_ALL_ACCESS",
         "lookup_key": "nhtsa_all_access",
-        "product": "NHTSA Comms all access",
+        "product": "Not Just My Car All access",
         "amount": 2000,
         "recurring": {"interval": "month"},
     },

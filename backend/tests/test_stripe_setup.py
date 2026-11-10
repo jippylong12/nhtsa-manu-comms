@@ -54,13 +54,13 @@ def test_apply_creates_the_three_prices_and_prints_env_lines(capsys):
     assert "STRIPE_PRICE_ALL_ACCESS=price_new_nhtsa_all_access" in out
     unlock, monthly, all_access = fake.create_calls
     assert (all_access["unit_amount"], all_access["recurring"]) == (2000, {"interval": "month"})
-    assert all_access["product_data"] == {"name": "NHTSA Comms all access"}
+    assert all_access["product_data"] == {"name": "Not Just My Car All access"}
     assert (unlock["unit_amount"], unlock["currency"]) == (300, "usd")
     assert "recurring" not in unlock
     assert unlock["product_data"] == {"name": "Vehicle unlock"}
     assert (monthly["unit_amount"], monthly["currency"]) == (500, "usd")
     assert monthly["recurring"] == {"interval": "month"}
-    assert monthly["product_data"] == {"name": "NHTSA Comms monthly"}
+    assert monthly["product_data"] == {"name": "Not Just My Car Monthly"}
 
 
 def test_apply_reuses_existing_lookup_keys(capsys):
