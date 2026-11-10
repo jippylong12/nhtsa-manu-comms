@@ -1,6 +1,6 @@
 """Schemas for /api/me."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import Field
@@ -16,6 +16,8 @@ class EntitlementResponse(CamelModel):
     vehicle_id: int | None = None
     status: str
     current_period_end: datetime | None = None
+    # A subscription the customer cancelled: it works until current_period_end, then ends.
+    cancel_at_period_end: bool = False
 
 
 class MyVehicle(CamelModel):
@@ -29,6 +31,21 @@ class MyVehicle(CamelModel):
     new_this_week: int
     access: Literal["full", "sample"]
     added_at: datetime
+    # Whether this car is included in the account's alert emails.
+    alerts_enabled: bool = True
+
+
+class MyVehicleUpdate(CamelModel):
+    alerts_enabled: bool
+
+
+class RemovalAllowance(CamelModel):
+    """How many plan cars a subscriber may still remove this calendar month."""
+
+    plan: str
+    limit: int
+    used: int
+    resets_on: date
 
 
 class AlertsStatus(CamelModel):
@@ -49,6 +66,8 @@ class MeResponse(CamelModel):
     entitlements: list[EntitlementResponse]
     vehicles: list[MyVehicle]
     alerts: AlertsStatus
+    # None unless the account is a subscriber held to a removal limit.
+    removals: RemovalAllowance | None = None
 
 
 class MyVehicleCreate(CamelModel):

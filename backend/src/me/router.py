@@ -18,6 +18,7 @@ from src.me.schemas import (
     MyBulletinsResponse,
     MyVehicle,
     MyVehicleCreate,
+    MyVehicleUpdate,
 )
 
 router = APIRouter(prefix="/me", tags=["Me"])
@@ -37,6 +38,7 @@ async def get_me(user: dict = Depends(current_user)) -> MeResponse:
         entitlements=await service.list_entitlements(user["id"]),
         vehicles=await service.list_my_vehicles(user["id"]),
         alerts=await service.get_alerts(user),
+        removals=await service.get_removals(user["id"]),
     )
 
 
@@ -93,10 +95,36 @@ async def add_vehicle(payload: MyVehicleCreate, user: dict = Depends(current_use
     summary="Remove a vehicle from my account",
 )
 async def remove_vehicle(vehicle_id: int, user: dict = Depends(current_user)) -> Response:
-    """Unlink the caller's vehicle; 404 when the caller has no such link."""
-    if not await service.remove_vehicle(user["id"], vehicle_id):
+    """Unlink the caller's vehicle; 404 when not linked, 409 past the plan's monthly removals."""
+    try:
+        removed = await service.remove_vehicle(user["id"], vehicle_id)
+    except service.RemovalLimitReached as e:
+        cars = "1 car" if e.limit == 1 else f"{e.limit} cars"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Your plan lets you remove {cars} a month. "
+                f"You can remove another from {e.resets_on:%B} {e.resets_on.day}."
+            ),
+        ) from None
+    if not removed:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/vehicles/{vehicle_id}",
+    response_model=MyVehicle,
+    summary="Include or leave out one of my vehicles in alert emails",
+)
+async def update_vehicle(
+    vehicle_id: int, payload: MyVehicleUpdate, user: dict = Depends(current_user)
+) -> MyVehicle:
+    """Per-car alert switch; 404 when the caller has no such link."""
+    vehicle = await service.set_vehicle_alerts(user["id"], vehicle_id, payload.alerts_enabled)
+    if vehicle is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return MyVehicle(**vehicle)
 
 
 @router.get(

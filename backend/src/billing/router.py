@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.auth.deps import current_user
 from src.billing import service, webhook
-from src.billing.schemas import CheckoutRequest, UrlResponse
+from src.billing.schemas import CheckoutRequest, PortalRequest, UrlResponse
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
@@ -28,10 +28,12 @@ async def checkout(payload: CheckoutRequest, user: dict = Depends(current_user))
 
 
 @router.post("/portal", response_model=UrlResponse, summary="Open the Stripe Customer Portal")
-async def portal(user: dict = Depends(current_user)) -> UrlResponse:
-    """Manage or cancel; 404 when the caller has never paid."""
+async def portal(
+    payload: PortalRequest | None = None, user: dict = Depends(current_user)
+) -> UrlResponse:
+    """Manage, or go straight to cancel; 404 when the caller has never paid."""
     try:
-        url = await service.create_portal(user)
+        url = await service.create_portal(user, payload.flow if payload else "manage")
     except service.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except service.NotConfigured as e:

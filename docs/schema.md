@@ -316,6 +316,13 @@ Five tables sit beside the corpus. None of them changes `communications`,
   given a free sample of. A free account may hold two that are not covered by an active
   unlock; a removed car keeps its row, so removing and adding hands out no new sample.
   Subscribers and admins are not limited.
+- `vehicle_removals` (migration 0020) is one row per car a subscriber took off a plan. A
+  plan covers N cars at a time, so the count of this month's rows is what stops a subscriber
+  from reading any number of cars by swapping (`PLAN_REMOVALS`: Monthly 1, All access 5 per
+  calendar month, UTC). Removing an unlocked car, or any car on an account without a
+  subscription, writes no row. The same migration adds `user_vehicles.alerts_enabled` (leave
+  one car out of the alert email) and `entitlements.cancel_at_period_end` (a cancelled
+  subscription that still runs to the end of its period).
 - `ingest_queue` (migration 0017) is the list of cars waiting to be read after a user added
   them: one row per vehicle, oldest first, with `attempts` and `last_error`. A background
   worker inside the API (`src/refresh/queue.py`) reads them one at a time and stops when the

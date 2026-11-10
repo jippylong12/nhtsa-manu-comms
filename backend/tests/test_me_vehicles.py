@@ -368,3 +368,112 @@ async def test_one_accounts_samples_do_not_count_against_another(db):
         assert await _add(c, USER_A, "TWO") == 201
         assert await _add(c, USER_B, "ONE") == 201
         assert await _add(c, USER_B, "THREE") == 201
+
+
+async def _remove(c, uid: str, vehicle_id: int):
+    return await c.delete(f"/api/me/vehicles/{vehicle_id}", headers=_as(uid))
+
+
+async def _add_id(c, uid: str, model: str) -> int:
+    return (await c.post("/api/me/vehicles", headers=_as(uid), json=_body(model))).json()[
+        "vehicleId"
+    ]
+
+
+async def test_monthly_allows_one_removal_a_month_and_the_second_is_refused(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        one = await _add_id(c, USER_A, "ONE")
+        two = await _add_id(c, USER_A, "TWO")
+        assert (await _remove(c, USER_A, one)).status_code == 204
+        three = await _add_id(c, USER_A, "THREE")
+        r = await _remove(c, USER_A, two)
+        assert r.status_code == 409
+        assert "1 car a month" in r.json()["detail"]
+        me = (await c.get("/api/me", headers=_as(USER_A))).json()
+    assert {v["vehicleId"] for v in me["vehicles"]} == {two, three}  # the refused car stays
+    assert (me["removals"]["limit"], me["removals"]["used"]) == (1, 1)
+
+
+async def test_last_months_removals_do_not_count(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        one = await _add_id(c, USER_A, "ONE")
+        two = await _add_id(c, USER_A, "TWO")
+        assert (await _remove(c, USER_A, one)).status_code == 204
+        await db.execute(
+            "UPDATE vehicle_removals SET removed_at = removed_at - interval '40 days' "
+            "WHERE user_id = $1",
+            await _user(db, USER_A),
+        )
+        assert (await _remove(c, USER_A, two)).status_code == 204
+
+
+async def test_all_access_allows_five_removals_a_month(db):
+    await _subscribe(db, USER_A, "all_access")
+    async with _http() as c:
+        ids = [await _add_id(c, USER_A, f"CAR{i}") for i in range(6)]
+        for vid in ids[:5]:
+            assert (await _remove(c, USER_A, vid)).status_code == 204
+        r = await _remove(c, USER_A, ids[5])
+    assert r.status_code == 409
+    assert "5 cars a month" in r.json()["detail"]
+
+
+async def test_removing_an_unlocked_car_is_never_counted_or_refused(db):
+    await _subscribe(db, USER_A)
+    async with _http() as c:
+        one = await _add_id(c, USER_A, "ONE")
+        two = await _add_id(c, USER_A, "TWO")
+        await db.execute(
+            "INSERT INTO entitlements (user_id, kind, vehicle_id, status) "
+            "VALUES ($1, 'unlock', $2, 'active')",
+            await _user(db, USER_A), two,
+        )
+        assert (await _remove(c, USER_A, one)).status_code == 204  # the month's one removal
+        assert (await _remove(c, USER_A, two)).status_code == 204  # unlocked: free to go
+        me = (await c.get("/api/me", headers=_as(USER_A))).json()
+        assert me["removals"]["used"] == 1
+        # And it comes back at no cost, without taking a place on the plan.
+        assert await _add(c, USER_A, "TWO") == 201
+
+
+async def test_a_free_account_removes_freely_and_has_no_allowance(db):
+    async with _http() as c:
+        one = await _add_id(c, USER_A, "ONE")
+        two = await _add_id(c, USER_A, "TWO")
+        assert (await _remove(c, USER_A, one)).status_code == 204
+        assert (await _remove(c, USER_A, two)).status_code == 204
+        me = (await c.get("/api/me", headers=_as(USER_A))).json()
+    assert me["removals"] is None
+    assert await db.fetchval(
+        "SELECT count(*) FROM vehicle_removals WHERE user_id = $1", await _user(db, USER_A)
+    ) == 0
+
+
+async def test_one_accounts_removals_do_not_count_against_another(db):
+    await _subscribe(db, USER_A)
+    await _subscribe(db, USER_B)
+    async with _http() as c:
+        a = await _add_id(c, USER_A, "ONE")
+        b = await _add_id(c, USER_B, "ONE")
+        assert (await _remove(c, USER_A, a)).status_code == 204
+        assert (await _remove(c, USER_B, b)).status_code == 204
+
+
+async def test_a_car_can_be_left_out_of_alerts_and_only_by_its_owner(db):
+    async with _http() as c:
+        one = await _add_id(c, USER_A, "ONE")
+        r = await c.patch(
+            f"/api/me/vehicles/{one}", headers=_as(USER_A), json={"alertsEnabled": False}
+        )
+        assert r.status_code == 200 and r.json()["alertsEnabled"] is False
+        me = (await c.get("/api/me", headers=_as(USER_A))).json()
+        assert me["vehicles"][0]["alertsEnabled"] is False
+        other = await c.patch(
+            f"/api/me/vehicles/{one}", headers=_as(USER_B), json={"alertsEnabled": True}
+        )
+        assert other.status_code == 404
+    assert await db.fetchval(
+        "SELECT alerts_enabled FROM user_vehicles WHERE vehicle_id = $1", one
+    ) is False

@@ -441,3 +441,52 @@ async def test_a_plan_change_in_the_portal_moves_the_entitlement_to_the_new_plan
         await _post(c, _event(PREFIX + "ep4c", "customer.subscription.updated", down))
     (row,) = await _rows(db, uid)
     assert row["plan"] == "monthly"
+
+
+async def test_a_cancelled_subscription_is_marked_as_ending_and_can_be_resumed(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        sub = await _subscribe(c, uid, "c1")
+        ending = {"id": sub, "status": "active", "cancel_at_period_end": True}
+        await _post(c, _event(PREFIX + "ec1a", "customer.subscription.updated", ending))
+        (row,) = await _rows(db, uid)
+        assert row["cancel_at_period_end"] is True and row["status"] == "active"
+        assert await entitlements.access_for(db, uid, vid) == "full"  # paid through the period
+        newer = {"id": sub, "status": "active", "cancel_at": 1900000000}
+        await _post(c, _event(PREFIX + "ec1b", "customer.subscription.updated", newer))
+        (row,) = await _rows(db, uid)
+        assert row["cancel_at_period_end"] is True
+        resumed = {"id": sub, "status": "active", "cancel_at_period_end": False}
+        await _post(c, _event(PREFIX + "ec1c", "customer.subscription.updated", resumed))
+    (row,) = await _rows(db, uid)
+    assert row["cancel_at_period_end"] is False
+
+
+async def test_subscribing_turns_alerts_back_on(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        await db.execute(
+            "INSERT INTO alert_state (user_id, unsubscribed_at) VALUES ($1, now()) "
+            "ON CONFLICT (user_id) DO UPDATE SET unsubscribed_at = now()",
+            uid,
+        )
+        await _subscribe(c, uid, "a1")
+    assert await db.fetchval(
+        "SELECT unsubscribed_at FROM alert_state WHERE user_id = $1", uid
+    ) is None
+
+
+async def test_an_unlock_does_not_touch_the_alert_setting(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        await db.execute(
+            "INSERT INTO alert_state (user_id, unsubscribed_at) VALUES ($1, now()) "
+            "ON CONFLICT (user_id) DO UPDATE SET unsubscribed_at = now()",
+            uid,
+        )
+        await _post(
+            c, _event(PREFIX + "ea2", "checkout.session.completed", _checkout(PREFIX + "a2", uid, vid))
+        )
+    assert await db.fetchval(
+        "SELECT unsubscribed_at FROM alert_state WHERE user_id = $1", uid
+    ) is not None

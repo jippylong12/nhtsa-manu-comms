@@ -144,6 +144,14 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
         user_id, kind, vehicle_id, session.get("customer"), session_id, subscription_id,
         _looked_up_period_end.get(), plan,
     )
+    if inserted and kind == "subscription":
+        # Alerts are what a subscription is for: a new subscriber starts with them on,
+        # even one who had turned them off under an earlier subscription.
+        await conn.execute(
+            "INSERT INTO alert_state (user_id) VALUES ($1) "
+            "ON CONFLICT (user_id) DO UPDATE SET unsubscribed_at = NULL",
+            user_id,
+        )
     log.info(
         "checkout %s: user=%s kind=%s vehicle=%s entitlement=%s",
         session_id, user_id, kind, vehicle_id, inserted or "already present",
@@ -158,9 +166,12 @@ async def _subscription_updated(conn: asyncpg.Connection, sub: dict) -> None:
     plan = _plan_of(sub)
     result = await conn.execute(
         "UPDATE entitlements SET status = $2, "
-        "current_period_end = COALESCE($3, current_period_end), plan = COALESCE($4, plan) "
+        "current_period_end = COALESCE($3, current_period_end), plan = COALESCE($4, plan), "
+        "cancel_at_period_end = $5 "
         "WHERE stripe_subscription_id = $1 AND status <> 'canceled'",
         sub["id"], status, _period_end(sub), plan,
+        # Newer API versions say it with `cancel_at` (a timestamp) instead of the flag.
+        bool(sub.get("cancel_at_period_end") or sub.get("cancel_at")),
     )
     log.info("subscription %s: status=%s plan=%s (%s)", sub["id"], status, plan, result)
 

@@ -93,18 +93,40 @@ async def create_checkout(
     return stripe.checkout.Session.create(**params)["url"]
 
 
-async def create_portal(user: dict) -> str:
-    """Create a Customer Portal session for the user's Stripe customer and return its URL."""
+async def create_portal(user: dict, flow: str = "manage") -> str:
+    """Create a Customer Portal session for the user's Stripe customer and return its URL.
+
+    `flow="cancel"` opens it on the cancel page of the caller's subscription, so cancelling
+    is one click here and one confirmation there. NotFound when there is nothing to cancel.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         customer = await entitlements.customer_id_for(conn, user["id"])
+        subscription = None
+        if flow == "cancel":
+            subscription = await conn.fetchval(
+                "SELECT stripe_subscription_id FROM entitlements WHERE user_id = $1 "
+                "AND kind = 'subscription' AND status IN ('active', 'past_due') "
+                "AND stripe_subscription_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+                user["id"],
+            )
     if not customer:
         raise NotFound("no billing account")
+    if flow == "cancel" and not subscription:
+        raise NotFound("no subscription to cancel")
     try:
         stripe = stripe_client.client()
     except RuntimeError as e:
         raise NotConfigured(str(e)) from e
     base = get_settings().app_base_url.rstrip("/")
-    return stripe.billing_portal.Session.create(
-        customer=customer, return_url=f"{base}/app/account"
-    )["url"]
+    params: dict = {"customer": customer, "return_url": f"{base}/app/account"}
+    if subscription:
+        params["flow_data"] = {
+            "type": "subscription_cancel",
+            "subscription_cancel": {"subscription": subscription},
+            "after_completion": {
+                "type": "redirect",
+                "redirect": {"return_url": f"{base}/app/account"},
+            },
+        }
+    return stripe.billing_portal.Session.create(**params)["url"]

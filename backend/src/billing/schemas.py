@@ -12,5 +12,10 @@ class CheckoutRequest(CamelModel):
     vehicle_id: int | None = None
 
 
+class PortalRequest(CamelModel):
+    # `cancel` opens the portal straight on the cancel page for the caller's subscription.
+    flow: Literal["manage", "cancel"] = "manage"
+
+
 class UrlResponse(CamelModel):
     url: str
