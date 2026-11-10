@@ -49,3 +49,42 @@ export function shouldLoad(hostname: string, pathname: string): boolean {
     // The unsubscribe address carries a personal token; the admin console is not a visitor.
     return !pathname.startsWith('/unsubscribe') && !pathname.startsWith('/admin');
 }
+
+/* Query parameters that may leave the browser with a page address: the car a visitor looked
+ * up and which view of it is open. Everything else is dropped, because it is either typed
+ * by a person (`search`), an identifier (`session_id`, `b`) or unknown. */
+const SAFE_PARAMS = new Set(['year', 'make', 'model', 'severity', 'view']);
+
+/** The page address as analytics may see it: allow-listed query parameters only, no fragment. */
+export function scrubUrl(href: string): string {
+    let url: URL;
+    try {
+        url = new URL(href);
+    } catch {
+        return '';
+    }
+    const kept = new URLSearchParams();
+    for (const [key, value] of url.searchParams) {
+        if (SAFE_PARAMS.has(key)) kept.append(key, value);
+    }
+    const query = kept.toString();
+    return `${url.origin}${url.pathname}${query ? `?${query}` : ''}`;
+}
+
+/** True the first time `key` is seen. `seen` holds for this page load; `storage`, when it
+ *  works, holds across reloads. A storage that throws must never cause a second "first time". */
+export function firstTime(
+    key: string,
+    seen: Set<string>,
+    storage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } | null
+): boolean {
+    if (seen.has(key)) return false;
+    seen.add(key);
+    try {
+        if (storage?.getItem(key)) return false;
+        storage?.setItem(key, '1');
+    } catch {
+        // Storage blocked: the in-memory set above still stops repeats on this page.
+    }
+    return true;
+}

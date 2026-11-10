@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './auth/AuthContext';
+import { trackPageView } from './analytics/analytics';
 import { RequireAdmin, RequireAuth } from './auth/guards';
 import { SiteLayout } from './pages/SiteLayout';
 import { LandingPage } from './pages/LandingPage';
@@ -68,6 +69,9 @@ const router = createBrowserRouter([
     ),
   },
 ]);
+
+// Page views are sent by hand, with a scrubbed address, on every navigation.
+router.subscribe(() => trackPageView());
 
 export default function App() {
   return (

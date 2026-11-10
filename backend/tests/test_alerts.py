@@ -627,3 +627,26 @@ def test_the_subject_for_several_cars_and_for_a_car_that_became_ready():
         ready_vehicles=[A.ReadyVehicle(vehicle_id=5, label="2023 Toyota RAV4", count=71)],
     )
     assert A.subject_for(ready) == "Your 2023 Toyota RAV4 is ready to read"
+
+
+def _ready(*labels):
+    return A.UserAlert(
+        generated_at=BASE, since=None, groups=[], watermark=None,
+        ready_vehicles=[
+            A.ReadyVehicle(vehicle_id=i + 1, label=label, count=10) for i, label in enumerate(labels)
+        ],
+    )
+
+
+def test_two_cars_ready_at_once_are_announced_in_the_plural():
+    html = A.render_html(_ready("2023 Toyota RAV4", "2021 Honda Civic"), UNSUB)
+
+    assert "Your cars are ready to read" in html
+    assert "Your car is" not in html and "its bulletins" not in html
+
+
+def test_one_car_ready_is_named_in_the_headline_as_in_the_subject():
+    alert = _ready("2023 Toyota RAV4")
+
+    assert "Your 2023 Toyota RAV4 is ready to read" in A.render_html(alert, UNSUB)
+    assert A.subject_for(alert) == "Your 2023 Toyota RAV4 is ready to read"

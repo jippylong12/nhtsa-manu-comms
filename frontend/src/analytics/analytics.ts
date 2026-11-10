@@ -5,7 +5,7 @@
  * `gtag('event', name, params)`. Nothing is sent anywhere until `initAnalytics` has loaded
  * the tag, which it does not do on a developer's machine, on /unsubscribe or on /admin. */
 
-import { GTM_ID, ecommerce, productOf, shouldLoad, transactionId } from './events';
+import { GTM_ID, ecommerce, firstTime, productOf, scrubUrl, shouldLoad, transactionId } from './events';
 
 declare global {
     interface Window {
@@ -25,11 +25,27 @@ export function initAnalytics(): void {
     if (!shouldLoad(window.location.hostname, window.location.pathname)) return;
     if (document.querySelector(`script[data-gtm="${GTM_ID}"]`)) return;
     gtag('js', new Date());
+    // Every event, the tag's own first page view included, reports this address and never
+    // the raw one: a search a person typed or a payment session id must not leave the browser.
+    lastPage = scrubUrl(window.location.href);
+    gtag('set', { page_location: lastPage });
     const script = document.createElement('script');
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtm.js?id=${GTM_ID}`;
     script.dataset.gtm = GTM_ID;
     document.head.appendChild(script);
+}
+
+let lastPage = '';
+
+/** Call on every route change. Sends one page view per page, with the scrubbed address;
+ *  typing in a search box rewrites the address many times and counts as no change. */
+export function trackPageView(): void {
+    const page = scrubUrl(window.location.href);
+    if (!page || page === lastPage) return;
+    lastPage = page;
+    gtag('set', { page_location: page });
+    gtag('event', 'page_view', { page_location: page });
 }
 
 export function track(event: string, params: Record<string, unknown> = {}): void {
@@ -60,20 +76,22 @@ export function trackBeginCheckout(kind: 'unlock' | 'subscription', plan?: strin
     track('begin_checkout', ecommerce(productOf(kind, plan)));
 }
 
-/** Once per purchase: a refresh of the thank-you page must not count it again. */
+const purchasesSeen = new Set<string>();
+
+/** Once per purchase: neither a re-render nor a refresh of the thank-you page counts it again. */
 export function trackPurchase(
     kind: 'unlock' | 'subscription',
     plan: string | null | undefined,
     sessionId: string | null
 ): void {
     const id = transactionId(sessionId);
-    const key = `purchaseTracked:${id ?? 'unknown'}`;
+    let storage: Storage | null = null;
     try {
-        if (sessionStorage.getItem(key)) return;
-        sessionStorage.setItem(key, '1');
+        storage = window.sessionStorage;
     } catch {
-        // Storage blocked: better to count than to lose the sale.
+        // Reading the property itself can throw when site data is blocked.
     }
+    if (!firstTime(`purchaseTracked:${id ?? 'unknown'}`, purchasesSeen, storage)) return;
     track('purchase', { transaction_id: id, ...ecommerce(productOf(kind, plan)) });
 }
 

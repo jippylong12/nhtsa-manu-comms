@@ -484,8 +484,11 @@ def render_html(alert: UserAlert, unsubscribe_url: str) -> str:
         lede = (
             "Your carmaker sent these to its dealers. Here is what each one means for you."
         )
+    elif len(alert.ready_vehicles) == 1:
+        headline = f"Your {alert.ready_vehicles[0].label} is ready to read"
+        lede = "We have finished reading its bulletins."
     elif alert.ready_vehicles:
-        headline, lede = "Your car is ready to read", "We have finished reading its bulletins."
+        headline, lede = "Your cars are ready to read", "We have finished reading their bulletins."
     else:
         headline, lede = "Nothing to report", "There is nothing for your cars today."
     return f"""<!doctype html>

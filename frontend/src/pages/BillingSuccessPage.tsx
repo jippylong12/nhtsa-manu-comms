@@ -63,9 +63,10 @@ export function BillingSuccessPage() {
 
   // Counted once the entitlement exists, so an abandoned or failed payment is never a sale.
   const boughtPlan = landed?.kind === 'subscription' ? (pending?.plan ?? planOf(meQuery.data)) : null;
+  const landedKind = landed?.kind ?? null;
   useEffect(() => {
-    if (landed) trackPurchase(landed.kind, boughtPlan, sessionId);
-  }, [landed, boughtPlan, sessionId]);
+    if (landedKind) trackPurchase(landedKind, boughtPlan, sessionId);
+  }, [landedKind, boughtPlan, sessionId]);
 
   const kind = landed?.kind ?? pending?.kind;
   const vehicle = vehicleFor(meQuery.data, landed?.vehicleId ?? pending?.vehicleId);
