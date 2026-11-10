@@ -76,9 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   useEffect(() => {
     currentUser = user;
+  }, [user]);
+  // Cleared only on unmount. Clearing it whenever `user` changed left a gap: a page
+  // mounting in the commit that signs the user in (a refresh on a private page) fired
+  // its first request with no token and showed an error.
+  useEffect(() => {
     registerTokenProvider(); // re-register after a StrictMode cleanup
     return () => setAuthTokenProvider(null);
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (!firebaseAuth) return;
