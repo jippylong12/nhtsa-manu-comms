@@ -113,3 +113,95 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* A car we have not read yet: say so plainly, then show an example. */
+.unknown {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: start;
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.unknownIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary-light);
+}
+
+.unknownTitle {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.unknownText {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.exampleLabel {
+  margin: 0 0 6px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Latest bulletin: coloured by how fresh it is. Red this week, amber this month, green older. */
+.latest {
+  --fresh: var(--color-success);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: var(--space-md) 0 0;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--fresh) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--fresh) 10%, transparent);
+  color: color-mix(in srgb, var(--fresh) 75%, white);
+  font-size: var(--font-size-base);
+}
+
+.latest[data-freshness='week'] {
+  --fresh: var(--color-danger);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--color-danger) 22%, transparent);
+}
+
+.latest[data-freshness='month'] {
+  --fresh: var(--color-warning);
+}
+
+.latest svg {
+  flex: none;
+}
+
+.latestLead {
+  font-weight: var(--font-weight-semibold);
+}
+
+.latestDate {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.latestAgo {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  opacity: 0.85;
+}

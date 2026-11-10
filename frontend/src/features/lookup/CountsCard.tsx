@@ -1,6 +1,7 @@
 /* Severity counts card: ready, processing and unknown (example) states */
 
-import { format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, formatDistanceToNowStrict, parseISO } from 'date-fns';
+import { Clock, SearchX } from 'lucide-react';
 
 import { PRIORITY_COLORS } from '@/client';
 import type { CommPriority, LookupCounts, LookupResponse } from '@/client';
@@ -16,10 +17,31 @@ function vehicleName(v: { year: number; make: string; model: string }) {
     return `${v.year} ${v.make} ${v.model}`;
 }
 
-function formatDate(iso: string | null) {
+type Freshness = 'week' | 'month' | 'older';
+
+interface Latest {
+    date: string;
+    ago: string;
+    freshness: Freshness;
+    lead: string;
+}
+
+/** The newest bulletin's date and how fresh it is: this week, this month, or older. */
+function latestOf(iso: string | null): Latest | null {
     if (!iso) return null;
     try {
-        return format(parseISO(iso), 'MMM d, yyyy');
+        const d = parseISO(iso);
+        if (Number.isNaN(d.getTime())) return null;
+        const days = differenceInCalendarDays(new Date(), d);
+        const freshness: Freshness = days <= 7 ? 'week' : days <= 31 ? 'month' : 'older';
+        const lead =
+            freshness === 'week' ? 'New this week' : freshness === 'month' ? 'New this month' : 'Latest bulletin';
+        return {
+            date: format(d, 'MMM d, yyyy'),
+            ago: days <= 0 ? 'today' : `${formatDistanceToNowStrict(d)} ago`,
+            freshness,
+            lead,
+        };
     } catch {
         return null;
     }
@@ -34,20 +56,28 @@ export function CountsCard({ data, onSeeAll }: CountsCardProps) {
     const processing = data.availability === 'processing';
     const unknown = data.availability === 'unknown';
     const shown = unknown && data.example ? data.example : data;
-    const date = processing ? null : formatDate(shown.latestDate);
+    const latest = processing ? null : latestOf(shown.latestDate);
 
     return (
         <section className={styles.card} aria-label="Update counts">
             <div aria-live="polite">
                 {unknown && (
-                    <p className={styles.banner} role="status">
-                        {data.example
-                            ? `Nobody has asked about a ${vehicleName(data)} yet. Here's what a ${vehicleName(data.example)} looks like. Sign up and we'll read yours, usually within a day.`
-                            : `Nobody has asked about a ${vehicleName(data)} yet. Sign up and we'll read yours, usually within a day.`}
-                    </p>
+                    <div className={styles.unknown} role="status">
+                        <span className={styles.unknownIcon} aria-hidden="true">
+                            <SearchX size={18} />
+                        </span>
+                        <div>
+                            <p className={styles.unknownTitle}>We haven't read the {vehicleName(data)} yet</p>
+                            <p className={styles.unknownText}>
+                                Add it free and we'll read its bulletins, usually within a day, then email you
+                                when they're ready.
+                            </p>
+                        </div>
+                    </div>
                 )}
                 {(!unknown || data.example) && (
                     <>
+                        {unknown && <p className={styles.exampleLabel}>Here's what you'll get, from another car</p>}
                         <h2 className={styles.title}>{vehicleName(shown)}</h2>
                         <div className={styles.tiles}>
                             {TILES.map((t) => (
@@ -73,13 +103,20 @@ export function CountsCard({ data, onSeeAll }: CountsCardProps) {
                                 We're reading this car's bulletins now. Sign up and we'll email you when it's ready.
                             </p>
                         ) : (
-                            date && <p className={styles.note}>Latest bulletin {date}</p>
+                            latest && (
+                                <p className={styles.latest} data-freshness={latest.freshness}>
+                                    <Clock size={16} aria-hidden="true" />
+                                    <span className={styles.latestLead}>{latest.lead}</span>
+                                    <span className={styles.latestDate}>{latest.date}</span>
+                                    <span className={styles.latestAgo}>{latest.ago}</span>
+                                </p>
+                            )
                         )}
                     </>
                 )}
             </div>
             <button type="button" className={`btn btn-primary ${styles.cta}`} onClick={onSeeAll}>
-                See them all
+                {unknown ? 'Add my car free' : 'See them all'}
             </button>
         </section>
     );
