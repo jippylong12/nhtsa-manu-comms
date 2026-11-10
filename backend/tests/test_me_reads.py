@@ -1,6 +1,6 @@
 """Per-account read state: bulletin_reads, read endpoints, unread and newThisWeek (JIP-1597).
 
-`firebase.verify` and `refresh.service.start` are the only faked boundaries. Runs
+`firebase.verify` and `refresh.queue.request` are the only faked boundaries. Runs
 against the real database on committed connections and deletes its own TESTRD rows.
 """
 
@@ -15,7 +15,7 @@ import pytest_asyncio
 from src.auth import firebase
 from src.config import get_settings
 from src.main import create_app
-from src.refresh import service as refresh_service
+from src.refresh import queue as ingest_queue
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +47,7 @@ def fakes(monkeypatch):
     async def fake_start(vehicle_id: int):
         return {"id": 1}
 
-    monkeypatch.setattr(refresh_service, "start", fake_start)
+    monkeypatch.setattr(ingest_queue, "request", fake_start)
     monkeypatch.setattr(
         firebase,
         "verify",

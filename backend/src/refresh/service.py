@@ -255,8 +255,8 @@ async def _progress(
         )
 
 
-async def start(vehicle_id: int) -> dict[str, Any]:
-    """Begin a run. Raises RefreshConflict if one is already active."""
+async def _begin(vehicle_id: int) -> dict[str, Any]:
+    """Claim the single run slot and write the run row. Raises RefreshConflict if it is taken."""
     vehicle = await VehicleService.get_vehicle(vehicle_id)
     if vehicle is None:
         raise LookupError(f"vehicle {vehicle_id} is not tracked")
@@ -300,11 +300,26 @@ async def start(vehicle_id: int) -> dict[str, Any]:
             run_id,
         )
 
-    run = _row(row)
+    return _row(row)
+
+
+async def start(vehicle_id: int) -> dict[str, Any]:
+    """Begin a run in the background. Raises RefreshConflict if one is already active."""
+    run = await _begin(vehicle_id)
     task = asyncio.create_task(_execute(run["id"], vehicle_id))
     _running.add(task)
     task.add_done_callback(_running.discard)
     return run
+
+
+async def run_now(vehicle_id: int) -> Optional[dict[str, Any]]:
+    """Run to completion and return the finished run row (the ingest queue's worker uses this).
+
+    Raises RefreshConflict if a run is already active, LookupError if the vehicle is not tracked.
+    """
+    run = await _begin(vehicle_id)
+    await _execute(run["id"], vehicle_id)
+    return await latest_run(vehicle_id)
 
 
 # --------------------------------------------------------------------------

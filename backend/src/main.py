@@ -17,6 +17,7 @@ from src.corpus.router import router as corpus_router
 from src.db import close_pool
 from src.me.router import router as me_router
 from src.public.router import router as public_router
+from src.refresh import queue as ingest_queue
 from src.refresh.router import router as refresh_router
 from src.symptom_search.router import router as symptom_search_router
 from src.usage.router import router as usage_router
@@ -32,6 +33,9 @@ async def lifespan(app: FastAPI):
     missing DATABASE_URL surfaces as a failed request rather than a failed
     startup, and there is no second store to connect to any more.
     """
+    if not get_settings().read_only:
+        # Cars queued before a restart or a deploy are picked up again here.
+        ingest_queue.ensure_worker()
     yield
     await close_pool()
 

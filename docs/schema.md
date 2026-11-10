@@ -310,6 +310,11 @@ Five tables sit beside the corpus. None of them changes `communications`,
 - `bulletin_reads` (migration 0016) is one row per (user, `nhtsa_id`) the user has read,
   keyed on the latest revision of a family so a new revision arrives unread; it drives
   the `unread` and `newThisWeek` counts on `GET /api/me`.
+- `ingest_queue` (migration 0017) is the list of cars waiting to be read after a user added
+  them: one row per vehicle, oldest first, with `attempts` and `last_error`. A background
+  worker inside the API (`src/refresh/queue.py`) reads them one at a time and stops when the
+  list is empty; it starts again on the next add or the next start of the API. A read that
+  fails three times stays in the table and is left to the nightly run.
 
 ## Alerts (migration 0015)
 
