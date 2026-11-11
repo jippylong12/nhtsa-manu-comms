@@ -268,3 +268,126 @@ async def test_a_still_documentless_bulletin_stays_summary_only(conn, no_pacing)
     assert (row["status"], row["status_reason"]) == ("processed", _SUMMARY_ONLY)
     assert row["processed_at"] is not None
     assert docs == 0
+
+
+# --- which links are news for the alert email (migration 0021) --------------------------
+
+
+async def _flags(conn, vehicle_id) -> dict[str, bool]:
+    return {
+        r["nhtsa_id"]: r["alert_pending"]
+        for r in await conn.fetch(
+            """
+            SELECT c.nhtsa_id, cv.alert_pending FROM communications c
+            JOIN communication_vehicles cv ON cv.communication_id = c.id
+            WHERE cv.vehicle_id = $1
+            """,
+            vehicle_id,
+        )
+    }
+
+
+async def _scanned(conn, vehicle_id) -> None:
+    await conn.execute(
+        "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, $2, 'e1')",
+        vehicle_id,
+        _WIN,
+    )
+
+
+async def _first_synced(conn, vehicle_id):
+    return await conn.fetchval("SELECT first_synced_at FROM vehicles WHERE id = $1", vehicle_id)
+
+
+@pytest.mark.asyncio
+async def test_a_cars_first_sync_is_history_and_a_bulletin_that_arrives_later_is_news(
+    conn, no_pacing
+):
+    vehicle = await _seed(conn)
+    await _scanned(conn, vehicle["id"])
+    client = _FakeClient({900001: _detail("900001"), 900002: _detail("900002")})
+
+    await sync_job.sync_vehicle(conn, client, vehicle)
+
+    assert await _flags(conn, vehicle["id"]) == {"900001": False, "900002": False, "900003": False}
+    assert await _first_synced(conn, vehicle["id"]) is not None
+
+    # NHTSA publishes a fourth bulletin; the next night's scan lists it.
+    await conn.execute(
+        "INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, summary, source_window) "
+        "VALUES ($1, '900004', 'concise d', $2)",
+        vehicle["id"],
+        _WIN,
+    )
+    await sync_job.sync_vehicle(conn, _FakeClient({900004: _detail("900004")}), vehicle)
+
+    flags = await _flags(conn, vehicle["id"])
+    assert flags["900004"] is True
+    assert [nid for nid, news in flags.items() if news] == ["900004"]
+
+
+@pytest.mark.asyncio
+async def test_a_first_sync_with_a_failed_fetch_is_not_finished_so_the_rest_is_still_history(
+    conn, no_pacing
+):
+    vehicle = await _seed(conn)
+    await _scanned(conn, vehicle["id"])
+
+    await sync_job.sync_vehicle(conn, _FakeClient({900001: _detail("900001"), 900002: None}), vehicle)
+    assert await _first_synced(conn, vehicle["id"]) is None
+
+    await sync_job.sync_vehicle(conn, _FakeClient({900002: _detail("900002")}), vehicle)
+    assert (await _flags(conn, vehicle["id"]))["900002"] is False
+    assert await _first_synced(conn, vehicle["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_car_not_scanned_yet_or_synced_with_a_cap_is_not_marked_as_synced(conn, no_pacing):
+    vehicle = await _seed(conn)
+    full = {900001: _detail("900001"), 900002: _detail("900002")}
+
+    await sync_job.sync_vehicle(conn, _FakeClient(full), vehicle)  # no vehicle_scans row
+    assert await _first_synced(conn, vehicle["id"]) is None
+
+    await _scanned(conn, vehicle["id"])
+    await sync_job.sync_vehicle(conn, _FakeClient(full), vehicle, limit=1)
+    assert await _first_synced(conn, vehicle["id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_recheck_of_a_summary_only_bulletin_does_not_hold_the_first_sync_back(
+    conn, no_pacing
+):
+    vehicle = await _seed(conn)
+    await _scanned(conn, vehicle["id"])
+    # 900003 is stored already, without a document: sync asks NHTSA for it again every run.
+    await conn.execute(
+        "UPDATE communications SET status_reason = $1 WHERE nhtsa_id = '900003'",
+        sync_job.SUMMARY_ONLY_REASON,
+    )
+    client = _FakeClient({900001: _detail("900001"), 900002: _detail("900002"), 900003: None})
+
+    stats = await sync_job.sync_vehicle(conn, client, vehicle)
+
+    assert stats.fetch_failures == 1 and stats.rechecked == 1
+    assert await _first_synced(conn, vehicle["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_bulletin_nhtsa_never_serves_stops_holding_the_first_sync_back_after_days(
+    conn, no_pacing
+):
+    vehicle = await _seed(conn)
+    await _scanned(conn, vehicle["id"])
+    served = {900001: _detail("900001"), 900002: None}  # 900002 is listed but never served
+
+    await sync_job.sync_vehicle(conn, _FakeClient(served), vehicle)
+    assert await _first_synced(conn, vehicle["id"]) is None
+
+    await conn.execute(
+        "UPDATE communication_vehicles SET first_seen_at = now() - interval '4 days' "
+        "WHERE vehicle_id = $1",
+        vehicle["id"],
+    )
+    await sync_job.sync_vehicle(conn, _FakeClient(served), vehicle)
+    assert await _first_synced(conn, vehicle["id"]) is not None

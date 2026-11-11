@@ -61,16 +61,28 @@ async def make_user(conn, tag, *, admin=False, subscription=None):
     return uid, f"{tag}@alerts.example.test"
 
 
-async def make_vehicle(conn, user_id, model):
+LONG_AGO = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+
+async def make_vehicle(conn, user_id, model, *, ready=LONG_AGO):
+    """A car on the account. By default we read it long ago; `ready=None` is a car whose
+    first read is still to finish (the alert pass marks it once nothing is waiting)."""
     vid = await conn.fetchval(
-        "INSERT INTO vehicles (year, make, model) VALUES (2099, 'TESTMAKE', $1) RETURNING id",
+        "INSERT INTO vehicles (year, make, model, first_synced_at, ready_at) "
+        "VALUES (2099, 'TESTMAKE', $1, $2, $3) RETURNING id",
         model,
+        LONG_AGO,
+        ready,
     )
     await conn.execute("INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2)", user_id, vid)
     return vid
 
 
-async def make_comm(conn, vehicle_id, nhtsa_id, hours, *, number=None, severity="small", summary=None):
+async def make_comm(
+    conn, vehicle_id, nhtsa_id, hours, *, number=None, severity="small", summary=None, news=True
+):
+    """A processed bulletin linked to the car. `news=False` is the car's history: a bulletin
+    we read for the first time that NHTSA published before the car's first sync."""
     cid = await conn.fetchval(
         """
         INSERT INTO communications
@@ -93,9 +105,11 @@ async def make_comm(conn, vehicle_id, nhtsa_id, hours, *, number=None, severity=
         f"LLM summary {nhtsa_id}",
     )
     await conn.execute(
-        "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1, $2)",
+        "INSERT INTO communication_vehicles (communication_id, vehicle_id, alert_pending) "
+        "VALUES ($1, $2, $3)",
         cid,
         vehicle_id,
+        news,
     )
     return cid
 
@@ -155,15 +169,19 @@ async def test_nothing_new_sends_nothing_and_leaves_the_watermark(conn, mailbox)
 
 
 @pytest.mark.parametrize("status", ["canceled", "past_due"])
-async def test_a_subscriber_whose_subscription_is_not_active_gets_nothing(conn, mailbox, status):
+async def test_a_subscriber_whose_subscription_is_not_active_is_a_free_account_again(
+    conn, mailbox, status
+):
     uid, email = await make_user(conn, "lapsed", subscription=status)
     vid = await make_vehicle(conn, uid, "ALERTLAPSED")
-    await make_comm(conn, vid, "ALERT-L1", 1)
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-L1", 1, summary="x")
 
-    summary = await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
 
-    assert mailbox.to(email) == []
-    assert summary.outcomes == []
+    [mail] = mailbox.to(email)
+    assert "Unlock now for $3" in mail["html"]
+    assert "See if your car has this" not in mail["html"]  # nothing in full
 
 
 async def test_an_unsubscribed_user_gets_nothing(conn, mailbox):
@@ -237,20 +255,19 @@ async def test_a_new_subscriber_whose_cars_only_have_older_bulletins_gets_no_ema
 async def test_a_car_first_processed_after_the_subscription_is_now_ready_once(conn, mailbox):
     uid, email = await make_user(conn, "newcar", subscription="active")
     old_car = await make_vehicle(conn, uid, "ALERTOLDCAR")
-    new_car = await make_vehicle(conn, uid, "ALERTNEWCAR")
+    new_car = await make_vehicle(conn, uid, "ALERTNEWCAR", ready=None)
     await subscribe_at(conn, uid, BASE + timedelta(hours=10))
     await make_comm(conn, old_car, "ALERT-NC-OLD", 2, number="NC1")
     await make_comm(conn, old_car, "ALERT-NC-OLD2", 30, number="NC2")  # old car, new news
-    await make_comm(conn, new_car, "ALERT-NC-NEW", 25, number="NC3")  # car ready after T
+    await make_comm(conn, new_car, "ALERT-NC-NEW", 25, number="NC3", news=False)
 
     await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
 
     [mail] = mailbox.to(email)
     # Only the car that became ready is under "Now ready"; the old car is just news.
-    ready = mail["text"].split("== Now ready ==")[1].split("\n\n")[0]
-    assert f"/app/vehicles/{new_car}" in ready
-    assert f"/app/vehicles/{old_car}" not in ready
-    assert "Now ready" in mail["html"]
+    assert "Alertnewcar (now ready) ==" in mail["text"]
+    assert "Alertoldcar (now ready)" not in mail["text"]
+    assert mail["html"].count("Now ready") == 1
 
 
 async def test_an_admin_without_a_subscription_is_baselined_silently_on_the_first_pass(
@@ -316,17 +333,19 @@ async def test_a_car_processed_for_the_first_time_shows_under_now_ready_exactly_
     conn, mailbox
 ):
     uid, email = await make_user(conn, "ready", subscription="active")
-    vid = await make_vehicle(conn, uid, "ALERTREADY")
+    vid = await make_vehicle(conn, uid, "ALERTREADY", ready=None)
     await set_watermark(conn, uid, BASE)
-    await make_comm(conn, vid, "ALERT-R1", 1, number="RD1")
-    await make_comm(conn, vid, "ALERT-R2", 2, number="RD2")
+    await make_comm(conn, vid, "ALERT-R1", 1, number="RD1", news=False)
+    await make_comm(conn, vid, "ALERT-R2", 2, number="RD2", news=False)
 
     first = await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
-    await make_comm(conn, vid, "ALERT-R3", 9, number="RD3")
-    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+    await make_comm(conn, vid, "ALERT-R3", 31 * 24, number="RD3")  # arrives after the pass
+    await A.run_alerts(
+        send=True, generated_at=RUN_AT + timedelta(days=2), only_user_id=uid, conn=conn
+    )
 
     first_mail, second_mail = mailbox.to(email)
-    assert "Now ready" in first_mail["html"] and "Now ready" in first_mail["text"]
+    assert "Now ready" in first_mail["html"] and "(now ready)" in first_mail["text"]
     assert f"https://app.example.test/app/vehicles/{vid}" in first_mail["html"]
     assert outcome_for(first, uid).ready_vehicles == 1
     assert "Now ready" not in second_mail["html"]
@@ -516,7 +535,7 @@ def test_the_unsubscribe_link_and_subscription_footer_are_in_both_parts():
 
     for body in (A.render_html(alert, UNSUB), A.render_text(alert, UNSUB)):
         assert UNSUB in body
-        assert "You get this because you subscribe at" in body
+        assert "You get this because you have a car saved at" in body
 
 
 def test_an_alert_with_nothing_in_it_does_not_claim_anything_new():
@@ -650,3 +669,345 @@ def test_one_car_ready_is_named_in_the_headline_as_in_the_subject():
 
     assert "Your 2023 Toyota RAV4 is ready to read" in A.render_html(alert, UNSUB)
     assert A.subject_for(alert) == "Your 2023 Toyota RAV4 is ready to read"
+
+
+# --- "new" is a flag set by sync, cleared once announced -------------------------------
+
+
+async def pending(conn, vehicle_id):
+    return await conn.fetchval(
+        "SELECT count(*) FROM communication_vehicles WHERE vehicle_id = $1 AND alert_pending",
+        vehicle_id,
+    )
+
+
+async def test_a_cars_history_read_for_the_first_time_is_never_listed_as_new(conn, mailbox):
+    # The 52-bulletin email: a car on the account whose old bulletins we only just read.
+    uid, email = await make_user(conn, "history", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTHISTORY")
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-H0", -5, number="H0", news=False)  # read before: not ready
+    for n in range(1, 6):
+        await make_comm(conn, vid, f"ALERT-H{n}", n, number=f"H{n}", news=False)
+
+    summary = await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    assert mailbox.to(email) == []
+    assert outcome_for(summary, uid).outcome == "skipped-no-news"
+
+
+async def test_a_car_that_became_ready_says_how_many_were_found_and_previews_one_two_three(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "readyline", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTREADYLINE", ready=None)
+    await set_watermark(conn, uid, BASE)
+    n = 0
+    for severity, how_many in (("serious", 3), ("medium", 4), ("small", 5)):
+        for _ in range(how_many):
+            n += 1
+            await make_comm(
+                conn, vid, f"ALERT-RL{n}", n, number=f"RL{n}", severity=severity, news=False
+            )
+
+    first = await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    await A.run_alerts(send=True, generated_at=RUN_AT + timedelta(days=1), conn=conn)
+
+    [mail] = mailbox.to(email)  # once: the ready email moved the watermark
+    assert "is ready to read" in mail["subject"]
+    assert "We found 12 bulletins: 3 serious, 4 medium, 5 small." in mail["text"]
+    assert "We found 12 bulletins" in mail["html"]
+    assert mail["html"].count("LLM summary ALERT-RL") == 6  # 1 serious, 2 medium, 3 small
+    assert "See all 12 in the app" in mail["html"]
+    assert outcome_for(first, uid).items == 0
+    assert outcome_for(first, uid).ready_vehicles == 1
+
+
+async def test_a_car_is_not_ready_while_any_of_its_bulletins_is_still_waiting(conn, mailbox):
+    uid, email = await make_user(conn, "waiting", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTWAITING", ready=None)
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-W1", 1, number="W1", news=False)
+    await make_comm(conn, vid, "ALERT-W2", 2, number="W2", news=False)
+    await conn.execute(
+        "UPDATE communications SET status = 'pending', processed_at = NULL "
+        "WHERE nhtsa_id = 'ALERT-W2'"
+    )
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    assert mailbox.to(email) == []
+
+    await conn.execute(
+        "UPDATE communications SET status = 'processed', processed_at = $1 "
+        "WHERE nhtsa_id = 'ALERT-W2'",
+        BASE + timedelta(hours=5),
+    )
+    await A.run_alerts(send=True, generated_at=RUN_AT + timedelta(days=1), conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "We found 2 bulletins" in mail["html"]
+
+
+async def test_two_free_accounts_waiting_on_one_car_are_each_told_once_with_their_sample(
+    conn, mailbox
+):
+    one, one_email = await make_user(conn, "freeone")
+    two, two_email = await make_user(conn, "freetwo")
+    vid = await make_vehicle(conn, one, "ALERTFREEWAIT", ready=None)
+    await conn.execute("INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2)", two, vid)
+    for uid in (one, two):
+        await set_watermark(conn, uid, BASE)
+    for n in range(1, 6):
+        await make_comm(conn, vid, f"ALERT-FW{n}", n, number=f"FW{n}", news=False)
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    await A.run_alerts(send=True, generated_at=RUN_AT + timedelta(days=1), conn=conn)
+
+    for email in (one_email, two_email):
+        [mail] = mailbox.to(email)
+        assert "We found 5 bulletins" in mail["html"]
+        assert mail["html"].count("LLM summary ALERT-FW") == 3  # the free sample: 3 small
+        assert "Unlock now for $3" in mail["html"]
+        assert "See all 5 in the app" not in mail["html"]
+
+
+async def test_a_free_account_that_adds_a_car_we_already_read_gets_no_email(conn, mailbox):
+    uid, email = await make_user(conn, "freelate")
+    vid = await make_vehicle(conn, uid, "ALERTFREELATE")  # read long before the account
+    for n in range(1, 4):
+        await make_comm(conn, vid, f"ALERT-FL{n}", n, number=f"FL{n}", news=False)
+
+    summary = await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    assert mailbox.to(email) == []
+    assert outcome_for(summary, uid).outcome == "skipped-no-news"
+
+
+async def test_a_free_account_gets_new_bulletins_as_opening_words_and_an_unlock_button(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "freeteaser")
+    vid = await make_vehicle(conn, uid, "ALERTFREETEASER")
+    await set_watermark(conn, uid, BASE)
+    secret = "the tail of the summary that only an unlocked car may read"
+    await make_comm(conn, vid, "ALERT-FT1", 4, number="FT1", severity="serious")
+    await conn.execute(
+        "UPDATE comm_documents SET llm_summary = $1 WHERE url LIKE '%ALERT-FT1.pdf'",
+        "The brake booster can lose vacuum in cold weather which makes the pedal feel hard "
+        "and lengthens stopping distance; " + secret,
+    )
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert mail["subject"].startswith("1 new bulletin for your")
+    for body in (mail["html"], mail["text"]):
+        assert "The brake booster can lose vacuum" in body
+        assert "lengthens stopping distance" not in body  # one line, no more
+        assert secret not in body
+        assert "ALERT-FT1.pdf" not in body  # no document link
+        assert f"/app/vehicles/{vid}?b=" not in body  # no way into the bulletin itself
+    assert "We found 1 new bulletin" in mail["html"]
+    assert "Unlock now for $3" in mail["html"]
+    assert await pending(conn, vid) == 0
+
+
+async def test_a_paying_account_sees_every_new_bulletin_in_full_with_nothing_to_click_through(
+    conn, mailbox
+):
+    uid, email = await make_user(conn, "allnew", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTALLNEW")
+    await set_watermark(conn, uid, BASE)
+    for n in range(1, 8):
+        await make_comm(conn, vid, f"ALERT-CP{n}", n, number=f"CP{n}", severity="small")
+
+    summary = await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert mail["subject"].startswith("7 new bulletins for your")
+    assert "We found 7 new bulletins" in mail["html"]
+    assert mail["html"].count("LLM summary ALERT-CP") == 7
+    assert "See all" not in mail["html"] and "Unlock now" not in mail["html"]
+    assert outcome_for(summary, uid).items == 7
+    assert await pending(conn, vid) == 0
+
+
+async def test_a_free_account_sees_at_most_the_preview_of_new_bulletins(conn, mailbox):
+    uid, email = await make_user(conn, "freecap")
+    vid = await make_vehicle(conn, uid, "ALERTFREECAP")
+    await set_watermark(conn, uid, BASE)
+    for n in range(1, 8):
+        await make_comm(conn, vid, f"ALERT-FC{n}", n, number=f"FC{n}", severity="small")
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "We found 7 new bulletins" in mail["html"]
+    assert mail["html"].count("LLM summary ALERT-FC") == 3
+    assert "Unlock now for $3" in mail["html"]
+
+
+async def test_a_new_bulletin_goes_to_every_subscriber_of_the_car_once_and_is_marked(
+    conn, mailbox
+):
+    one, one_email = await make_user(conn, "sharedone", subscription="active")
+    two, two_email = await make_user(conn, "sharedtwo", subscription="active")
+    vid = await make_vehicle(conn, one, "ALERTSHARED")
+    await conn.execute("INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2)", two, vid)
+    for uid in (one, two):
+        await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-S0", -5, number="S0", news=False)
+    await make_comm(conn, vid, "ALERT-S1", 4, number="S1")
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    assert len(mailbox.to(one_email)) == 1 and len(mailbox.to(two_email)) == 1
+    assert "LLM summary ALERT-S1" in mailbox.to(one_email)[0]["html"]
+    assert await pending(conn, vid) == 0
+
+    # The bulletin is read again later (processed_at moves): nobody is mailed twice.
+    await conn.execute(
+        "UPDATE communications SET processed_at = $1 WHERE nhtsa_id = 'ALERT-S1'",
+        BASE + timedelta(days=10),
+    )
+    await A.run_alerts(send=True, generated_at=RUN_AT + timedelta(days=1), conn=conn)
+    assert len(mailbox.to(one_email)) == 1 and len(mailbox.to(two_email)) == 1
+
+
+async def test_a_failed_send_keeps_the_flag_and_only_the_failed_user_is_mailed_next_run(
+    conn, mailbox
+):
+    bad, bad_email = await make_user(conn, "flagbad", subscription="active")
+    good, good_email = await make_user(conn, "flaggood", subscription="active")
+    vid = await make_vehicle(conn, bad, "ALERTFLAG")
+    await conn.execute("INSERT INTO user_vehicles (user_id, vehicle_id) VALUES ($1, $2)", good, vid)
+    for uid in (bad, good):
+        await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-F0", -5, number="F0", news=False)
+    await make_comm(conn, vid, "ALERT-F1", 4, number="F1")
+    mailbox.fail_for = {bad_email}
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    assert await pending(conn, vid) == 1
+    mailbox.fail_for = set()
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    assert len(mailbox.to(good_email)) == 1
+    assert len(mailbox.to(bad_email)) == 1
+    assert await pending(conn, vid) == 0
+
+
+async def test_a_pass_for_one_user_and_a_dry_run_leave_the_flag_for_everyone_else(conn, mailbox):
+    uid, _ = await make_user(conn, "scoped", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTSCOPED")
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-SC1", 4, number="SC1")
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, only_user_id=uid, conn=conn)
+    assert await pending(conn, vid) == 1
+
+
+async def test_a_bulletin_still_being_read_keeps_its_flag_until_it_is_ready(conn, mailbox):
+    uid, email = await make_user(conn, "unread", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTUNREAD")
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-U0", -5, number="U0", news=False)
+    await make_comm(conn, vid, "ALERT-U1", 4, number="U1")
+    await conn.execute(
+        "UPDATE communications SET status = 'pending', processed_at = NULL "
+        "WHERE nhtsa_id = 'ALERT-U1'"
+    )
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+
+    assert mailbox.to(email) == []
+    assert await pending(conn, vid) == 1
+
+
+# --- review fixes -----------------------------------------------------------------------
+
+
+async def test_a_bulletin_read_long_ago_and_linked_to_this_car_today_is_still_news(
+    conn, mailbox
+):
+    # NHTSA amends an old bulletin to cover another car: it was processed before every
+    # holder's watermark, but it only became this car's news when sync linked it.
+    uid, email = await make_user(conn, "relinked", subscription="active")
+    vid = await make_vehicle(conn, uid, "ALERTRELINKED")
+    await set_watermark(conn, uid, BASE)
+    await make_comm(conn, vid, "ALERT-RK1", -48, number="RK1")
+    linked_at = BASE + timedelta(hours=4)
+    await conn.execute(
+        "UPDATE communication_vehicles SET first_seen_at = $1 WHERE vehicle_id = $2",
+        linked_at,
+        vid,
+    )
+
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    await A.run_alerts(send=True, generated_at=RUN_AT + timedelta(days=1), conn=conn)
+
+    [mail] = mailbox.to(email)
+    assert "LLM summary ALERT-RK1" in mail["html"]
+    assert await watermark(conn, uid) == linked_at
+
+
+def _migration(name: str) -> str:
+    import pathlib
+
+    return (pathlib.Path(__file__).parent.parent / "migrations" / name).read_text()
+
+
+async def test_migration_0022_never_announces_a_car_people_already_read_as_ready(
+    conn, mailbox
+):
+    # A car read long ago with one bulletin still waiting when the migration runs, held by
+    # an account whose alert_state row has no watermark yet.
+    uid, email = await make_user(conn, "migrated")
+    vid = await make_vehicle(conn, uid, "ALERTMIGRATED", ready=None)
+    await conn.execute("INSERT INTO alert_state (user_id) VALUES ($1)", uid)
+    await make_comm(conn, vid, "ALERT-MG1", -48, number="MG1", news=False)
+    await make_comm(conn, vid, "ALERT-MG2", -47, number="MG2", news=False)
+    await conn.execute(
+        "UPDATE communications SET status = 'pending', processed_at = NULL "
+        "WHERE nhtsa_id = 'ALERT-MG2'"
+    )
+    await conn.execute(
+        "UPDATE communications SET processed_at = $1 WHERE nhtsa_id = 'ALERT-MG1'", LONG_AGO
+    )
+
+    await conn.execute(_migration("0022_alert_ready_and_free.sql"))
+
+    assert await conn.fetchval("SELECT ready_at FROM vehicles WHERE id = $1", vid) == LONG_AGO
+    assert await watermark(conn, uid) is not None
+    await conn.execute(
+        "UPDATE communications SET status = 'processed', processed_at = $1 "
+        "WHERE nhtsa_id = 'ALERT-MG2'",
+        BASE,
+    )
+    await A.run_alerts(send=True, generated_at=RUN_AT, conn=conn)
+    assert mailbox.to(email) == []
+
+
+async def test_migration_0021_leaves_a_car_with_an_unlinked_scanned_bulletin_unsynced(conn):
+    uid, _ = await make_user(conn, "halfsynced")
+    vid = await make_vehicle(conn, uid, "ALERTHALFSYNCED", ready=None)
+    await conn.execute("UPDATE vehicles SET first_synced_at = NULL WHERE id = $1", vid)
+    await conn.execute(
+        "INSERT INTO vehicle_scans (vehicle_id, source_window, etag) VALUES ($1, 'TESTWIN', 'e')",
+        vid,
+    )
+    await make_comm(conn, vid, "ALERT-HS1", 1, number="HS1", news=False)
+    await conn.executemany(
+        "INSERT INTO vehicle_bulletins (vehicle_id, nhtsa_id, summary, source_window) "
+        "VALUES ($1, $2, '', 'TESTWIN')",
+        [(vid, "ALERT-HS1"), (vid, "ALERT-HS2")],  # HS2 was scanned but never fetched
+    )
+
+    await conn.execute(_migration("0021_alert_new_only.sql"))
+    assert await conn.fetchval("SELECT first_synced_at FROM vehicles WHERE id = $1", vid) is None
+
+    await conn.execute("DELETE FROM vehicle_bulletins WHERE nhtsa_id = 'ALERT-HS2'")
+    await conn.execute(_migration("0021_alert_new_only.sql"))
+    assert (
+        await conn.fetchval("SELECT first_synced_at FROM vehicles WHERE id = $1", vid) is not None
+    )

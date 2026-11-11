@@ -1,18 +1,32 @@
-"""Per-user alerts: one email a day when something new landed for the user's cars.
+"""Per-user alerts: an email only when there is something to say about the user's cars.
 
-Generalises the single-recipient digest. Each recipient has an `alert_state` row
-holding a watermark; the alert lists communications processed after it, folded to
-the current revision of each bulletin and grouped by vehicle. The watermark only
-advances after a send succeeds, so a failed send repeats exactly the same items on
-the next run and one user's failure never stops the others.
+Two kinds of news, one format per car ("we found X bulletins", a serious / medium / small
+breakdown, then a preview of at most 1 serious, 2 medium and 3 small):
 
-A user with no watermark yet is not "everything is new": the baseline is the creation of
-their earliest active subscription, or, for an admin with no subscription, the first pass
-that sees them (that pass sends nothing and stores the moment as their watermark). So a
-first alert only carries news that arrived after the user became a recipient.
+* Ready. A car's first read finished (`vehicles.ready_at`, set once by a sending pass when
+  the car's first sync is done and nothing linked to it is still waiting to be read). Every
+  account that was waiting on the car is told once, free or paid. An account that adds a car
+  we already read gets no email: it is ready when they add it.
+* New. Sync sets `communication_vehicles.alert_pending` on a bulletin it links to a car
+  whose first sync is already behind it (a car's history, read for the first time, is never
+  flagged). A sending pass mails every flagged, processed bulletin to the accounts that hold
+  the car, then clears the flags, so a bulletin is announced once and a day with nothing new
+  sends nothing. Re-reading a bulletin later never announces it again.
+
+What an account sees depends on what it may read. Full access (a subscription place, an
+unlock, an admin) gets the ready preview in full and every new bulletin in full, with
+nothing to click through for. A free account gets its free sample in
+full in the ready email, and in the new email only the opening words of each bulletin with
+a button to unlock the car. A subscriber's car past the plan's count is left out.
+
+Each recipient has an `alert_state` watermark (the newest moment already mailed). It only
+advances after a send succeeds, so when one user's send fails the flags for that user's cars
+stay set, the next run repeats exactly their items, and the users who were already mailed
+are not mailed twice. An account with no watermark starts from when it subscribed, else
+from when it was created; an admin with neither is baselined silently on the first pass.
 
 A dry run (`send=False`) renders one HTML file per user with news and never calls
-Resend or moves a watermark.
+Resend, moves a watermark, marks a car ready or clears a flag.
 """
 
 import asyncio
@@ -36,6 +50,12 @@ log = logging.getLogger("alerts")
 
 SEVERITY_LABELS = {"serious": "Serious", "medium": "Medium", "small": "Small"}
 SEVERITY_COLORS = {"serious": "#ef4444", "medium": "#eab308", "small": "#22c55e"}
+# How many bulletins of each severity one car shows in an email; the rest are a count and
+# a button into the app. The same numbers as the free sample (`SAMPLE_QUOTA` in src/me).
+PREVIEW_QUOTA = {"serious": 1, "medium": 2, "small": 3}
+UNLOCK_PRICE = "$3"
+# A locked bulletin shows this many characters of its summary, cut at a word.
+TEASER_CHARS = 110
 
 
 @dataclass
@@ -55,17 +75,42 @@ class AlertItem:
 
 @dataclass
 class VehicleGroup:
+    """One car's section of an email: the bulletins shown, and the totals behind them."""
+
     label: str
     items: list[AlertItem] = field(default_factory=list)
     # 0 when unknown: the email then leaves out the links into the app for this car.
     vehicle_id: int = 0
+    # Every bulletin the section is about, by severity; `items` is only the preview.
+    # None means the preview is everything.
+    counts: Optional[dict[str, int]] = None
+    # The account reads this car as a free sample: no bulletin beyond the sample in full.
+    locked: bool = False
+
+    @property
+    def total(self) -> int:
+        return sum(self.counts.values()) if self.counts is not None else len(self.items)
+
+    @property
+    def breakdown(self) -> dict[str, int]:
+        if self.counts is not None:
+            return self.counts
+        found = dict.fromkeys(SEVERITY_LABELS, 0)
+        for it in self.items:
+            found[it.severity if it.severity in found else "small"] += 1
+        return found
 
 
 @dataclass
 class ReadyVehicle:
+    """A car whose first read just finished: the total found and a preview of it."""
+
     vehicle_id: int
     label: str
     count: int
+    counts: Optional[dict[str, int]] = None
+    items: list[AlertItem] = field(default_factory=list)
+    locked: bool = False
 
 
 @dataclass
@@ -74,11 +119,12 @@ class UserAlert:
     since: Optional[datetime]
     groups: list[VehicleGroup]
     ready_vehicles: list[ReadyVehicle]
-    watermark: Optional[datetime]  # max processed_at seen
+    watermark: Optional[datetime]  # the newest moment this alert covers
 
     @property
     def total_items(self) -> int:
-        return sum(len(g.items) for g in self.groups)
+        """New bulletins across the user's cars (all of them, not only the ones shown)."""
+        return sum(g.total for g in self.groups)
 
     @property
     def has_news(self) -> bool:
@@ -106,25 +152,30 @@ class AlertRunSummary:
 
 
 async def recipients(conn, only_user_id: Optional[int] = None) -> list[dict]:
-    """Subscribers with an active subscription, plus every admin; minus unsubscribed.
+    """Every account with a car, plus subscribers and admins; minus unsubscribed.
 
     Creates the user's `alert_state` row (with a fresh token) on first use. Each dict
-    carries id, email, unsubscribe_token, last_watermark and subscribed_since (when the
-    user's earliest active subscription was created; None for an admin without one).
+    carries id, email, is_admin, created_at, unsubscribe_token, last_watermark and
+    subscribed_since (when the user's earliest active subscription was created, else None).
     """
-    await conn.execute(
-        """
-        INSERT INTO alert_state (user_id)
-        SELECT u.id FROM users u
-        WHERE u.is_admin OR EXISTS (
+    eligible = """
+        u.is_admin
+        OR EXISTS (SELECT 1 FROM user_vehicles uv WHERE uv.user_id = u.id)
+        OR EXISTS (
             SELECT 1 FROM entitlements e
             WHERE e.user_id = u.id AND e.kind = 'subscription' AND e.status = 'active')
+    """
+    await conn.execute(
+        f"""
+        INSERT INTO alert_state (user_id)
+        SELECT u.id FROM users u WHERE {eligible}
         ON CONFLICT (user_id) DO NOTHING
         """
     )
     rows = await conn.fetch(
-        """
-        SELECT u.id, u.email, u.display_name, a.unsubscribe_token, a.last_watermark,
+        f"""
+        SELECT u.id, u.email, u.display_name, u.is_admin, u.created_at,
+               a.unsubscribe_token, a.last_watermark,
                (SELECT min(e.created_at) FROM entitlements e
                 WHERE e.user_id = u.id AND e.kind = 'subscription' AND e.status = 'active'
                ) AS subscribed_since
@@ -132,9 +183,7 @@ async def recipients(conn, only_user_id: Optional[int] = None) -> list[dict]:
         JOIN alert_state a ON a.user_id = u.id
         WHERE a.unsubscribed_at IS NULL
           AND ($1::bigint IS NULL OR u.id = $1)
-          AND (u.is_admin OR EXISTS (
-              SELECT 1 FROM entitlements e
-              WHERE e.user_id = u.id AND e.kind = 'subscription' AND e.status = 'active'))
+          AND ({eligible})
         ORDER BY u.id
         """,
         only_user_id,
@@ -153,106 +202,154 @@ def _stem(row) -> str:
 
 
 def baseline_for(user: dict) -> Optional[datetime]:
-    """Where a user's news starts: their watermark, else when they subscribed, else None.
+    """Where a user's news starts: their watermark, else when they subscribed, else when
+    the account was created.
 
     None means an admin with no watermark and no subscription: the caller baselines them
     at the moment of the pass instead of treating their history as news.
     """
-    return user["last_watermark"] or user.get("subscribed_since")
+    known = user["last_watermark"] or user.get("subscribed_since")
+    if known or user.get("is_admin"):
+        return known
+    return user.get("created_at")
+
+
+_BULLETINS_SQL = """
+    SELECT
+        c.nhtsa_id, c.communication_number, c.communication_type, c.communication_date,
+        c.summary, c.severity, c.processed_at,
+        -- When this became news for this car: read, and linked to the car. A bulletin
+        -- read long ago for one car can be linked to another car today.
+        greatest(c.processed_at, cv.first_seen_at) AS news_at,
+        v.id AS vehicle_id, v.year, v.make, v.model, v.ready_at,
+        (SELECT d.llm_summary FROM comm_documents d
+         WHERE d.communication_id = c.id AND d.llm_summary IS NOT NULL
+         ORDER BY d.id LIMIT 1) AS llm_summary,
+        (SELECT d.url FROM comm_documents d
+         WHERE d.communication_id = c.id ORDER BY d.id LIMIT 1) AS url,
+        (SELECT coalesce(array_agg(DISTINCT s), '{}')
+         FROM comm_documents d, unnest(d.symptoms) s
+         WHERE d.communication_id = c.id) AS symptoms,
+        (SELECT coalesce(array_agg(DISTINCT s), '{}')
+         FROM comm_documents d, unnest(d.systems) s
+         WHERE d.communication_id = c.id) AS systems
+    FROM vehicles v
+    JOIN communication_vehicles cv ON cv.vehicle_id = v.id
+    JOIN communications c ON c.id = cv.communication_id
+    WHERE c.status = 'processed' AND c.processed_at IS NOT NULL
+"""
+
+
+def _fold(rows: list) -> list[tuple]:
+    """The current revision of each bulletin family with how many older ones it replaces,
+    newest first."""
+    by_stem: dict[str, list] = {}
+    for r in rows:
+        by_stem.setdefault(_stem(r), []).append(r)
+    folded = [(max(m, key=_recency), len(m) - 1) for m in by_stem.values()]
+    folded.sort(key=lambda t: _recency(t[0]), reverse=True)
+    return folded
+
+
+def _section(
+    folded: list[tuple], everything: bool = False
+) -> tuple[dict[str, int], list[AlertItem]]:
+    """A car's totals by severity and the bulletins to show: the newest PREVIEW_QUOTA of
+    each severity, or all of them when `everything`."""
+    counts = dict.fromkeys(SEVERITY_LABELS, 0)
+    items: list[AlertItem] = []
+    for r, superseded in folded:
+        severity = r["severity"] if r["severity"] in counts else "small"
+        counts[severity] += 1
+        if everything or counts[severity] <= PREVIEW_QUOTA[severity]:
+            items.append(
+                AlertItem(
+                    nhtsa_id=r["nhtsa_id"],
+                    severity=severity,
+                    communication_type=r["communication_type"],
+                    communication_date=r["communication_date"],
+                    summary=r["summary"] or "",
+                    llm_summary=r["llm_summary"],
+                    symptoms=list(r["symptoms"]),
+                    systems=list(r["systems"]),
+                    url=r["url"],
+                    superseded_count=superseded,
+                )
+            )
+    return counts, items
 
 
 async def build_for_user(
     conn, user: dict, since: Optional[datetime], generated_at: datetime
 ) -> UserAlert:
-    """Everything processed since `since` for the user's vehicles. Pure read.
+    """What there is to tell the user since `since`. Pure read.
 
-    Only cars the account reads in full: a car past the plan's count (after a move to a
-    smaller plan) is a sample, and an alert would hand out its new bulletins in full.
+    `ready_vehicles`: cars whose first read finished after `since`, with everything found.
+    `groups`: for the user's other cars, the bulletins flagged as new and processed after
+    `since`. A subscriber's car past the plan's count is in neither: it is a sample, and
+    its place in the email belongs to the cars the plan covers.
     """
     linked = await conn.fetch(
         "SELECT vehicle_id FROM user_vehicles WHERE user_id = $1 AND alerts_enabled", user["id"]
     )
-    readable = [
-        r["vehicle_id"]
-        for r in linked
-        if await access_for(conn, user["id"], r["vehicle_id"]) == "full"
-    ]
-    rows = await conn.fetch(
-        """
-        SELECT
-            c.nhtsa_id, c.communication_number, c.communication_type, c.communication_date,
-            c.summary, c.severity, c.processed_at,
-            v.id AS vehicle_id, v.year, v.make, v.model,
-            (SELECT d.llm_summary FROM comm_documents d
-             WHERE d.communication_id = c.id AND d.llm_summary IS NOT NULL
-             ORDER BY d.id LIMIT 1) AS llm_summary,
-            (SELECT d.url FROM comm_documents d
-             WHERE d.communication_id = c.id ORDER BY d.id LIMIT 1) AS url,
-            (SELECT coalesce(array_agg(DISTINCT s), '{}')
-             FROM comm_documents d, unnest(d.symptoms) s
-             WHERE d.communication_id = c.id) AS symptoms,
-            (SELECT coalesce(array_agg(DISTINCT s), '{}')
-             FROM comm_documents d, unnest(d.systems) s
-             WHERE d.communication_id = c.id) AS systems
-        FROM user_vehicles uv
-        JOIN vehicles v ON v.id = uv.vehicle_id
-        JOIN communication_vehicles cv ON cv.vehicle_id = v.id
-        JOIN communications c ON c.id = cv.communication_id
-        WHERE uv.user_id = $1
-          AND uv.alerts_enabled
-          AND uv.vehicle_id = ANY($3::bigint[])
-          AND c.status = 'processed'
-          AND c.processed_at IS NOT NULL
-          AND ($2::timestamptz IS NULL OR c.processed_at > $2)
-        ORDER BY v.year, v.model, c.communication_date DESC NULLS LAST
-        """,
-        user["id"],
+    locked: dict[int, bool] = {}
+    for r in linked:
+        full = await access_for(conn, user["id"], r["vehicle_id"]) == "full"
+        if full or not user.get("subscribed_since"):
+            locked[r["vehicle_id"]] = not full
+    vehicle_ids = list(locked)
+
+    ready_rows = await conn.fetch(
+        _BULLETINS_SQL
+        + " AND v.id = ANY($1::bigint[]) AND v.ready_at IS NOT NULL"
+        " AND ($2::timestamptz IS NULL OR v.ready_at > $2)",
+        vehicle_ids,
         since,
-        readable,
+    )
+    ready_ids = {r["vehicle_id"] for r in ready_rows}
+    new_rows = await conn.fetch(
+        _BULLETINS_SQL
+        + " AND v.id = ANY($1::bigint[]) AND cv.alert_pending"
+        " AND ($2::timestamptz IS NULL OR greatest(c.processed_at, cv.first_seen_at) > $2)",
+        [vid for vid in vehicle_ids if vid not in ready_ids],
+        since,
     )
 
-    # Per vehicle, keep the current revision of each bulletin family and count the rest.
-    families: dict[int, dict[str, list]] = {}
-    labels: dict[int, str] = {}
     watermark = since
-    for r in rows:
-        labels[r["vehicle_id"]] = display_vehicle(r["year"], r["make"], r["model"])
-        families.setdefault(r["vehicle_id"], {}).setdefault(_stem(r), []).append(r)
-        if watermark is None or r["processed_at"] > watermark:
-            watermark = r["processed_at"]
+    by_vehicle: dict[int, list] = {}
+    for r in [*ready_rows, *new_rows]:
+        by_vehicle.setdefault(r["vehicle_id"], []).append(r)
+        seen = r["ready_at"] if r["vehicle_id"] in ready_ids else r["news_at"]
+        if watermark is None or seen > watermark:
+            watermark = seen
 
     groups: list[VehicleGroup] = []
-    for vid, by_stem in families.items():
-        folded = [(max(m, key=_recency), len(m) - 1) for m in by_stem.values()]
-        folded.sort(key=lambda t: _recency(t[0]), reverse=True)
-        groups.append(
-            VehicleGroup(
-                label=labels[vid],
-                vehicle_id=vid,
-                items=[
-                    AlertItem(
-                        nhtsa_id=r["nhtsa_id"],
-                        severity=r["severity"],
-                        communication_type=r["communication_type"],
-                        communication_date=r["communication_date"],
-                        summary=r["summary"] or "",
-                        llm_summary=r["llm_summary"],
-                        symptoms=list(r["symptoms"]),
-                        systems=list(r["systems"]),
-                        url=r["url"],
-                        superseded_count=superseded,
-                    )
-                    for r, superseded in folded
-                ],
+    ready: list[ReadyVehicle] = []
+    for vid, rows in by_vehicle.items():
+        label = display_vehicle(rows[0]["year"], rows[0]["make"], rows[0]["model"])
+        # New bulletins on a car the account may read are shown whole, every one of them:
+        # a paying reader never has to click through for news. A ready car (its whole
+        # history) and a locked car keep the short preview.
+        is_ready = vid in ready_ids
+        counts, items = _section(_fold(rows), everything=not is_ready and not locked[vid])
+        if is_ready:
+            ready.append(
+                ReadyVehicle(
+                    vehicle_id=vid,
+                    label=label,
+                    count=sum(counts.values()),
+                    counts=counts,
+                    items=items,
+                    locked=locked[vid],
+                )
             )
-        )
+        else:
+            groups.append(
+                VehicleGroup(
+                    label=label, vehicle_id=vid, items=items, counts=counts, locked=locked[vid]
+                )
+            )
     groups.sort(key=lambda g: g.label)
-
-    ready = [
-        ReadyVehicle(vehicle_id=vid, label=labels[vid], count=len(by_stem))
-        for vid, by_stem in families.items()
-        if await _first_processed_is_new(conn, vid, since)
-    ]
     ready.sort(key=lambda r: r.label)
 
     return UserAlert(
@@ -264,17 +361,28 @@ async def build_for_user(
     )
 
 
-async def _first_processed_is_new(conn, vehicle_id: int, since: Optional[datetime]) -> bool:
-    """True when the vehicle's earliest processed communication is after `since`."""
-    first = await conn.fetchval(
+async def mark_ready_vehicles(conn, generated_at: datetime) -> int:
+    """Stamp `ready_at` on every car whose first read just finished. Returns how many.
+
+    Finished means the first sync is done, at least one bulletin was read and none linked
+    to the car is still waiting, so the total an email quotes is the whole of it.
+    """
+    result = await conn.execute(
         """
-        SELECT min(c.processed_at)
-        FROM communication_vehicles cv JOIN communications c ON c.id = cv.communication_id
-        WHERE cv.vehicle_id = $1 AND c.status = 'processed' AND c.processed_at IS NOT NULL
+        UPDATE vehicles v SET ready_at = $1
+        WHERE v.ready_at IS NULL AND v.first_synced_at IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM communication_vehicles cv
+              JOIN communications c ON c.id = cv.communication_id
+              WHERE cv.vehicle_id = v.id AND c.status = 'processed')
+          AND NOT EXISTS (
+              SELECT 1 FROM communication_vehicles cv
+              JOIN communications c ON c.id = cv.communication_id
+              WHERE cv.vehicle_id = v.id AND c.status = 'pending')
         """,
-        vehicle_id,
+        generated_at,
     )
-    return first is not None and (since is None or first > since)
+    return int(result.split()[-1])
 
 
 def _safe_link(url: Optional[str]) -> bool:
@@ -302,7 +410,71 @@ def _base_url() -> str:
 
 
 def _footer_line() -> str:
-    return f"You get this because you subscribe at {_base_url()}."
+    return f"You get this because you have a car saved at {_base_url()}."
+
+
+def _opening(text: str) -> str:
+    """The first words of a summary, for a bulletin the account has not unlocked."""
+    text = " ".join((text or "").split())
+    if len(text) <= TEASER_CHARS:
+        return text
+    return text[:TEASER_CHARS].rsplit(" ", 1)[0].rstrip(",;:.") + "\u2026"
+
+
+@dataclass
+class _Section:
+    """One car as the email shows it, whichever kind of news it is."""
+
+    label: str
+    vehicle_id: int
+    ready: bool
+    total: int
+    counts: dict[str, int]
+    items: list[AlertItem]
+    locked: bool
+
+    @property
+    def found(self) -> str:
+        if self.ready:
+            return f"We found {_plural(self.total, 'bulletin')}"
+        return f"We found {_plural(self.total, 'new bulletin')}"
+
+    @property
+    def teaser(self) -> bool:
+        """New bulletins on a car the account has not unlocked: opening words only."""
+        return self.locked and not self.ready
+
+    @property
+    def more(self) -> int:
+        return self.total - len(self.items)
+
+
+def _sections(alert: UserAlert) -> list[_Section]:
+    ready = [
+        _Section(
+            label=rv.label,
+            vehicle_id=rv.vehicle_id,
+            ready=True,
+            total=rv.count,
+            counts=rv.counts or {},
+            items=rv.items,
+            locked=rv.locked,
+        )
+        for rv in alert.ready_vehicles
+    ]
+    new = [
+        _Section(
+            label=g.label,
+            vehicle_id=g.vehicle_id,
+            ready=False,
+            total=g.total,
+            counts=g.breakdown,
+            items=g.items,
+            locked=g.locked,
+        )
+        for g in alert.groups
+    ]
+    return ready + new
 
 
 def _plural(n: int, word: str) -> str:
@@ -331,28 +503,37 @@ def render_text(alert: UserAlert, unsubscribe_url: str) -> str:
     if alert.total_items:
         lines.append(f"{_plural(alert.total_items, 'new bulletin')} for your cars.")
     lines.append("")
-    if alert.ready_vehicles:
-        lines.append("== Now ready ==")
-        for rv in alert.ready_vehicles:
-            lines.append(
-                f"- {rv.label}: {_plural(rv.count, 'bulletin')} {base}/app/vehicles/{rv.vehicle_id}"
-            )
+    for sec in _sections(alert):
+        car_url = f"{base}/app/vehicles/{sec.vehicle_id}" if sec.vehicle_id else ""
+        lines.append(f"== {sec.label}{' (now ready)' if sec.ready else ''} ==")
+        split = ", ".join(
+            f"{n} {SEVERITY_LABELS[sev].lower()}" for sev, n in sec.counts.items() if n
+        )
+        lines.append(f"{sec.found}{': ' + split if split else ''}.")
         lines.append("")
-    for grp in alert.groups:
-        lines.append(f"== {grp.label} ({len(grp.items)}) ==")
-        for it in grp.items:
+        for it in sec.items:
             date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
             label, _ = _severity(it)
             lines.append(f"- [{label}] {date}{_revision_note(it)}")
+            if sec.teaser:
+                lines.append(f"  {_opening(it.llm_summary or it.summary)}")
+                lines.append("")
+                continue
             lines.append(f"  {it.llm_summary or it.summary}")
             if it.systems:
                 lines.append(f"  Systems: {', '.join(it.systems)}")
             if it.symptoms:
                 lines.append(f"  Symptoms: {', '.join(it.symptoms[:5])}")
-            if grp.vehicle_id:
-                lines.append(f"  See if your car has this: {_item_url(base, grp.vehicle_id, it)}")
+            if sec.vehicle_id:
+                lines.append(f"  See if your car has this: {_item_url(base, sec.vehicle_id, it)}")
             if it.url:
                 lines.append(f"  Original document: {it.url}")
+            lines.append("")
+        if car_url and sec.locked:
+            lines.append(f"Unlock this car for {UNLOCK_PRICE}: {car_url}")
+            lines.append("")
+        elif car_url and sec.more > 0:
+            lines.append(f"See all {sec.total} in the app: {car_url}")
             lines.append("")
     lines.append(_footer_line())
     lines.append(f"Manage alerts: {base}/app/account")
@@ -392,90 +573,130 @@ def _button(href: str, label: str) -> str:
     )
 
 
+def _card_html(base: str, sec: _Section, it: AlertItem) -> str:
+    """One bulletin: in full, or its opening words when the car is not unlocked."""
+    date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
+    label, color = _severity(it)
+    if sec.teaser:
+        body = escape(_opening(it.llm_summary or it.summary) or "No summary available")
+        extras = ""
+        text_color = "#aab4c5"
+    else:
+        body = escape(it.llm_summary or it.summary or "No summary available")
+        text_color = "#e8edf5"
+        chips = "".join(
+            f'<span style="display:inline-block;font-size:12px;color:#aac4f5;'
+            f"background:#1a2740;border-radius:10px;padding:3px 9px;"
+            f'margin:0 6px 6px 0;">{escape(s)}</span>'
+            for s in it.systems[:4]
+        )
+        actions = []
+        if sec.vehicle_id:
+            actions.append(_button(_item_url(base, sec.vehicle_id, it), "See if your car has this"))
+        if _safe_link(it.url):
+            actions.append(
+                f'<a href="{escape(it.url)}" style="display:inline-block;color:#8fb4ff;'
+                f"font-size:13px;text-decoration:none;padding:10px 0 10px "
+                f'{14 if actions else 0}px;">Original document (PDF)</a>'
+            )
+        extras = (
+            f'<div style="margin-top:12px;">{chips}</div>'
+            f'<div style="margin-top:6px;">{"".join(actions)}</div>'
+        )
+    return f"""
+        <tr><td style="padding:0 0 12px;">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+               style="background:#141c2e;border:1px solid #243049;
+                      border-left:4px solid {color};border-radius:12px;">
+        <tr><td style="padding:16px 18px;">
+            <div style="font-size:13px;color:#9ca3af;margin-bottom:8px;">
+                <strong style="color:{color};">{label}</strong>
+                &nbsp;&middot;&nbsp;{date}{escape(_revision_note(it))}
+            </div>
+            <div style="font-size:16px;color:{text_color};line-height:1.55;">
+                {body}
+            </div>
+            {extras}
+        </td></tr></table>
+        </td></tr>
+        """
+
+
+def _breakdown_html(counts: dict[str, int]) -> str:
+    """'2 serious · 5 medium · 9 small', each count in its severity colour."""
+    parts = [
+        f'<span style="white-space:nowrap;"><strong style="color:{SEVERITY_COLORS[sev]};">'
+        f"{n}</strong> {SEVERITY_LABELS[sev].lower()}</span>"
+        for sev, n in counts.items()
+        if n and sev in SEVERITY_LABELS
+    ]
+    return " &nbsp;&middot;&nbsp; ".join(parts)
+
+
+def _section_html(base: str, sec: _Section) -> str:
+    car_url = f"{base}/app/vehicles/{sec.vehicle_id}" if sec.vehicle_id else ""
+    badge = (
+        '<span style="display:inline-block;font-size:11px;font-weight:700;'
+        "text-transform:uppercase;letter-spacing:0.06em;color:#34c777;background:#10231b;"
+        'border:1px solid #1f5137;border-radius:10px;padding:2px 8px;margin-left:8px;'
+        'vertical-align:middle;">Now ready</span>'
+        if sec.ready
+        else ""
+    )
+    open_car = (
+        f'<a href="{escape(car_url)}" style="color:#8fb4ff;font-size:13px;'
+        f'text-decoration:none;font-weight:600;">Open this car &rarr;</a>'
+        if car_url
+        else ""
+    )
+    cards = "".join(_card_html(base, sec, it) for it in sec.items)
+
+    footer = ""
+    if car_url and sec.locked:
+        what = (
+            f"Your free sample is above. Unlock all {sec.total} for this car, forever."
+            if sec.ready
+            else f"Unlock this car to read {'it' if sec.total == 1 else 'these'} in full "
+            "and see whether yours is affected."
+        )
+        footer = (
+            f'<div style="font-size:14px;line-height:1.5;color:#c7d0de;margin-bottom:12px;">'
+            f"{escape(what)}</div>"
+            f"{_button(car_url, f'Unlock now for {UNLOCK_PRICE}')}"
+            f'<div style="font-size:12px;color:#8a94a6;margin-top:10px;">'
+            f"Or subscribe to open every car on your account.</div>"
+        )
+    elif car_url and sec.more > 0:
+        footer = _button(car_url, f"See all {sec.total} in the app")
+    if footer:
+        footer = (
+            '<tr><td style="padding:0 0 4px;"><table width="100%" cellpadding="0" '
+            'cellspacing="0" role="presentation" style="background:#101726;'
+            'border:1px dashed #2b3a57;border-radius:12px;"><tr>'
+            f'<td style="padding:16px 18px;">{footer}</td></tr></table></td></tr>'
+        )
+
+    return f"""
+        <tr><td style="padding:28px 0 12px;">
+            <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>
+            <td style="font-size:19px;font-weight:700;color:#f8fafc;">
+                {escape(sec.label)}{badge}</td>
+            <td align="right" style="white-space:nowrap;">{open_car}</td>
+            </tr></table>
+            <div style="font-size:15px;color:#e5e7eb;margin-top:8px;">
+                <strong style="color:#f8fafc;">{escape(sec.found)}</strong>
+                <span style="color:#9ca3af;">&nbsp;&nbsp;{_breakdown_html(sec.counts)}</span>
+            </div>
+        </td></tr>
+        {cards}
+        {footer}
+        """
+
+
 def render_html(alert: UserAlert, unsubscribe_url: str) -> str:
     """The alert email. Inline styles and tables only: email clients strip <style> and SVG."""
     base = _base_url()
-    sections = []
-
-    if alert.ready_vehicles:
-        ready_rows = "".join(
-            f'<div style="padding:8px 0;font-size:15px;color:#e5e7eb;">'
-            f'<strong style="color:#f8fafc;">{escape(rv.label)}</strong> '
-            f'<span style="color:#9ca3af;">&middot; {_plural(rv.count, "bulletin")} on file</span> '
-            f'&middot; <a href="{escape(base)}/app/vehicles/{rv.vehicle_id}" '
-            f'style="color:#8fb4ff;text-decoration:none;font-weight:600;">Open &rarr;</a></div>'
-            for rv in alert.ready_vehicles
-        )
-        sections.append(
-            '<tr><td style="padding:20px 0 0;"><table width="100%" cellpadding="0" cellspacing="0" '
-            'role="presentation" style="background:#10231b;border:1px solid #1f5137;'
-            'border-radius:12px;"><tr><td style="padding:16px 18px;">'
-            '<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
-            'letter-spacing:0.06em;color:#34c777;">Now ready</div>'
-            f"{ready_rows}</td></tr></table></td></tr>"
-        )
-
-    for grp in alert.groups:
-        cards = []
-        for it in grp.items:
-            date = f"{it.communication_date:%b %d, %Y}" if it.communication_date else "Unknown date"
-            label, color = _severity(it)
-            chips = "".join(
-                f'<span style="display:inline-block;font-size:12px;color:#aac4f5;'
-                f"background:#1a2740;border-radius:10px;padding:3px 9px;"
-                f'margin:0 6px 6px 0;">{escape(s)}</span>'
-                for s in it.systems[:4]
-            )
-            actions = []
-            if grp.vehicle_id:
-                actions.append(
-                    _button(_item_url(base, grp.vehicle_id, it), "See if your car has this")
-                )
-            if _safe_link(it.url):
-                actions.append(
-                    f'<a href="{escape(it.url)}" style="display:inline-block;color:#8fb4ff;'
-                    f'font-size:13px;text-decoration:none;padding:10px 0 10px '
-                    f'{14 if actions else 0}px;">Original document (PDF)</a>'
-                )
-            cards.append(
-                f"""
-                <tr><td style="padding:0 0 12px;">
-                <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
-                       style="background:#141c2e;border:1px solid #243049;
-                              border-left:4px solid {color};border-radius:12px;">
-                <tr><td style="padding:16px 18px;">
-                    <div style="font-size:13px;color:#9ca3af;margin-bottom:8px;">
-                        <strong style="color:{color};">{label}</strong>
-                        &nbsp;&middot;&nbsp;{date}{escape(_revision_note(it))}
-                    </div>
-                    <div style="font-size:16px;color:#e8edf5;line-height:1.55;margin-bottom:12px;">
-                        {escape(it.llm_summary or it.summary or 'No summary available')}
-                    </div>
-                    <div>{chips}</div>
-                    <div style="margin-top:6px;">{''.join(actions)}</div>
-                </td></tr></table>
-                </td></tr>
-                """
-            )
-        open_car = (
-            f'<a href="{escape(base)}/app/vehicles/{grp.vehicle_id}" style="color:#8fb4ff;'
-            f'font-size:13px;text-decoration:none;font-weight:600;">Open this car &rarr;</a>'
-            if grp.vehicle_id
-            else ""
-        )
-        sections.append(
-            f"""
-            <tr><td style="padding:28px 0 12px;">
-                <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>
-                <td style="font-size:19px;font-weight:700;color:#f8fafc;">{escape(grp.label)}
-                    <span style="font-size:13px;font-weight:500;color:#9ca3af;">
-                    &nbsp;{len(grp.items)} new</span></td>
-                <td align="right" style="white-space:nowrap;">{open_car}</td>
-                </tr></table>
-            </td></tr>
-            {''.join(cards)}
-            """
-        )
+    sections = [_section_html(base, sec) for sec in _sections(alert)]
 
     n = alert.total_items
     if n:
@@ -607,6 +828,26 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
     settings = get_settings()
     base = _base_url()
     summary = AlertRunSummary()
+    # A full sending pass announces every flagged bulletin that is ready to read, then
+    # clears those flags. A pass for one user leaves them for everyone else.
+    clearing = send and only_user_id is None
+    if send:
+        marked = await mark_ready_vehicles(conn, generated_at)
+        if marked:
+            log.info("%d car(s) finished their first read", marked)
+    announced = (
+        await conn.fetch(
+            """
+            SELECT cv.communication_id, cv.vehicle_id
+            FROM communication_vehicles cv
+            JOIN communications c ON c.id = cv.communication_id
+            WHERE cv.alert_pending AND c.status = 'processed' AND c.processed_at IS NOT NULL
+            """
+        )
+        if clearing
+        else []
+    )
+    failed_vehicle_ids: set[int] = set()
     for user in await recipients(conn, only_user_id):
         since = since_override if since_override is not None else baseline_for(user)
         first_pass = since is None
@@ -658,6 +899,7 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
         except Exception as exc:  # one user's failure must not stop the others
             outcome.outcome = "failed"
             outcome.error = str(exc)
+            failed_vehicle_ids.update(g.vehicle_id for g in alert.groups)
             log.error("user %s: send failed: %s", user["id"], outcome.error)
             continue
 
@@ -669,5 +911,25 @@ async def _run(conn, send, generated_at, out_dir, only_user_id, since_override) 
                 generated_at,
                 user["id"],
             )
-        log.info("user %s: sent (%d items), message id %s", user["id"], alert.total_items, outcome.message_id)
+        log.info(
+            "user %s: sent (%d items), message id %s",
+            user["id"],
+            alert.total_items,
+            outcome.message_id,
+        )
+
+    # Mark what was announced. A car with a failed send keeps its flags so that user gets
+    # the same items next run; everyone already mailed is held back by their watermark.
+    done = [r for r in announced if r["vehicle_id"] not in failed_vehicle_ids]
+    if done:
+        await conn.execute(
+            """
+            UPDATE communication_vehicles cv SET alert_pending = false
+            FROM unnest($1::bigint[], $2::bigint[]) AS t(communication_id, vehicle_id)
+            WHERE cv.communication_id = t.communication_id AND cv.vehicle_id = t.vehicle_id
+            """,
+            [r["communication_id"] for r in done],
+            [r["vehicle_id"] for r in done],
+        )
+        log.info("cleared the new flag on %d bulletin link(s)", len(done))
     return summary

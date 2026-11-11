@@ -30,6 +30,8 @@ erDiagram
         text model "canonical plain nameplate"
         text_array keywords
         boolean active
+        timestamptz first_synced_at "null until the first full sync"
+        timestamptz ready_at "null until the first read finished"
     }
 
     communications {
@@ -74,6 +76,7 @@ erDiagram
         bigint vehicle_id PK_FK
         text_array matched_keywords
         timestamptz first_seen_at
+        boolean alert_pending "news not yet mailed"
     }
 
     comm_vocab {
@@ -303,8 +306,8 @@ Five tables sit beside the corpus. None of them changes `communications`,
   replay cannot create a second row for the same checkout or subscription.
 - `stripe_events` records every Stripe event id the webhook has handled. An id seen once is
   acknowledged and never processed again.
-- `alert_state` is one row per alert recipient: `last_watermark` (the newest
-  `processed_at` already mailed), `last_sent_at`, `unsubscribed_at` and a random
+- `alert_state` is one row per alert recipient (every account with a car, since 0022):
+  `last_watermark` (the newest moment already mailed), `last_sent_at`, `unsubscribed_at` and a random
   `unsubscribe_token` that goes into the link in every email. A user with no watermark yet
   starts from the time their subscription began (an admin with no subscription is baselined,
   silently, on the first sending pass), so a first email never replays a car's history. Rows
@@ -328,6 +331,25 @@ Five tables sit beside the corpus. None of them changes `communications`,
   worker inside the API (`src/refresh/queue.py`) reads them one at a time and stops when the
   list is empty; it starts again on the next add or the next start of the API. A read that
   fails three times stays in the table and is left to the nightly run.
+
+## New-bulletin flag (migration 0021)
+
+`vehicles.first_synced_at` is when a car's first complete sync finished (the car already
+scanned, no cap, and every scanned bulletin fetched; a bulletin NHTSA lists but never serves
+stops holding it back once the car's oldest link is 3 days old, `FIRST_SYNC_GIVE_UP_DAYS`). A link sync creates after that moment gets
+`communication_vehicles.alert_pending = true`; a link created before it is the car's history
+and stays false. The alert pass mails pending, processed links to the car's subscribers and
+sets them back to false. The partial index `communication_vehicles_alert_pending_idx` covers
+only the waiting rows.
+
+## Ready marker and free recipients (migration 0022)
+
+`vehicles.ready_at` is when a car's first read finished: its first sync is done and no
+bulletin linked to it is still `pending`. A sending alert pass stamps it once
+(`mark_ready_vehicles`); accounts whose baseline is older get the ready email. Cars already
+fully read when the migration ran were given the time of their first processed bulletin.
+The migration also gives every existing account an `alert_state` row starting at the moment
+it ran, because free accounts are alert recipients from here on.
 
 ## Alerts (migration 0015)
 
@@ -374,6 +396,8 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 | 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
 | 0014 | Accounts: `users`, `user_vehicles`, `entitlements`, `stripe_events`, `alert_state` |
 | 0015 | Alerts: moves the admin watermark into `alert_state`, drops the old digest watermark table |
+| 0022 | Ready and free alerts: `vehicles.ready_at`, and an `alert_state` row for every existing account |
+| 0021 | Alerts list new bulletins only: `vehicles.first_synced_at` (set for cars already synced) and `communication_vehicles.alert_pending` with a partial index |
 
 The data backfill to canonical models is a script
 (`python -m src.scripts.backfill_plain_nameplate`), not a migration; see the

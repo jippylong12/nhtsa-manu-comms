@@ -120,6 +120,13 @@ async def sync_vehicle(
         stats.errors.append(msg)
         return stats
 
+    # A link made after the car's first full sync is a bulletin NHTSA just published for
+    # it: news for the alert email. Links made before that are the car's history.
+    is_news = (
+        await conn.fetchval("SELECT first_synced_at FROM vehicles WHERE id = $1", vehicle["id"])
+        is not None
+    )
+
     comm_ids = [r["nhtsa_id"] for r in products]
     # Concise summary per bulletin, from the index -- the replacement for the map
     # sync used to build from the vehicle-details payload.
@@ -159,6 +166,7 @@ async def sync_vehicle(
             communication_id=row["id"],
             vehicle_id=vehicle["id"],
             matched_keywords=_matched_keywords(id_to_summary.get(nid), vehicle["keywords"]),
+            alert_pending=is_news,
         ):
             stats.new_links += 1
 
@@ -166,6 +174,7 @@ async def sync_vehicle(
     # returned bulletin by numeric nhtsaIdNumber, so a string id would miss it.
     to_fetch = [int(nid) for nid in comm_ids if nid not in known or nid in summary_only]
     if not to_fetch:
+        await _mark_first_sync(conn, vehicle["id"], False, limit)
         log.info("%s: nothing new (%s)", label, stats.summary())
         return stats
 
@@ -175,24 +184,65 @@ async def sync_vehicle(
         len(to_fetch),
         len(summary_only & set(comm_ids)),
     )
+    # History still missing after this run: a bulletin not stored yet whose fetch failed.
+    # A failed re-check of a summary-only bulletin is not that; the bulletin is stored.
+    history_missing = False
     async for nhtsa_id, comm in client.fetch_communications_batch(to_fetch):
         if str(nhtsa_id) in summary_only:
             stats.rechecked += 1
         if not comm:
             stats.fetch_failures += 1
+            history_missing = history_missing or str(nhtsa_id) not in known
             continue
         try:
-            await _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats)
+            await _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats, is_news)
         except Exception as e:  # noqa: BLE001
             msg = f"{label}: storing {nhtsa_id} failed: {type(e).__name__}: {e}"
             log.error(msg)
             stats.errors.append(msg)
+            history_missing = True
 
+    await _mark_first_sync(conn, vehicle["id"], history_missing, limit)
     log.info("%s: done (%s)", label, stats.summary())
     return stats
 
 
-async def _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats) -> None:
+# NHTSA lists some bulletins it never serves. After this long a car's first sync is taken
+# as done with whatever could be fetched, or the car would never be ready and never get news.
+FIRST_SYNC_GIVE_UP_DAYS = 3
+
+
+async def _mark_first_sync(
+    conn, vehicle_id: int, history_missing: bool, limit: int | None
+) -> None:
+    """Record that the car's history is in, so later links count as news.
+
+    Only for a scanned car, and not on a capped run: before that there is history still to
+    come, and marking the car would mail that history as new. A bulletin that could not be
+    fetched holds the mark back too, until the car's oldest link is
+    FIRST_SYNC_GIVE_UP_DAYS old.
+    """
+    if limit:
+        return
+    await conn.execute(
+        """
+        UPDATE vehicles SET first_synced_at = now()
+        WHERE id = $1 AND first_synced_at IS NULL
+          AND EXISTS (SELECT 1 FROM vehicle_scans s WHERE s.vehicle_id = $1)
+          AND (NOT $2::boolean OR EXISTS (
+              SELECT 1 FROM communication_vehicles cv
+              WHERE cv.vehicle_id = $1
+                AND cv.first_seen_at < now() - make_interval(days => $3)))
+        """,
+        vehicle_id,
+        history_missing,
+        FIRST_SYNC_GIVE_UP_DAYS,
+    )
+
+
+async def _store_comm(
+    conn, vehicle, nhtsa_id, comm, id_to_summary, stats, is_news: bool = False
+) -> None:
     """Persist one communication, its documents, and its vehicle link."""
     documents = [
         {
@@ -256,6 +306,7 @@ async def _store_comm(conn, vehicle, nhtsa_id, comm, id_to_summary, stats) -> No
             communication_id=comm_pk,
             vehicle_id=vehicle["id"],
             matched_keywords=_matched_keywords(summary, vehicle["keywords"]),
+            alert_pending=is_news,
         ):
             stats.new_links += 1
 

@@ -102,18 +102,25 @@ async def link_vehicle(
     communication_id: int,
     vehicle_id: int,
     matched_keywords: list[str],
+    alert_pending: bool = False,
 ) -> bool:
-    """Attach a communication to a vehicle. Returns True if the link is new."""
+    """Attach a communication to a vehicle. Returns True if the link is new.
+
+    `alert_pending` marks a new link as news for the alert email; an existing link is
+    never touched, so a bulletin is announced at most once per car.
+    """
     row = await conn.fetchrow(
         """
-        INSERT INTO communication_vehicles (communication_id, vehicle_id, matched_keywords)
-        VALUES ($1, $2, $3)
+        INSERT INTO communication_vehicles
+            (communication_id, vehicle_id, matched_keywords, alert_pending)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (communication_id, vehicle_id) DO NOTHING
         RETURNING communication_id
         """,
         communication_id,
         vehicle_id,
         matched_keywords,
+        alert_pending,
     )
     return row is not None
 

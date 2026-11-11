@@ -157,18 +157,59 @@ because sync skips known bulletins and the stages only read documents not yet pr
 
 ## Alerts
 
-**Who gets them.** Users with an active subscription entitlement who have not
-unsubscribed, plus every admin. Admins count as eligible whether or not they pay.
+**Who gets them.** Every account with a saved car that has not unsubscribed, free or paid,
+plus every admin. What an account is shown depends on what it may read (below).
 
-**What an alert lists.** Bulletins processed after the user's watermark, for the cars on the
-account, grouped by car. Revisions are folded to the latest per bulletin family. A car whose
-first processed bulletin is newer than the watermark appears under "Now ready" (the car was
-added or finished processing since the last email).
+**Two kinds of email, one format.** Each car in an email reads the same way: "We found X
+bulletins", a serious / medium / small breakdown, then a preview of at most 1 serious, 2
+medium and 3 small (newest first), then one button. A night with nothing to say sends
+nothing.
+
+| | When | Full access (plan place, unlock, admin) | Free account |
+|---|---|---|---|
+| **Ready** | The car's first read finished and the account was waiting on it | Total found, breakdown, the preview in full, "See all X in the app" | Total found, breakdown, its free sample in full, "Unlock now for $3" |
+| **New** | The nightly found bulletins NHTSA newly published for a car already read | Count, breakdown, every new bulletin in full, nothing to click through for | Count, breakdown, one line of each for at most the preview (no link to the bulletin or its document), "Unlock now for $3" |
+
+A subscriber's car past the plan's count is left out of both.
+
+**Ready.** A car is ready when its first sync is done and none of its bulletins is still
+waiting to be read, so the total in the email is the whole of it; a sending pass stamps
+`vehicles.ready_at` once. A car is read once however many accounts ask for it (the queue
+holds one row per car): each account that added it before it finished gets the ready email,
+once. An account that adds a car we already read gets no email, because the car is ready
+the moment they add it.
+
+**New.** "New" is a flag, not a date: when the nightly sync links a bulletin to a car whose
+first full sync is already done (`vehicles.first_synced_at`), it sets
+`communication_vehicles.alert_pending`. Bulletins linked during a car's first sync are its
+history and are never flagged, however recently we read them. Once the bulletin is read,
+the alert pass mails it to every account that holds the car and clears the flag, so it is
+announced once and re-reading it later announces nothing. Revisions are folded to the latest
+per bulletin family.
+
+```mermaid
+flowchart TD
+    add[Account adds a car] --> have{Already read?}
+    have -- yes --> none[No email: ready in the app now]
+    have -- no --> queue[One read per car, however many accounts wait]
+    queue --> done[First sync done, nothing waiting]
+    done --> ready[Ready email to every waiting account, once]
+    scan[Nightly scan finds a bulletin] --> sync{Car's first sync done?}
+    sync -- no --> history[Link as history, no flag]
+    sync -- yes --> flag[Link with alert_pending]
+    flag --> read[Bulletin is read]
+    read --> pass[New email to the car's accounts: full or teaser]
+    pass --> clear[Clear the flag]
+```
+
+If one user's send fails, the flags for that user's cars stay set and the next run retries
+them; users who were already mailed are held back by their watermark.
 
 **The watermark.** It is per user (`alert_state.last_watermark`) and advances only after a
 successful send, so a failed send is retried in full on the next run, never skipped. A user
 with no watermark yet starts from a baseline, never from the beginning of time: the moment
-their earliest active subscription was created (`entitlements.created_at`). So a brand-new
+their earliest active subscription was created (`entitlements.created_at`), else the moment
+the account was created (migration 0022 started every existing account from the day it ran). So a brand-new
 subscriber's first email lists only news processed after they subscribed, and "Now ready"
 names only cars whose first bulletin was processed after that moment. An admin with no
 subscription has no such moment, so the first alert pass that sees them sends nothing and

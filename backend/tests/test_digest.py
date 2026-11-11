@@ -66,7 +66,8 @@ async def seeded(monkeypatch):
                 f"LLM summary for comm {i}",
             )
             await conn.execute(
-                "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1,$2)",
+                "INSERT INTO communication_vehicles (communication_id, vehicle_id, alert_pending) "
+                "VALUES ($1, $2, true)",
                 cid,
                 v,
             )
@@ -177,7 +178,8 @@ async def test_a_vehicle_digest_lists_a_revision_family_once_as_its_current_revi
             BASE + timedelta(hours=10 + i),
         )
         await conn.execute(
-            "INSERT INTO communication_vehicles (communication_id, vehicle_id) VALUES ($1,$2)",
+            "INSERT INTO communication_vehicles (communication_id, vehicle_id, alert_pending) "
+            "VALUES ($1, $2, true)",
             cid,
             seeded["vehicle"],
         )

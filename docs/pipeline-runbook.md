@@ -21,7 +21,7 @@ This runs, in order:
 
 1. **sync** — look up each tracked vehicle's communications in the flat-file index, fetch the new ones from NHTSA by ID, insert them as `pending`.
 2. **process** — extract PDF text locally, read each PDF with Claude Haiku 5.5 (structured extraction), embed.
-3. **alerts** — email each eligible user the bulletins processed since their own watermark (dry-run unless `--send-digest`; see [Alerts](#alerts)).
+3. **alerts** — email each eligible user the bulletins NHTSA newly published for their cars, then mark them announced (dry-run unless `--send-digest`; see [Alerts](#alerts)).
 
 Useful flags:
 
@@ -272,14 +272,14 @@ Use one schedule per database, not both.
 
 ## Alerts
 
-Alerts email each eligible user the bulletins processed since their own watermark: users
-with an active subscription who have not unsubscribed, plus every admin. The rules (watermark,
+Alerts email every account with a car, free or paid: once when a car it was waiting on finishes its first read, and again when NHTSA publishes new bulletins for it (a free account gets those as a teaser with an unlock button). A car's history is never mailed and a night with nothing new sends nothing. A dry run does not stamp a car ready, so it shows only cars a sending pass already stamped.
+The rules (watermark,
 revision folding, "Now ready", unsubscribe) are in [product.md](product.md#alerts).
 
 ```bash
 cd backend
 python -m src.alerts                                  # dry run for everyone: writes one HTML file per user with news, sends nothing
-python -m src.alerts --send                           # send, and advance each sent user's watermark
+python -m src.alerts --send                           # send, advance each sent user's watermark, and mark the bulletins announced
 python -m src.alerts --only-email you@example.com     # restrict to one user by email
 python -m src.alerts --only-user-id 3                 # restrict to one user by id
 python -m src.alerts --out-dir /tmp/alerts            # where the dry run writes its HTML (default: current directory)
