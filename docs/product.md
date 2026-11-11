@@ -71,6 +71,14 @@ that car. `past_due` and `canceled` entitlements grant nothing.
 Symptom search needs full access to the car it searches, and is limited to 30 queries per
 user per 24 hours. Admins are exempt from both.
 
+Each payment also buys 1,000 symptom searches (`SEARCHES_PER_PAYMENT`). The count starts
+again from zero on every payment: a car unlock, a new subscription, and each subscription
+renewal. It does not carry over, so an account that pays $3 once and never again has 1,000
+searches in total, and one that unlocks a second car a week later is back to a fresh 1,000.
+A search past the limit is refused with 429 until the next payment. The Stripe webhook
+records the moment of the latest payment in `users.searches_reset_at`; the count is the
+`search_embed` rows in `usage_events` after it. Admins are not limited.
+
 ## Pricing
 
 | Plan | Price | Includes |

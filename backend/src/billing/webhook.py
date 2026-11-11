@@ -144,6 +144,8 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
         user_id, kind, vehicle_id, session.get("customer"), session_id, subscription_id,
         _looked_up_period_end.get(), plan,
     )
+    if inserted:
+        await _reset_searches(conn, user_id)
     if inserted and kind == "subscription":
         # Alerts are what a subscription is for: a new subscriber starts with them on,
         # even one who had turned them off under an earlier subscription.
@@ -158,12 +160,29 @@ async def _checkout_completed(conn: asyncpg.Connection, session: dict) -> None:
     )
 
 
+async def _reset_searches(conn: asyncpg.Connection, user_id: int) -> None:
+    """A payment was made: the account's symptom searches count from now (migration 0024)."""
+    await conn.execute("UPDATE users SET searches_reset_at = now() WHERE id = $1", user_id)
+
+
 async def _subscription_updated(conn: asyncpg.Connection, sub: dict) -> None:
     status = _STATUS.get(sub.get("status"))
     if status is None or not sub.get("id"):
         log.info("subscription %s: status %r not mapped, ignored", sub.get("id"), sub.get("status"))
         return
     plan = _plan_of(sub)
+    # A renewal is a payment: Stripe moves the paid period forward. Seen before the row is
+    # updated, and only for an active subscription, so a replayed or late event resets nothing.
+    period_end = _period_end(sub)
+    if status == "active" and period_end is not None:
+        renewed = await conn.fetchval(
+            "SELECT user_id FROM entitlements WHERE stripe_subscription_id = $1 "
+            "AND status <> 'canceled' AND current_period_end IS NOT NULL "
+            "AND current_period_end < $2",
+            sub["id"], period_end,
+        )
+        if renewed is not None:
+            await _reset_searches(conn, renewed)
     result = await conn.execute(
         "UPDATE entitlements SET status = $2, "
         "current_period_end = COALESCE($3, current_period_end), plan = COALESCE($4, plan), "

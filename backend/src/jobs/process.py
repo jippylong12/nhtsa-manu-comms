@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
@@ -126,23 +127,68 @@ async def run_llm(
         )
         return stats
 
-    # A batch from an earlier run that outlived its wait is paid for whether or not it is
-    # collected. Store its results first; while one is still running, send nothing new, or
-    # the documents in it would be sent, and paid for, a second time.
-    earlier = await open_batches()
-    if earlier:
-        log.info("collecting %d batch job(s) left running by an earlier run", len(earlier))
-        collected = await _collect_tracked(earlier)
-        if getattr(collected, "unfinished", None):
-            log.warning("an earlier batch is still running: no new documents sent this run")
-            return collected
+    # One collector at a time: the API's batch watch (`collect_open_batches`) may be storing
+    # the same results, and storing them twice would bill the ledger twice.
+    async with batch_lock(wait=True):
+        # A batch from an earlier run that outlived its wait is paid for whether or not it
+        # is collected. Store its results first; while one is still running, send nothing
+        # new, or the documents in it would be sent, and paid for, a second time.
+        earlier = await open_batches()
+        if earlier:
+            log.info("collecting %d batch job(s) left running by an earlier run", len(earlier))
+            collected = await _collect_tracked(earlier, max_wait=0)
+            if getattr(collected, "unfinished", None):
+                log.warning("an earlier batch is still running: no new documents sent this run")
+                return collected
 
-    names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
-    if names:
-        await track_batches(names)
-        log.info("submitted %d batch job(s); collecting", len(names))
-        return await _collect_tracked(names)
-    return None
+        names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
+        if names:
+            await track_batches(names)
+            log.info("submitted %d batch job(s); collecting", len(names))
+            # This run waits a while so the night's alerts can go out with it. A batch that
+            # takes longer (Anthropic allows itself 24 hours) is not lost: it stays in
+            # `llm_batches` and the API's batch watch keeps checking back until it ends.
+            return await _collect_tracked(names)
+        return None
+
+
+_BATCH_LOCK_KEY = 0x6E68747361626174  # "nhtsabat"
+
+
+@asynccontextmanager
+async def batch_lock(wait: bool):
+    """Hold the one batch-collection slot. Yields False when `wait` is off and it is taken."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if wait:
+            await conn.execute("SELECT pg_advisory_lock($1)", _BATCH_LOCK_KEY)
+            held = True
+        else:
+            held = await conn.fetchval("SELECT pg_try_advisory_lock($1)", _BATCH_LOCK_KEY)
+        try:
+            yield held
+        finally:
+            if held:
+                await conn.execute("SELECT pg_advisory_unlock($1)", _BATCH_LOCK_KEY)
+
+
+async def collect_open_batches() -> int:
+    """Check every batch still out once, store the ones that ended, embed what they read.
+
+    What the API's batch watch calls on a timer. Returns how many documents were stored.
+    It never waits and never submits: a batch still running is simply checked again later.
+    """
+    async with batch_lock(wait=False) as held:
+        if not held:
+            return 0  # the nightly run is collecting right now
+        out = await open_batches()
+        if not out:
+            return 0
+        stats = await _collect_tracked(out, max_wait=0)
+    stored = int(getattr(stats, "processed", 0) or 0)
+    if stored:
+        await run_embed(None)
+    return stored
 
 
 async def open_batches() -> list[str]:
@@ -180,13 +226,17 @@ async def mark_batches_collected(batch_ids: list[str]) -> None:
         )
 
 
-async def _collect_tracked(batch_ids: list[str]) -> Any:
+async def _collect_tracked(batch_ids: list[str], max_wait: int | None = None) -> Any:
     """Collect batch jobs, record the run, and mark the finished ones as collected.
 
+    `max_wait` 0 checks each batch once without waiting; None is the stage's usual wait.
     Returns the stage stats; ids in `stats.unfinished` are still running at Anthropic and
-    stay tracked for the next run.
+    stay tracked for the next check.
     """
-    stats = await llm_stage.collect_batch(batch_ids)
+    if max_wait is None:
+        stats = await llm_stage.collect_batch(batch_ids)
+    else:
+        stats = await llm_stage.collect_batch(batch_ids, max_wait=max_wait)
     unfinished = list(getattr(stats, "unfinished", None) or [])
     finished = [b for b in batch_ids if b not in unfinished]
     if finished:

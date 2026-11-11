@@ -490,3 +490,63 @@ async def test_an_unlock_does_not_touch_the_alert_setting(db):
     assert await db.fetchval(
         "SELECT unsubscribed_at FROM alert_state WHERE user_id = $1", uid
     ) is not None
+
+
+# --- a payment starts the account's symptom searches again (migration 0024) --------------
+
+
+async def _reset_at(conn, uid):
+    return await conn.fetchval("SELECT searches_reset_at FROM users WHERE id = $1", uid)
+
+
+async def test_every_purchase_resets_the_search_count_and_a_replay_does_not(db):
+    async with _http() as c:
+        uid, vid = await _setup(db, c)
+        assert await _reset_at(db, uid) is None
+        first = _event(
+            PREFIX + "q1", "checkout.session.completed", _checkout(PREFIX + "q1", uid, vid, "unlock")
+        )
+        await _post(c, first)
+        after_first = await _reset_at(db, uid)
+        assert after_first is not None
+
+        await _post(c, first)  # Stripe sends the same event again
+        assert await _reset_at(db, uid) == after_first
+
+        other = await db.fetchval(
+            "INSERT INTO vehicles (year, make, model) VALUES ($1, $2, 'ACCORD') RETURNING id",
+            YEAR, MAKE,
+        )
+        await _post(
+            c,
+            _event(
+                PREFIX + "q2", "checkout.session.completed",
+                _checkout(PREFIX + "q2", uid, other, "unlock"),
+            ),
+        )
+        assert await _reset_at(db, uid) > after_first  # a second car, weeks later
+
+
+async def test_a_subscription_renewal_resets_the_search_count_once(db):
+    async with _http() as c:
+        uid, _ = await _setup(db, c)
+        sub = await _subscribe(c, uid, "q3")
+
+        def updated(eid, period_end, status="active"):
+            return _event(
+                PREFIX + eid, "customer.subscription.updated",
+                {"id": sub, "status": status, "current_period_end": period_end},
+            )
+
+        await _post(c, updated("q3a", 1900000000))  # the first period is recorded
+        start = await _reset_at(db, uid)
+
+        await _post(c, updated("q3b", 1900000000))  # an update inside the same period
+        assert await _reset_at(db, uid) == start
+
+        await _post(c, updated("q3c", 1902600000))  # next month: Stripe moves the period on
+        renewed = await _reset_at(db, uid)
+        assert renewed > start
+
+        await _post(c, updated("q3d", 1905200000, status="past_due"))  # unpaid: no reset
+        assert await _reset_at(db, uid) == renewed

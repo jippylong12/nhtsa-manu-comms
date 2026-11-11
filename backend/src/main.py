@@ -15,6 +15,7 @@ from src.communications.router import router as communications_router
 from src.config import Settings, get_settings
 from src.corpus.router import router as corpus_router
 from src.db import close_pool
+from src.jobs import batch_watch
 from src.me.router import router as me_router
 from src.public.router import router as public_router
 from src.refresh import queue as ingest_queue
@@ -36,6 +37,8 @@ async def lifespan(app: FastAPI):
     if not get_settings().read_only:
         # Cars queued before a restart or a deploy are picked up again here.
         ingest_queue.ensure_worker()
+        # A batch the nightly run could not wait for is collected here when it ends.
+        batch_watch.ensure_running()
     yield
     await close_pool()
 

@@ -332,14 +332,25 @@ Five tables sit beside the corpus. None of them changes `communications`,
   list is empty; it starts again on the next add or the next start of the API. A read that
   fails three times stays in the table and is left to the nightly run.
 
+## Search quota (migration 0024)
+
+`users.searches_reset_at` is the moment of the account's latest payment. A paying account
+may run 1,000 symptom searches after it; the webhook moves it on a car unlock, a new
+subscription and each renewal (a `customer.subscription.updated` that moves
+`current_period_end` forward while active). Accounts that had already paid were started
+from their latest entitlement.
+
 ## Batch jobs out at Anthropic (migration 0023)
 
 `llm_batches` is one row per Batch API job the pipeline submitted, with `collected_at` null
 until its results are stored. A batch is paid for when Anthropic finishes it, collected or
-not. The nightly run waits an hour for its batch; before this table, one that took longer
-was forgotten and the next night sent, and paid for, the same documents again, with the
-first batch's cost never reaching `usage_events` or the daily cap. Now `process.run_llm`
-collects every open row first and submits nothing new while one is still running.
+not, and Anthropic may take up to 24 hours. The nightly run waits an hour for its batch so
+that night's alerts can go out with it. One that takes longer stays in this table, and the
+API's batch watch (`src/jobs/batch_watch.py`) checks every open row every 15 minutes,
+stores the results of the ones that ended and embeds them. `process.run_llm` also collects
+every open row first and submits nothing new while one is still running, so no document is
+sent twice. A Postgres advisory lock keeps the watch and the nightly from storing the same
+results twice.
 
 ## New-bulletin flag (migration 0021)
 
@@ -405,6 +416,7 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 | 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
 | 0014 | Accounts: `users`, `user_vehicles`, `entitlements`, `stripe_events`, `alert_state` |
 | 0015 | Alerts: moves the admin watermark into `alert_state`, drops the old digest watermark table |
+| 0024 | `users.searches_reset_at`: 1,000 symptom searches per payment |
 | 0023 | `llm_batches`: Batch API jobs still out, so none is paid for twice |
 | 0022 | Ready and free alerts: `vehicles.ready_at`, and an `alert_state` row for every existing account |
 | 0021 | Alerts list new bulletins only: `vehicles.first_synced_at` (set for cars already synced) and `communication_vehicles.alert_pending` with a partial index |

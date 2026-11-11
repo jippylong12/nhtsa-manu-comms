@@ -254,3 +254,68 @@ async def test_a_non_admin_with_an_admin_looking_uid_gets_no_bypass(db, search_c
     vid = await _vehicle(db)
     r = await _search(PREFIX + "admin-not", vid)
     assert r.status_code == 404
+
+
+# --- 1,000 searches per payment (migration 0024) ----------------------------------------
+
+
+async def _seed_searches(conn, user_id: int, count: int, age: timedelta) -> None:
+    await conn.execute(
+        """
+        INSERT INTO usage_events (kind, model, occurred_at, meta)
+        SELECT 'search_embed', 'gemini-embedding-001', now() - $3::interval,
+               jsonb_build_object('user_id', $1::bigint, 'test', $2::text)
+        FROM generate_series(1, $4)
+        """,
+        user_id, PREFIX, age, count,
+    )
+
+
+async def _paid(conn, user_id: int, age: timedelta) -> None:
+    await conn.execute(
+        "UPDATE users SET searches_reset_at = now() - $2::interval WHERE id = $1", user_id, age
+    )
+
+
+async def test_a_thousand_searches_since_the_last_payment_is_429(db, search_calls):
+    uid = await _user(db, USER_A)
+    vid = await _vehicle(db)
+    await _link(db, uid, vid)
+    await _unlock(db, uid, vid)
+    await _paid(db, uid, timedelta(days=90))
+    await _seed_searches(db, uid, 1000, timedelta(days=30))
+    r = await _search(USER_A, vid)
+    assert r.status_code == 429
+    assert "1,000 searches" in r.json()["detail"]
+    assert search_calls == []
+
+
+async def test_nine_hundred_ninety_nine_still_allow_one_more(db, search_calls):
+    uid = await _user(db, USER_A)
+    vid = await _vehicle(db)
+    await _link(db, uid, vid)
+    await _unlock(db, uid, vid)
+    await _paid(db, uid, timedelta(days=90))
+    await _seed_searches(db, uid, 999, timedelta(days=30))
+    assert (await _search(USER_A, vid)).status_code == 200
+
+
+async def test_a_payment_starts_the_thousand_again_from_zero(db, search_calls):
+    uid = await _user(db, USER_A)
+    vid = await _vehicle(db)
+    await _link(db, uid, vid)
+    await _unlock(db, uid, vid)
+    await _seed_searches(db, uid, 1000, timedelta(days=30))  # all used up...
+    await _paid(db, uid, timedelta(days=1))  # ...then they paid again yesterday
+    assert (await _search(USER_A, vid)).status_code == 200
+
+
+async def test_an_account_that_never_had_a_reset_counts_every_search_it_ever_made(
+    db, search_calls
+):
+    uid = await _user(db, USER_A)
+    vid = await _vehicle(db)
+    await _link(db, uid, vid)
+    await _unlock(db, uid, vid)
+    await _seed_searches(db, uid, 1000, timedelta(days=400))
+    assert (await _search(USER_A, vid)).status_code == 429

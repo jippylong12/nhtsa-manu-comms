@@ -19,6 +19,7 @@ versions: docs/database.md.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import pathlib
@@ -189,6 +190,11 @@ def _no_batch_ledger_writes(request, monkeypatch):
             if b in out:
                 out.remove(b)
 
+    @asynccontextmanager
+    async def batch_lock(wait):
+        yield True
+
+    monkeypatch.setattr(process, "batch_lock", batch_lock)
     monkeypatch.setattr(process, "open_batches", open_batches)
     monkeypatch.setattr(process, "track_batches", track_batches)
     monkeypatch.setattr(process, "mark_batches_collected", mark_batches_collected)

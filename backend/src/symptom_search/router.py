@@ -27,6 +27,11 @@ _limiter = SlidingWindowLimiter(RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SECONDS)
 # Per-user daily cap, counted from the usage ledger (one answer_compose row per query).
 DAILY_QUERY_LIMIT = 30
 
+# What one payment buys: this many searches, counted from the account's latest payment
+# (`users.searches_reset_at`, moved by the Stripe webhook on a car unlock, a new subscription
+# and each renewal). Every search counts (one search_embed row each), answered or not.
+SEARCHES_PER_PAYMENT = 1000
+
 
 async def _gate(user: dict, vehicle_id: int) -> None:
     """Raise 404/402/429 unless this user may run one more search on this vehicle."""
@@ -53,6 +58,24 @@ async def _gate(user: dict, vehicle_id: int) -> None:
         )
         if used >= DAILY_QUERY_LIMIT:
             raise HTTPException(status_code=429, detail="daily search limit reached")
+        since_payment = await conn.fetchval(
+            """
+            SELECT count(*) FROM usage_events
+            WHERE kind = 'search_embed' AND meta->>'user_id' = $1
+              AND occurred_at > coalesce(
+                  (SELECT searches_reset_at FROM users WHERE id = $2), '-infinity')
+            """,
+            str(user["id"]),
+            user["id"],
+        )
+        if since_payment >= SEARCHES_PER_PAYMENT:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"You have used the {SEARCHES_PER_PAYMENT:,} searches that come with a "
+                    "payment. They start again with your next payment."
+                ),
+            )
 
 
 @router.post(
@@ -61,7 +84,10 @@ async def _gate(user: dict, vehicle_id: int) -> None:
     summary="Match a described symptom to this vehicle's manufacturer communications",
     responses={
         402: {"description": "unlock this vehicle or subscribe to search it"},
-        429: {"description": "daily search limit reached (30 per user per 24 hours)"},
+        429: {
+            "description": "daily search limit reached (30 per user per 24 hours), or the "
+            "1,000 searches that come with a payment are used up"
+        },
     },
 )
 async def symptom_search(
