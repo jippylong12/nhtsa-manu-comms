@@ -141,11 +141,9 @@ async def test_the_batch_watch_stores_a_batch_that_ended_and_embeds_without_subm
 
 
 @pytest.mark.asyncio
-async def test_the_batch_watch_leaves_a_running_batch_alone_and_stands_aside_for_the_nightly(
+async def test_the_batch_watch_leaves_a_running_batch_alone_for_the_next_check(
     seen, monkeypatch
 ):
-    from contextlib import asynccontextmanager
-
     calls, runs = seen
     calls.open_now.append("batches/slow")
 
@@ -156,12 +154,3 @@ async def test_the_batch_watch_leaves_a_running_batch_alone_and_stands_aside_for
     monkeypatch.setattr(llm_stage, "collect_batch", collect_batch)
     assert await process.collect_open_batches() == 0
     assert calls.open_now == ["batches/slow"]  # still tracked for the next check
-
-    @asynccontextmanager
-    async def taken(wait):
-        yield False
-
-    monkeypatch.setattr(process, "batch_lock", taken)
-    calls.clear()
-    assert await process.collect_open_batches() == 0
-    assert calls == []  # the nightly holds the slot: nothing is collected twice

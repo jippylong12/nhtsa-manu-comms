@@ -130,7 +130,11 @@ def stage(monkeypatch):
         return None
 
     monkeypatch.setattr(llm, "record_usage", record_usage)
+    async def batch_documents(batch_id):
+        return list(rec.docs)
+
     monkeypatch.setattr(llm, "_pending_documents", pending)
+    monkeypatch.setattr(llm, "_batch_documents", batch_documents)
     monkeypatch.setattr(llm, "_store", store)
     monkeypatch.setattr(llm, "_mark_failed", mark_failed)
     monkeypatch.setattr(llm, "promote_completed_communications", promote)
@@ -531,3 +535,66 @@ async def test_collect_batch_reports_a_batch_it_gave_up_waiting_for(stage, monke
     assert stats.unfinished == ["msgbatch_slow"]
     assert stats.errors == ["batch msgbatch_slow not ended after 120s"]
     assert stats.processed == 0 and stats.failed == 0
+
+
+# --- review fixes: a document is paid for once, and one bad batch blocks nothing ----------
+
+
+async def test_submit_records_which_documents_went_into_which_batch(stage, monkeypatch):
+    recorded = []
+
+    async def record_batch(batch_id, document_ids):
+        recorded.append((batch_id, document_ids))
+
+    monkeypatch.setattr(llm, "_record_batch", record_batch)
+    stage.add_doc(1, "pdf", [b"%PDF"])
+    stage.add_doc(2, "text")
+    stage.client = FakeAnthropic()
+
+    assert await llm.submit_batch() == ["msgbatch_1"]
+    assert recorded == [("msgbatch_1", [1, 2])]
+
+
+async def test_a_batch_whose_results_are_already_stored_is_not_metered_or_stored_again(stage):
+    stage.add_doc(2, "pdf", [b"%PDF"])
+    stage.client = FakeAnthropic(results=[_succeeded(2, json.dumps(GOOD))])
+
+    first = await llm.collect_batch(["msgbatch_1"], poll_seconds=0)
+    second = await llm.collect_batch(["msgbatch_1"], poll_seconds=0)  # the watch, a moment later
+
+    assert first.processed == 1 and second.processed == 0
+    assert len(stage.usage) == 1 and len(stage.stored) == 1
+
+
+class _Gone(anthropic.NotFoundError):
+    def __init__(self):
+        Exception.__init__(self, "batch not found")
+
+
+async def test_a_batch_anthropic_no_longer_has_is_given_up_and_the_next_one_is_still_collected(
+    stage, monkeypatch
+):
+    closed = []
+
+    async def close_batch(batch_id):
+        closed.append(batch_id)
+
+    monkeypatch.setattr(llm, "_close_batch", close_batch)
+    stage.add_doc(2, "pdf", [b"%PDF"])
+    stage.client = FakeAnthropic(results=[_succeeded(2, json.dumps(GOOD))])
+    retrieve = stage.client.messages.batches.retrieve
+
+    def flaky(batch_id):
+        if batch_id == "gone":
+            raise _Gone()
+        if batch_id == "down":
+            raise RuntimeError("503")
+        return retrieve(batch_id)
+
+    stage.client.messages.batches.retrieve = flaky
+
+    stats = await llm.collect_batch(["gone", "down", "msgbatch_1"], poll_seconds=0)
+
+    assert "gone" in closed  # never collectable: closed, so it blocks no later run
+    assert stats.unfinished == ["down"]  # could not be checked now: kept for the next check
+    assert stats.processed == 1  # the good batch was still stored

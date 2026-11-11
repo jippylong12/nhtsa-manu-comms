@@ -19,10 +19,10 @@ versions: docs/database.md.
 """
 
 import asyncio
-from contextlib import asynccontextmanager
 import json
 import os
 import pathlib
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 import asyncpg
@@ -190,11 +190,28 @@ def _no_batch_ledger_writes(request, monkeypatch):
             if b in out:
                 out.remove(b)
 
-    @asynccontextmanager
-    async def batch_lock(wait):
-        yield True
+    from src.jobs import llm
 
-    monkeypatch.setattr(process, "batch_lock", batch_lock)
+    closed: set[str] = set()
+
+    async def record_batch(batch_id, document_ids):
+        out.append(batch_id)
+
+    async def close_batch(batch_id):
+        closed.add(batch_id)
+        if batch_id in out:
+            out.remove(batch_id)
+
+    @asynccontextmanager
+    async def storing(batch_id):
+        mine = batch_id not in closed
+        yield mine
+        if mine:
+            await close_batch(batch_id)
+
+    monkeypatch.setattr(llm, "_record_batch", record_batch)
+    monkeypatch.setattr(llm, "_close_batch", close_batch)
+    monkeypatch.setattr(llm, "_storing", storing)
     monkeypatch.setattr(process, "open_batches", open_batches)
     monkeypatch.setattr(process, "track_batches", track_batches)
     monkeypatch.setattr(process, "mark_batches_collected", mark_batches_collected)

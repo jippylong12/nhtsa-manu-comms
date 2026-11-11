@@ -181,6 +181,9 @@ async def _run(args, now: datetime) -> int:
         log.info("=== STAGE: process (extract -> llm -> embed) ===")
         try:
             await processor.run_extract(None)
+            # First store any batch an earlier run left out: its cost only reaches the
+            # ledger when it is collected, and tonight's budget must be worked out after.
+            await processor.collect_open_batches()
             budget = await _llm_document_budget(now, args.sync_llm)
             if budget == 0:
                 # Not a failure: the cap did its job. The documents stay pending.

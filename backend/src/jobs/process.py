@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
@@ -127,49 +126,27 @@ async def run_llm(
         )
         return stats
 
-    # One collector at a time: the API's batch watch (`collect_open_batches`) may be storing
-    # the same results, and storing them twice would bill the ledger twice.
-    async with batch_lock(wait=True):
-        # A batch from an earlier run that outlived its wait is paid for whether or not it
-        # is collected. Store its results first; while one is still running, send nothing
-        # new, or the documents in it would be sent, and paid for, a second time.
-        earlier = await open_batches()
-        if earlier:
-            log.info("collecting %d batch job(s) left running by an earlier run", len(earlier))
-            collected = await _collect_tracked(earlier, max_wait=0)
-            if getattr(collected, "unfinished", None):
-                log.warning("an earlier batch is still running: no new documents sent this run")
-                return collected
+    # A batch from an earlier run that outlived its wait is paid for whether or not it is
+    # collected. Store its results first. While one is still running nothing new is sent:
+    # its cost is not in the ledger yet, so the daily cap cannot account for it.
+    # (Its documents could not be sent again anyway: `_pending_documents` skips them.)
+    earlier = await open_batches()
+    if earlier:
+        log.info("collecting %d batch job(s) left running by an earlier run", len(earlier))
+        collected = await _collect_tracked(earlier, max_wait=0)
+        if getattr(collected, "unfinished", None):
+            log.warning("an earlier batch is still running: no new documents sent this run")
+            return collected
 
-        names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
-        if names:
-            await track_batches(names)
-            log.info("submitted %d batch job(s); collecting", len(names))
-            # This run waits a while so the night's alerts can go out with it. A batch that
-            # takes longer (Anthropic allows itself 24 hours) is not lost: it stays in
-            # `llm_batches` and the API's batch watch keeps checking back until it ends.
-            return await _collect_tracked(names)
-        return None
-
-
-_BATCH_LOCK_KEY = 0x6E68747361626174  # "nhtsabat"
-
-
-@asynccontextmanager
-async def batch_lock(wait: bool):
-    """Hold the one batch-collection slot. Yields False when `wait` is off and it is taken."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        if wait:
-            await conn.execute("SELECT pg_advisory_lock($1)", _BATCH_LOCK_KEY)
-            held = True
-        else:
-            held = await conn.fetchval("SELECT pg_try_advisory_lock($1)", _BATCH_LOCK_KEY)
-        try:
-            yield held
-        finally:
-            if held:
-                await conn.execute("SELECT pg_advisory_unlock($1)", _BATCH_LOCK_KEY)
+    names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
+    if names:
+        await track_batches(names)
+        log.info("submitted %d batch job(s); collecting", len(names))
+        # This run waits a while so the night's alerts can go out with it. A batch that
+        # takes longer (Anthropic allows itself 24 hours) is not lost: it stays in
+        # `llm_batches` and the API's batch watch keeps checking back until it ends.
+        return await _collect_tracked(names)
+    return None
 
 
 async def collect_open_batches() -> int:
@@ -178,13 +155,12 @@ async def collect_open_batches() -> int:
     What the API's batch watch calls on a timer. Returns how many documents were stored.
     It never waits and never submits: a batch still running is simply checked again later.
     """
-    async with batch_lock(wait=False) as held:
-        if not held:
-            return 0  # the nightly run is collecting right now
-        out = await open_batches()
-        if not out:
-            return 0
-        stats = await _collect_tracked(out, max_wait=0)
+    out = await open_batches()
+    if not out:
+        return 0
+    # Safe beside the nightly run or a re-extract: `llm._storing` lets only one of them
+    # store a given batch's results.
+    stats = await _collect_tracked(out, max_wait=0)
     stored = int(getattr(stats, "processed", 0) or 0)
     if stored:
         await run_embed(None)

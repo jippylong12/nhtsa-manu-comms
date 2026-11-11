@@ -349,8 +349,17 @@ that night's alerts can go out with it. One that takes longer stays in this tabl
 API's batch watch (`src/jobs/batch_watch.py`) checks every open row every 15 minutes,
 stores the results of the ones that ended and embeds them. `process.run_llm` also collects
 every open row first and submits nothing new while one is still running, so no document is
-sent twice. A Postgres advisory lock keeps the watch and the nightly from storing the same
-results twice.
+sent twice.
+
+`comm_documents.llm_batch_id` (migration 0025) is the batch a document was last sent in.
+While that batch is still out, no other read picks the document up: adding a car, an admin
+refresh, `--sync` and a re-extract all skip it, so it is never read a second time at full
+price while its batch result is on the way. Only one process stores a given batch's results
+(a per-batch advisory lock, held only while storing), so the nightly run, the batch watch,
+a re-extract and a manual `--collect` can never write its cost to the ledger twice. A batch
+Anthropic no longer has (not found, or permission denied) is closed and its documents are
+read again; any other error leaves it tracked for the next check. The nightly run collects
+what is out before it works out its budget under the daily cap.
 
 ## New-bulletin flag (migration 0021)
 
@@ -416,6 +425,7 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 | 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
 | 0014 | Accounts: `users`, `user_vehicles`, `entitlements`, `stripe_events`, `alert_state` |
 | 0015 | Alerts: moves the admin watermark into `alert_state`, drops the old digest watermark table |
+| 0025 | `comm_documents.llm_batch_id`: a document in a batch still out is not read by anything else |
 | 0024 | `users.searches_reset_at`: 1,000 symptom searches per payment |
 | 0023 | `llm_batches`: Batch API jobs still out, so none is paid for twice |
 | 0022 | Ready and free alerts: `vehicles.ready_at`, and an `alert_state` row for every existing account |

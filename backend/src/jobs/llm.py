@@ -15,6 +15,7 @@ import base64
 import copy
 import json
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -432,12 +433,102 @@ async def _pending_documents(limit: int | None, vehicle_id: int | None = None) -
               AND c.status = 'pending'
               AND d.extracted_at IS NOT NULL
               AND {vehicle_scope('$1')}
+              -- Not while it is inside a batch that is still out: its read is already
+              -- paid for there, and reading it again here would pay twice.
+              AND NOT EXISTS (
+                  SELECT 1 FROM llm_batches b
+                  WHERE b.batch_id = d.llm_batch_id AND b.collected_at IS NULL)
             ORDER BY d.id
             {f'LIMIT {int(limit)}' if limit else ''}
             """,
             vehicle_id,
         )
     return [dict(r) for r in rows]
+
+
+async def _batch_documents(batch_id: str) -> list[dict]:
+    """The unread documents a batch's results may belong to: the ones sent in it, plus any
+    never sent in a batch (a job submitted before membership was recorded)."""
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT d.id, d.url, d.extracted_text, d.extraction_method, d.page_count,
+                   d.communication_id
+            FROM comm_documents d
+            JOIN communications c ON c.id = d.communication_id
+            WHERE d.llm_summary IS NULL AND c.status = 'pending'
+              AND d.extracted_at IS NOT NULL
+              AND (d.llm_batch_id = $1 OR d.llm_batch_id IS NULL)
+            ORDER BY d.id
+            """,
+            batch_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def _record_batch(batch_id: str, document_ids: list[int]) -> None:
+    """A batch was just submitted: it is out, and these documents are in it."""
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "INSERT INTO llm_batches (batch_id) VALUES ($1) ON CONFLICT (batch_id) DO NOTHING",
+                batch_id,
+            )
+            await conn.execute(
+                "UPDATE comm_documents SET llm_batch_id = $1 WHERE id = ANY($2::bigint[])",
+                batch_id,
+                document_ids,
+            )
+
+
+async def _close_batch(batch_id: str) -> None:
+    """Nothing more will be stored from this batch: its documents are free to be read again."""
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO llm_batches (batch_id, collected_at) VALUES ($1, now()) "
+            "ON CONFLICT (batch_id) DO UPDATE SET collected_at = now() "
+            "WHERE llm_batches.collected_at IS NULL",
+            batch_id,
+        )
+
+
+@asynccontextmanager
+async def _storing(batch_id: str):
+    """The one slot for storing a batch's results. Yields False when they are stored already.
+
+    The nightly run, the API's batch watch, a re-extract and a manual --collect can all
+    reach the same ended batch. Storing it twice would write its cost to the ledger twice,
+    so whoever gets here second finds it closed and stores nothing. Held only while the
+    results are stored, never while waiting on Anthropic. Closed on a clean exit.
+    """
+    from src.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", batch_id)
+        try:
+            done = await conn.fetchval(
+                "SELECT collected_at IS NOT NULL FROM llm_batches WHERE batch_id = $1", batch_id
+            )
+            mine = not done
+            yield mine
+            if mine:
+                await conn.execute(
+                    "INSERT INTO llm_batches (batch_id, collected_at) VALUES ($1, now()) "
+                    "ON CONFLICT (batch_id) DO UPDATE SET collected_at = now()",
+                    batch_id,
+                )
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", batch_id)
 
 
 async def _plan_for(doc: dict) -> pdf_input.InputPlan:
@@ -789,6 +880,9 @@ async def submit_batch(limit: int | None = None, vehicle_id: int | None = None) 
         batch = await asyncio.to_thread(lambda c=chunk: client.messages.batches.create(requests=c))
         batch_ids.append(batch.id)
         log.info("submitted batch %s with %d document(s)", batch.id, len(chunk))
+        # Straight away: from here these documents are paid for in this batch, and no other
+        # read may pick them up until its results are stored.
+        await _record_batch(batch.id, [int(r["custom_id"]) for r in chunk])
     return batch_ids
 
 
@@ -812,12 +906,25 @@ async def collect_batch(
     """Poll batches and persist their results."""
     client = _client()
     stats = LLMStats()
-    docs_by_id = {str(d["id"]): d for d in await _pending_documents(None)}
 
     for batch_id in batch_ids:
         waited = 0
         last_logged = 0
-        batch = await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
+        try:
+            batch = await asyncio.to_thread(client.messages.batches.retrieve, batch_id)
+        except (anthropic.NotFoundError, anthropic.PermissionDeniedError) as e:
+            # Anthropic no longer has this batch for us (a rotated key, results past their
+            # retention). It can never be collected; holding on to it would block every
+            # later run, so it is closed and its documents are read again.
+            log.error("batch %s is gone at Anthropic (%s); giving it up", batch_id, e)
+            stats.errors.append(f"batch {batch_id} is gone at Anthropic and was given up")
+            await _close_batch(batch_id)
+            continue
+        except Exception as e:  # noqa: BLE001 - one batch must not stop the others
+            log.error("batch %s could not be checked: %s", batch_id, e)
+            stats.unfinished.append(batch_id)
+            stats.errors.append(f"batch {batch_id} could not be checked: {type(e).__name__}")
+            continue
         status = batch.processing_status
         while status != "ended":
             if waited >= max_wait:
@@ -843,49 +950,59 @@ async def collect_batch(
         if status != "ended":
             continue
 
-        results = await asyncio.to_thread(lambda b=batch_id: list(client.messages.batches.results(b)))
-        dropped = 0
-        for item in results:
-            doc = docs_by_id.get(str(item.custom_id))
-            if doc is None:
-                # A paid result we cannot match to a pending document: count and log it
-                # loudly rather than silently discarding what the run paid for.
-                dropped += 1
+        async with _storing(batch_id) as mine:
+            if not mine:
+                log.info("batch %s: its results are already stored", batch_id)
                 continue
-            result = item.result
-            if result.type != "succeeded":
-                stats.failed += 1
-                reason = f"batch {result.type}{_batch_failure_detail(result)}"
-                stats.errors.append(f"doc {doc['id']}: {reason}")
-                await _mark_failed(doc["communication_id"], reason)
-                continue
-
-            message = result.message
-            ti, to = message.usage.input_tokens, message.usage.output_tokens
-            input_kind = "pdf" if (doc["page_count"] or 1) <= pdf_input.MAX_DIRECT_PAGES else "text"
-            await _meter(doc, stats, ti, to, batch=True, path="batch", input_kind=input_kind)
-            text = next((b.text for b in message.content if b.type == "text"), None)
-            if message.stop_reason == "max_tokens":
-                clean, err = None, "response hit max_tokens"
-            else:
-                clean, err = validate(text)
-            if err:
-                stats.failed += 1
-                stats.errors.append(f"doc {doc['id']}: {err}")
-                await _mark_failed(doc["communication_id"], f"LLM schema violation: {err}")
-                continue
-
-            await _store(doc, clean, ti, to, batch=True)
-            stats.processed += 1
-
-        if dropped:
-            msg = (
-                f"batch {batch_id}: {dropped} response(s) could not be matched to a "
-                f"pending document and were dropped"
-            )
-            log.warning(msg)
-            stats.errors.append(msg)
+            await _store_batch_results(client, batch_id, stats)
 
     await promote_completed_communications()
     log.info("batch collection complete :: %s", stats.summary())
     return stats
+
+
+async def _store_batch_results(client: Any, batch_id: str, stats: LLMStats) -> None:
+    """Meter and store every result of one ended batch. Called inside `_storing`."""
+    docs_by_id = {str(d["id"]): d for d in await _batch_documents(batch_id)}
+    results = await asyncio.to_thread(lambda b=batch_id: list(client.messages.batches.results(b)))
+    dropped = 0
+    for item in results:
+        doc = docs_by_id.get(str(item.custom_id))
+        if doc is None:
+            # A paid result we cannot match to a pending document: count and log it
+            # loudly rather than silently discarding what the run paid for.
+            dropped += 1
+            continue
+        result = item.result
+        if result.type != "succeeded":
+            stats.failed += 1
+            reason = f"batch {result.type}{_batch_failure_detail(result)}"
+            stats.errors.append(f"doc {doc['id']}: {reason}")
+            await _mark_failed(doc["communication_id"], reason)
+            continue
+
+        message = result.message
+        ti, to = message.usage.input_tokens, message.usage.output_tokens
+        input_kind = "pdf" if (doc["page_count"] or 1) <= pdf_input.MAX_DIRECT_PAGES else "text"
+        await _meter(doc, stats, ti, to, batch=True, path="batch", input_kind=input_kind)
+        text = next((b.text for b in message.content if b.type == "text"), None)
+        if message.stop_reason == "max_tokens":
+            clean, err = None, "response hit max_tokens"
+        else:
+            clean, err = validate(text)
+        if err:
+            stats.failed += 1
+            stats.errors.append(f"doc {doc['id']}: {err}")
+            await _mark_failed(doc["communication_id"], f"LLM schema violation: {err}")
+            continue
+
+        await _store(doc, clean, ti, to, batch=True)
+        stats.processed += 1
+
+    if dropped:
+        msg = (
+            f"batch {batch_id}: {dropped} response(s) could not be matched to a "
+            f"pending document and were dropped"
+        )
+        log.warning(msg)
+        stats.errors.append(msg)

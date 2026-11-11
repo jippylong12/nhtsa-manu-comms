@@ -37,9 +37,15 @@ def calls(monkeypatch):
         return alerts_service.AlertRunSummary()
 
     async def no_cap(now, sync):
+        seen.append("budget")
         return None
 
+    async def collect_open_batches():
+        seen.append("collect-earlier")
+        return 0
+
     monkeypatch.setattr(run_pipeline, "_llm_document_budget", no_cap)
+    monkeypatch.setattr(run_pipeline.processor, "collect_open_batches", collect_open_batches)
     monkeypatch.setattr(run_pipeline.processor, "run_extract", run_extract)
     monkeypatch.setattr(run_pipeline.processor, "run_llm", run_llm)
     monkeypatch.setattr(run_pipeline.processor, "run_embed", run_embed)
@@ -64,7 +70,9 @@ NOW = datetime(2026, 11, 7, tzinfo=timezone.utc)
 async def test_alerts_run_after_process_as_a_dry_run_by_default(calls):
     code = await run_pipeline._run(_args(), NOW)
     assert code == 0
-    assert calls == ["extract", "llm", "embed", ("alerts", False)]
+    # A batch left out by an earlier run is stored before tonight's budget is worked out:
+    # its cost only reaches the ledger then, and the cap must see it.
+    assert calls == ["extract", "collect-earlier", "budget", "llm", "embed", ("alerts", False)]
 
 
 @pytest.mark.asyncio
