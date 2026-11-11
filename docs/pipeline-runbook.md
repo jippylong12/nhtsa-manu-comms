@@ -21,7 +21,7 @@ This runs, in order:
 
 1. **sync** — look up each tracked vehicle's communications in the flat-file index, fetch the new ones from NHTSA by ID, insert them as `pending`.
 2. **process** — extract PDF text locally, read each PDF with Claude Haiku 5.5 (structured extraction), embed.
-   The LLM step waits up to an hour for its batch. A batch that takes longer (Anthropic allows itself 24 hours) stays tracked in `llm_batches`; the `api` service checks it every 15 minutes and stores it when it ends. A run sends nothing new while a batch is still out, so no document is paid for twice.
+   The LLM step waits up to an hour for its batch. A batch that takes longer (Anthropic allows itself 24 hours) stays tracked in `llm_batches`; the `api` service checks it every 15 minutes and stores it when it ends. With `SEND_ALERTS_AFTER_BATCH=true` on `api` it then sends the alert emails itself; otherwise they go out with the next nightly run. A run sends nothing new while a batch is still out, so no document is paid for twice.
 3. **alerts** — email each eligible user the bulletins NHTSA newly published for their cars, then mark them announced (dry-run unless `--send-digest`; see [Alerts](#alerts)).
 
 Useful flags:

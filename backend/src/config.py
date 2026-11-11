@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     digest_to_email: str = ""
     # When set, every alert goes to this address instead of the user's (replica proofs).
     alert_test_recipient: str = ""
+    # The api sends alert emails itself as soon as it stores a batch the nightly run could
+    # not wait for, instead of leaving them for the next night. Off unless set, so a local
+    # API never mails anyone. Needs RESEND_API_KEY and DIGEST_FROM_EMAIL on the same service.
+    send_alerts_after_batch: bool = False
 
     # Accounts (Firebase Authentication; the frontend signs in, the API verifies the ID token).
     # Base64 of the service-account JSON file.

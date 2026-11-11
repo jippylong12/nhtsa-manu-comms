@@ -60,11 +60,12 @@ Railway variables on the `api` service and Railway passes them to the build.
 | `GEMINI_EMBEDDING_MODEL` | optional | optional | no | Embedding model |
 | `GEMINI_TIMEOUT_SECONDS` | optional | optional | no | Per-call ceiling (default 120) |
 | `EMBEDDING_DIMENSIONS` | optional | optional | no | Vector size (default 1536) |
-| `RESEND_API_KEY` | no | yes | yes | Sends the alert emails |
-| `DIGEST_FROM_EMAIL` | no | yes | no | Alert sender (an address on a domain verified in Resend) |
+| `RESEND_API_KEY` | optional | yes | yes | Sends the alert emails. On `api` only when `SEND_ALERTS_AFTER_BATCH` is on |
+| `DIGEST_FROM_EMAIL` | optional | yes | no | Alert sender (an address on a domain verified in Resend). On `api` only when `SEND_ALERTS_AFTER_BATCH` is on |
 | `DIGEST_TO_EMAIL` | no | yes | no | Digest recipient (legacy; alerts go to each subscriber's own email) |
 | `ALERT_TEST_RECIPIENT` | no | optional | no | Redirects every alert to this one address (replica proofs only); leave unset in production |
-| `APP_BASE_URL` | no | yes | no | Public origin used for the unsubscribe link in alert emails |
+| `SEND_ALERTS_AFTER_BATCH` | optional | no | no | `true` lets the `api` send alert emails as soon as it stores a batch the nightly could not wait for; needs `RESEND_API_KEY` and `DIGEST_FROM_EMAIL` on `api` too. Off by default, so those alerts go out with the next nightly run |
+| `APP_BASE_URL` | optional | yes | no | Public origin used for the links in alert emails. On `api` only when `SEND_ALERTS_AFTER_BATCH` is on |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | yes | no | yes | Verifies Firebase ID tokens |
 | `ADMIN_FIREBASE_UIDS` | yes | no | no | Admin accounts |
 | `STRIPE_SECRET_KEY` | yes | no | yes | Stripe API |
