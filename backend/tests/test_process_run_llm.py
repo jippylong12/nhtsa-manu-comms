@@ -154,3 +154,16 @@ async def test_the_batch_watch_leaves_a_running_batch_alone_for_the_next_check(
     monkeypatch.setattr(llm_stage, "collect_batch", collect_batch)
     assert await process.collect_open_batches() == 0
     assert calls.open_now == ["batches/slow"]  # still tracked for the next check
+
+
+@pytest.mark.asyncio
+async def test_a_run_waits_three_hours_for_the_batch_it_just_submitted(seen, monkeypatch):
+    waits: list = []
+
+    async def collect_batch(names, **kw):
+        waits.append(kw.get("max_wait"))
+        return _stats()
+
+    monkeypatch.setattr(llm_stage, "collect_batch", collect_batch)
+    await process.run_llm(None, sync=False)
+    assert waits == [3 * 60 * 60]

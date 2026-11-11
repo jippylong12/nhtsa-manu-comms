@@ -344,7 +344,7 @@ from their latest entitlement.
 
 `llm_batches` is one row per Batch API job the pipeline submitted, with `collected_at` null
 until its results are stored. A batch is paid for when Anthropic finishes it, collected or
-not, and Anthropic may take up to 24 hours. The nightly run waits an hour for its batch so
+not, and Anthropic may take up to 24 hours. The nightly run waits three hours for its batch so
 that night's alerts can go out with it. One that takes longer stays in this table, and the
 API's batch watch (`src/jobs/batch_watch.py`) checks every open row every 15 minutes,
 stores the results of the ones that ended and embeds them. `process.run_llm` also collects

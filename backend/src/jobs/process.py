@@ -104,6 +104,10 @@ async def run_extract(
     return stats
 
 
+# How long a run keeps checking the batch it just submitted before leaving it to the watch.
+RUN_BATCH_WAIT_SECONDS = 3 * 60 * 60
+
+
 async def run_llm(
     limit: int | None, sync: bool, vehicle_id: int | None = None
 ) -> Any:
@@ -142,10 +146,10 @@ async def run_llm(
     if names:
         await track_batches(names)
         log.info("submitted %d batch job(s); collecting", len(names))
-        # This run waits a while so the night's alerts can go out with it. A batch that
-        # takes longer (Anthropic allows itself 24 hours) is not lost: it stays in
+        # This run waits three hours so the night's alerts can go out with it. A batch
+        # that takes longer (Anthropic allows itself 24 hours) is not lost: it stays in
         # `llm_batches` and the API's batch watch keeps checking back until it ends.
-        return await _collect_tracked(names)
+        return await _collect_tracked(names, max_wait=RUN_BATCH_WAIT_SECONDS)
     return None
 
 
