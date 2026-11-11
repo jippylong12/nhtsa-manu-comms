@@ -126,21 +126,81 @@ async def run_llm(
         )
         return stats
 
+    # A batch from an earlier run that outlived its wait is paid for whether or not it is
+    # collected. Store its results first; while one is still running, send nothing new, or
+    # the documents in it would be sent, and paid for, a second time.
+    earlier = await open_batches()
+    if earlier:
+        log.info("collecting %d batch job(s) left running by an earlier run", len(earlier))
+        collected = await _collect_tracked(earlier)
+        if getattr(collected, "unfinished", None):
+            log.warning("an earlier batch is still running: no new documents sent this run")
+            return collected
+
     names = await llm_stage.submit_batch(limit=limit, vehicle_id=vehicle_id)
     if names:
+        await track_batches(names)
         log.info("submitted %d batch job(s); collecting", len(names))
-        stats = await llm_stage.collect_batch(names)
-        await record_run(
-            "llm",
-            {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": names},
-            stats.tokens_in,
-            stats.tokens_out,
-            stats.cost_usd,
-            ok=stats.failed == 0,
-            error="; ".join(stats.errors[:5]) or None,
-        )
-        return stats
+        return await _collect_tracked(names)
     return None
+
+
+async def open_batches() -> list[str]:
+    """Batch jobs submitted whose results are not stored yet, oldest first."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT batch_id FROM llm_batches WHERE collected_at IS NULL ORDER BY submitted_at"
+        )
+    return [r["batch_id"] for r in rows]
+
+
+async def track_batches(batch_ids: list[str]) -> None:
+    """Remember submitted batch jobs until their results are stored."""
+    if not batch_ids:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO llm_batches (batch_id) VALUES ($1) ON CONFLICT (batch_id) DO NOTHING",
+            [(b,) for b in batch_ids],
+        )
+
+
+async def mark_batches_collected(batch_ids: list[str]) -> None:
+    """The results of these batch jobs are stored; they are no longer out."""
+    if not batch_ids:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE llm_batches SET collected_at = now() "
+            "WHERE batch_id = ANY($1::text[]) AND collected_at IS NULL",
+            batch_ids,
+        )
+
+
+async def _collect_tracked(batch_ids: list[str]) -> Any:
+    """Collect batch jobs, record the run, and mark the finished ones as collected.
+
+    Returns the stage stats; ids in `stats.unfinished` are still running at Anthropic and
+    stay tracked for the next run.
+    """
+    stats = await llm_stage.collect_batch(batch_ids)
+    unfinished = list(getattr(stats, "unfinished", None) or [])
+    finished = [b for b in batch_ids if b not in unfinished]
+    if finished:
+        await mark_batches_collected(finished)
+    await record_run(
+        "llm",
+        {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": batch_ids},
+        stats.tokens_in,
+        stats.tokens_out,
+        stats.cost_usd,
+        ok=stats.failed == 0,
+        error="; ".join(stats.errors[:5]) or None,
+    )
+    return stats
 
 
 async def run_embed(limit: int | None, vehicle_id: int | None = None) -> Any:
@@ -469,7 +529,9 @@ async def _batch_llm_once(
     ids = await llm_stage.submit_batch(limit=None, vehicle_id=vehicle_id)
     failed = 0
     if ids:
-        # Recorded before the wait so a lost session (or --resume) can see the batch is out.
+        # Recorded before the wait so a lost session (or --resume) can see the batch is out,
+        # and tracked so the nightly run collects it instead of sending the documents again.
+        await track_batches(ids)
         await record_run("llm", {"mode": "batch-submitted", "jobs": ids})
         log.info(
             "SUBMITTED %d batch job(s): %s -- if this session is lost, finish with: "
@@ -482,6 +544,8 @@ async def _batch_llm_once(
             ids, poll_seconds=BATCH_POLL_SECONDS, max_wait=BATCH_WAIT_SECONDS
         )
         failed = stats.failed
+        still_out = getattr(stats, "unfinished", None) or []
+        await mark_batches_collected([b for b in ids if b not in still_out])
         await record_run(
             "llm",
             {"processed": stats.processed, "failed": stats.failed, "mode": "batch", "jobs": ids},
@@ -728,6 +792,9 @@ def main() -> int:
             if args.collect:
                 stats = await llm_stage.collect_batch(
                     args.collect, poll_seconds=BATCH_POLL_SECONDS, max_wait=BATCH_WAIT_SECONDS
+                )
+                await mark_batches_collected(
+                    [b for b in args.collect if b not in stats.unfinished]
                 )
                 if stats.unfinished:
                     log.error(

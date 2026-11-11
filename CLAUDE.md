@@ -297,6 +297,7 @@ See `docs/schema.md` for the full schema and `backend/migrations/` for the histo
 | `refresh_runs` | State of an in-app refresh; one active at a time |
 | `pipeline_runs` | Operational record of a CLI job execution |
 | `usage_events` | Billing record: one row per billable model call |
+| `llm_batches` | Batch API jobs submitted and not yet collected; the pipeline collects these before sending anything new, so no document is paid for twice |
 | `users` | One row per Firebase account; `is_admin` set from `ADMIN_FIREBASE_UIDS` |
 | `user_vehicles` | An account's saved cars (at most 10) |
 | `entitlements` | Paid access: an unlock for one car or a subscription for all; only `active` grants |

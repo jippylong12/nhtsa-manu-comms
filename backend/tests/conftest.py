@@ -164,3 +164,37 @@ async def vehicle(conn):
         """
     )
     return dict(row)
+
+
+@pytest.fixture(autouse=True)
+def _no_batch_ledger_writes(request, monkeypatch):
+    """`process` tracks Batch API jobs in `llm_batches` through the pool, outside any test
+    transaction. Tests that drive the pipeline with fake batches must not leave rows behind,
+    so the three ledger functions are in-memory here. `tests/test_llm_batches.py` opts out
+    and exercises the real SQL."""
+    if request.node.get_closest_marker("real_batch_ledger"):
+        return
+    from src.jobs import process
+
+    out: list[str] = []
+
+    async def open_batches():
+        return list(out)
+
+    async def track_batches(ids):
+        out.extend(ids)
+
+    async def mark_batches_collected(ids):
+        for b in ids:
+            if b in out:
+                out.remove(b)
+
+    monkeypatch.setattr(process, "open_batches", open_batches)
+    monkeypatch.setattr(process, "track_batches", track_batches)
+    monkeypatch.setattr(process, "mark_batches_collected", mark_batches_collected)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "real_batch_ledger: use the real llm_batches table instead of the fake"
+    )

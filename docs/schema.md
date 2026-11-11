@@ -332,6 +332,15 @@ Five tables sit beside the corpus. None of them changes `communications`,
   list is empty; it starts again on the next add or the next start of the API. A read that
   fails three times stays in the table and is left to the nightly run.
 
+## Batch jobs out at Anthropic (migration 0023)
+
+`llm_batches` is one row per Batch API job the pipeline submitted, with `collected_at` null
+until its results are stored. A batch is paid for when Anthropic finishes it, collected or
+not. The nightly run waits an hour for its batch; before this table, one that took longer
+was forgotten and the next night sent, and paid for, the same documents again, with the
+first batch's cost never reaching `usage_events` or the daily cap. Now `process.run_llm`
+collects every open row first and submits nothing new while one is still running.
+
 ## New-bulletin flag (migration 0021)
 
 `vehicles.first_synced_at` is when a car's first complete sync finished (the car already
@@ -396,6 +405,7 @@ Requires `DATABASE_URL` in `backend/.env` (see [database.md](database.md)).
 | 0013 | Lean flat-file index: comm_vocab, vehicle_bulletins, vehicle_scans derived from comm_products, then comm_products dropped |
 | 0014 | Accounts: `users`, `user_vehicles`, `entitlements`, `stripe_events`, `alert_state` |
 | 0015 | Alerts: moves the admin watermark into `alert_state`, drops the old digest watermark table |
+| 0023 | `llm_batches`: Batch API jobs still out, so none is paid for twice |
 | 0022 | Ready and free alerts: `vehicles.ready_at`, and an `alert_state` row for every existing account |
 | 0021 | Alerts list new bulletins only: `vehicles.first_synced_at` (set for cars already synced) and `communication_vehicles.alert_pending` with a partial index |
 
